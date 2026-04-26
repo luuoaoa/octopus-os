@@ -1,0 +1,15 @@
+# Kernel config fragment merged on top of the bcmrpi defconfig.
+# Trims subsystems we don't use on this device, since the rootfs is an
+# initramfs that lives in RAM — every byte saved here is RAM saved at
+# runtime AND fewer bytes for the kernel to decompress at boot.
+#
+# We use vfat for /boot, ext4 for /var, and tmpfs for everything else.
+# Drop the rest of the in-tree filesystem drivers.
+# CONFIG_BTRFS_FS is not set
+# CONFIG_XFS_FS is not set
+# CONFIG_BCACHEFS_FS is not set
+# CONFIG_OCFS2_FS is not set
+# CONFIG_GFS2_FS is not set
+# CONFIG_NILFS2_FS is not set
+# CONFIG_REISERFS_FS is not set
+# CONFIG_NTFS3_FS is not set
