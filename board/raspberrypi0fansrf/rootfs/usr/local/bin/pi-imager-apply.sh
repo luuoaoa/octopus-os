@@ -58,14 +58,15 @@ if [ -r "$USR" ]; then
         echo "pi-imager-apply: timezone=$TZ"
     fi
 
+    # Dropbear is disabled by default (see 30-pifansrf.preset). Only start
+    # if user-data explicitly opts in with `ssh_pwauth: true`.
     SSH_PWAUTH=$(awk '/^ssh_pwauth:[[:space:]]+/{print $2; exit}' "$USR")
     case "$SSH_PWAUTH" in
-        false|False|FALSE)
-            systemctl stop dropbear.service 2>/dev/null || true
-            systemctl disable dropbear.service 2>/dev/null || true
-            echo "pi-imager-apply: SSH disabled (ssh_pwauth: false)"
+        true|True|TRUE)
+            systemctl start dropbear.service 2>/dev/null || true
+            echo "pi-imager-apply: SSH started (ssh_pwauth: true)"
             ;;
-        # true / absent / anything else: leave default (dropbear enabled)
+        # false / absent / anything else: leave dropbear off
     esac
 fi
 

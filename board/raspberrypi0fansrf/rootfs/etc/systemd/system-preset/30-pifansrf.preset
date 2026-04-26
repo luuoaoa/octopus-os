@@ -1,0 +1,4 @@
+# Higher priority than buildroot's 80-buildroot.preset.
+# Dropbear is off by default; pi-imager-apply.service starts it only when
+# /boot/user-data sets `ssh_pwauth: true`.
+disable dropbear.service
