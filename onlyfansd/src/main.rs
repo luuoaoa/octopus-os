@@ -543,8 +543,12 @@ impl Daemon {
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
+            // Default to INFO across the board. hap=debug used to be on by default
+            // but hap::transport::tcp logs every byte written, which fills the
+            // journal once a HomeKit controller is active. Override per-run via
+            // RUST_LOG, e.g. `RUST_LOG=info,hap=debug` for protocol tracing.
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,hap=debug,libmdns=error")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
 
