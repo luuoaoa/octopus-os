@@ -113,8 +113,12 @@ if [ -f "$USR" ]; then
     SSH_PWAUTH=$(strip "$SSH_PWAUTH")
     case "$SSH_PWAUTH" in
         true|True|TRUE)
-            systemctl start dropbear.service 2>/dev/null || true
-            log "SSH started (ssh_pwauth: true)"
+            # --no-block: just queue it. systemctl start without --no-block
+            # waits for the unit to reach 'active', and dropbear's
+            # After=network.target chain ultimately depends on us finishing
+            # — that's a deadlock.
+            systemctl start --no-block dropbear.service 2>/dev/null || true
+            log "SSH queued (ssh_pwauth: true)"
             ;;
     esac
 else
