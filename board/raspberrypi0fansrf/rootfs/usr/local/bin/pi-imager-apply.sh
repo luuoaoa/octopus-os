@@ -22,18 +22,30 @@ strip() {
 }
 
 BOOT=/boot
-NET="$BOOT/network-config"
-USR="$BOOT/user-data"
+
+# Find first existing file matching any of the globs/paths in $@.
+find_first() {
+    for p in "$@"; do
+        [ -f "$p" ] && { printf '%s\n' "$p"; return 0; }
+    done
+}
 
 # Dump what's actually on /boot so missing-file mysteries are diagnosable.
 log "/boot listing:"
 ls -la "$BOOT" 2>&1 | while IFS= read -r line; do log "  $line"; done
 
+# FAT 8.3 truncation: if a file's LFN entry is missing, /boot/network-config
+# is invisible and only shows up under its short name (e.g. network-.con,
+# NETWOR~1, etc.). Match by glob so we find whichever spelling exists.
+NET=$(find_first "$BOOT/network-config" "$BOOT"/network-* "$BOOT"/NETWORK-* "$BOOT"/NETWOR~*)
+USR=$(find_first "$BOOT/user-data"      "$BOOT"/user-data* "$BOOT"/USER-DAT*  "$BOOT"/USER-D~*)
+[ -n "$NET" ] && [ "$NET" != "$BOOT/network-config" ] && \
+    log "NOTE: network-config matched as '$NET' (FAT short name?). Re-save the file from a tool that writes LFN entries to fix."
+[ -n "$USR" ] && [ "$USR" != "$BOOT/user-data" ] && \
+    log "NOTE: user-data matched as '$USR'"
+
 # === network-config -> /etc/wpa_supplicant/wpa_supplicant-wlan0.conf ===
-if [ -f "$NET" ]; then
-    if [ ! -r "$NET" ]; then
-        log "WARN: $NET exists but is not readable"
-    fi
+if [ -n "${NET:-}" ] && [ -f "$NET" ]; then
     log "reading $NET"
 
     # SSID: the first quoted key under `access-points:`.
@@ -89,7 +101,7 @@ else
 fi
 
 # === user-data -> hostname, timezone, ssh_pwauth ===
-if [ -f "$USR" ]; then
+if [ -n "${USR:-}" ] && [ -f "$USR" ]; then
     log "reading $USR"
 
     HOST=$(sed -nE 's/^hostname:[[:space:]]+(.*)[[:space:]]*$/\1/p' "$USR" | head -1)
