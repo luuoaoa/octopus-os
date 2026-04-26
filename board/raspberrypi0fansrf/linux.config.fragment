@@ -13,3 +13,11 @@
 # CONFIG_NILFS2_FS is not set
 # CONFIG_REISERFS_FS is not set
 # CONFIG_NTFS3_FS is not set
+
+# Headless device — no display, no camera. Drop the entire DRM/media stack
+# and human-input devices we have no port for.
+# CONFIG_DRM_VC4 is not set
+# CONFIG_MEDIA_SUPPORT is not set
+# CONFIG_INPUT_JOYDEV is not set
+# CONFIG_INPUT_JOYSTICK is not set
+# CONFIG_INPUT_TOUCHSCREEN is not set
