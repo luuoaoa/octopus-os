@@ -33,3 +33,18 @@
 # CONFIG_LLC is not set
 # CONFIG_NETROM is not set
 # CONFIG_VXLAN is not set
+
+# Sound: keep ALSA core, the BCM2835 I2S machine driver, and snd-usb-audio
+# (the USB audio class driver) — that's enough for an I2S DAC HAT or a
+# generic USB audio dongle, which is how shairport-sync will play out.
+# Drop the WM5102/Arizona codec (huge, no hardware), MIDI sequencer, OSS
+# emulation, and the niche USB-audio device drivers that target specific
+# pro-audio interfaces we don't have.
+# CONFIG_SND_SOC_WM5102 is not set
+# CONFIG_SND_SEQUENCER is not set
+# CONFIG_SND_PCM_OSS is not set
+# CONFIG_SND_USB_CAIAQ is not set
+# CONFIG_SND_USB_LINE6 is not set
+# CONFIG_SND_USB_6FIRE is not set
+# CONFIG_SND_USB_UA101 is not set
+# CONFIG_SND_USB_HIFACE is not set
