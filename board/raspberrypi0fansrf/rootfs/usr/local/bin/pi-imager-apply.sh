@@ -6,7 +6,20 @@
 #   /boot/network-config:  access-points (SSID + password [hex] + hidden)
 #   /boot/user-data:       hostname, timezone, ssh_pwauth
 # Everything else is ignored.
+#
+# Logs to stderr (-> journalctl -u pi-imager-apply) for debuggability.
 set -u
+
+log() { echo "pi-imager-apply: $*" >&2; }
+
+# Strip leading/trailing whitespace and surrounding quotes from a value.
+strip() {
+    s=${1#"${1%%[![:space:]]*}"}
+    s=${s%"${s##*[![:space:]]}"}
+    s=${s#\"}; s=${s%\"}
+    s=${s#\'}; s=${s%\'}
+    printf '%s' "$s"
+}
 
 BOOT=/boot
 NET="$BOOT/network-config"
@@ -14,18 +27,38 @@ USR="$BOOT/user-data"
 
 # === network-config -> /etc/wpa_supplicant/wpa_supplicant-wlan0.conf ===
 if [ -r "$NET" ]; then
-    SSID=$(awk '
-        /^[[:space:]]*access-points:/ { in_ap = 1; next }
-        in_ap && /^[[:space:]]+"[^"]+":/ {
-            line = $0
-            sub(/^[[:space:]]+"/, "", line)
-            sub(/":[[:space:]]*$/, "", line)
-            print line; exit
-        }' "$NET")
-    PSK=$(awk -F'"' '/^[[:space:]]+password:/{print $2; exit}' "$NET")
-    HIDDEN=$(awk '/^[[:space:]]+hidden:[[:space:]]+true/{print 1; exit}' "$NET")
+    log "reading $NET"
+
+    # SSID: the first quoted key under `access-points:`.
+    SSID_RAW=$(sed -nE '/^[[:space:]]+access-points:/,$ {
+        s/^[[:space:]]+"([^"]+)":[[:space:]]*$/\1/p
+    }' "$NET" | head -1)
+    SSID=$(strip "$SSID_RAW")
+
+    # PSK (hex or passphrase) inside the first quoted password field.
+    PSK_RAW=$(sed -nE 's/^[[:space:]]+password:[[:space:]]+"?([^"]+)"?[[:space:]]*$/\1/p' "$NET" | head -1)
+    PSK=$(strip "$PSK_RAW")
+
+    # Hidden flag.
+    HIDDEN=
+    grep -qE '^[[:space:]]+hidden:[[:space:]]+true[[:space:]]*$' "$NET" && HIDDEN=1
+
+    log "parsed SSID=[$SSID] psk_len=${#PSK} hidden=${HIDDEN:-0}"
 
     if [ -n "$SSID" ] && [ -n "$PSK" ]; then
+        # Decide quoting: 64 hex chars => raw hex PSK (no quotes); otherwise
+        # an ASCII passphrase (must be quoted).
+        case "$PSK" in
+            *[!0-9a-fA-F]*) PSK_LINE="    psk=\"$PSK\"" ;;
+            *)
+                if [ ${#PSK} -eq 64 ]; then
+                    PSK_LINE="    psk=$PSK"
+                else
+                    PSK_LINE="    psk=\"$PSK\""
+                fi
+                ;;
+        esac
+
         mkdir -p /etc/wpa_supplicant
         {
             echo "ctrl_interface=/var/run/wpa_supplicant"
@@ -34,40 +67,51 @@ if [ -r "$NET" ]; then
             echo
             echo "network={"
             echo "    ssid=\"$SSID\""
-            echo "    psk=$PSK"
+            echo "    key_mgmt=WPA-PSK"
+            echo "$PSK_LINE"
             [ -n "$HIDDEN" ] && echo "    scan_ssid=1"
             echo "}"
         } > /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
         chmod 600 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
-        echo "pi-imager-apply: WiFi configured (SSID='$SSID' hidden=${HIDDEN:-0})"
+        log "wrote /etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+    else
+        log "WARN: SSID or PSK missing; skipping wpa_supplicant config"
     fi
+else
+    log "no $NET; skipping WiFi config"
 fi
 
 # === user-data -> hostname, timezone, ssh_pwauth ===
 if [ -r "$USR" ]; then
-    HOST=$(awk '/^hostname:[[:space:]]+/{print $2; exit}' "$USR")
+    log "reading $USR"
+
+    HOST=$(sed -nE 's/^hostname:[[:space:]]+(.*)[[:space:]]*$/\1/p' "$USR" | head -1)
+    HOST=$(strip "$HOST")
     if [ -n "$HOST" ]; then
         echo "$HOST" > /etc/hostname
         hostname "$HOST" 2>/dev/null || true
-        echo "pi-imager-apply: hostname=$HOST"
+        log "hostname=$HOST"
     fi
 
-    TZ=$(awk '/^timezone:[[:space:]]+/{print $2; exit}' "$USR")
+    TZ=$(sed -nE 's/^timezone:[[:space:]]+(.*)[[:space:]]*$/\1/p' "$USR" | head -1)
+    TZ=$(strip "$TZ")
     if [ -n "$TZ" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
         ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
-        echo "pi-imager-apply: timezone=$TZ"
+        log "timezone=$TZ"
     fi
 
     # Dropbear is disabled by default (see 30-pifansrf.preset). Only start
     # if user-data explicitly opts in with `ssh_pwauth: true`.
-    SSH_PWAUTH=$(awk '/^ssh_pwauth:[[:space:]]+/{print $2; exit}' "$USR")
+    SSH_PWAUTH=$(sed -nE 's/^ssh_pwauth:[[:space:]]+(.*)[[:space:]]*$/\1/p' "$USR" | head -1)
+    SSH_PWAUTH=$(strip "$SSH_PWAUTH")
     case "$SSH_PWAUTH" in
         true|True|TRUE)
             systemctl start dropbear.service 2>/dev/null || true
-            echo "pi-imager-apply: SSH started (ssh_pwauth: true)"
+            log "SSH started (ssh_pwauth: true)"
             ;;
-        # false / absent / anything else: leave dropbear off
     esac
+else
+    log "no $USR; skipping hostname/timezone/ssh"
 fi
 
 exit 0
