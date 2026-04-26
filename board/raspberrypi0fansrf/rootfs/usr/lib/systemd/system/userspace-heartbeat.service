@@ -1,5 +1,5 @@
 [Unit]
-Description=Userspace heartbeat (triple-blink ACT LED to confirm boot reached multi-user)
+Description=Userspace heartbeat: brief ACT LED flash every ~10s
 After=local-fs.target
 
 [Service]

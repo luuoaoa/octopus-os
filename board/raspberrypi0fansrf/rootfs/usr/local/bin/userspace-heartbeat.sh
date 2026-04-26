@@ -1,8 +1,6 @@
 #!/bin/sh
-# Triple-blink the ACT LED in a tight loop.
-# Pattern is intentionally distinct from the kernel's default "heartbeat"
-# trigger (thump-thump-pause): three quick blinks, then 1.2s rest.
-# If you see this pattern, multi-user.target was reached.
+# Slow health blink: a brief flash every ~10 seconds. Visible enough to
+# confirm userspace is still alive, quiet enough to ignore.
 set -u
 
 LED_DIR=
@@ -14,11 +12,8 @@ done
 echo none > "$LED_DIR/trigger" 2>/dev/null || true
 
 while :; do
-    for _ in 1 2 3; do
-        echo 1 > "$LED_DIR/brightness"
-        sleep 0.1
-        echo 0 > "$LED_DIR/brightness"
-        sleep 0.15
-    done
-    sleep 1.2
+    echo 1 > "$LED_DIR/brightness"
+    sleep 0.1
+    echo 0 > "$LED_DIR/brightness"
+    sleep 9.9
 done
