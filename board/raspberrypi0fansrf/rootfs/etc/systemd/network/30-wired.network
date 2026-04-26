@@ -1,0 +1,12 @@
+[Match]
+Type=ether
+
+[Network]
+# Try DHCP from whatever network the cable is plugged into,
+# AND always keep the static address below for direct-to-host pings.
+DHCP=yes
+Address=192.168.99.10/24
+IPv6PrivacyExtensions=true
+
+[DHCP]
+RouteMetric=10
