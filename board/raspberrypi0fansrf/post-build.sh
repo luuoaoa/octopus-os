@@ -40,3 +40,18 @@ if [ -n "${SSH_CONNECTION:-}" ] && [ -f /etc/motd ]; then
     cat /etc/motd
 fi
 EOF
+
+# Trim binaries that have no buildroot Kconfig knob to disable individually:
+#   bootctl   — EFI bootloader management; the Pi uses the GPU bootloader.
+#   tune2fs   — ext fs maintenance; we keep e2fsck for systemd-fsck on /var.
+#   xz CLI    — liblzma stays (kmod can read xz-compressed modules) but the
+#               command-line tools have no consumer on this device.
+rm -f "${TARGET_DIR}/usr/bin/bootctl" \
+      "${TARGET_DIR}/usr/sbin/tune2fs" \
+      "${TARGET_DIR}/usr/bin/xz" \
+      "${TARGET_DIR}/usr/bin/xzcat" \
+      "${TARGET_DIR}/usr/bin/xzdec" \
+      "${TARGET_DIR}/usr/bin/lzcat" \
+      "${TARGET_DIR}/usr/bin/lzma" \
+      "${TARGET_DIR}/usr/bin/lzmadec" \
+      "${TARGET_DIR}/usr/bin/lzmainfo"
