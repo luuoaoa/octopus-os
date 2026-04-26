@@ -1,0 +1,12 @@
+[Unit]
+Description=Userspace heartbeat (triple-blink ACT LED to confirm boot reached multi-user)
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/userspace-heartbeat.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
