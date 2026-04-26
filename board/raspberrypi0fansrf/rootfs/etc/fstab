@@ -1,2 +1,2 @@
-/dev/root       /     auto    rw                              0  1
-/dev/mmcblk0p2  /var  ext4    defaults,noatime,commit=60      0  2
+/dev/root       /     auto    rw                                                  0  1
+/dev/mmcblk0p2  /var  ext4    defaults,noatime,commit=60,x-systemd.makefs         0  2
