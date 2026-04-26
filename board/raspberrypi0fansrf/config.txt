@@ -3,8 +3,9 @@ fixup_file=fixup.dat
 
 kernel=zImage
 
-# Load rootfs.cpio.gz as initramfs (toram-style: full rootfs in RAM, no SD root)
-initramfs rootfs.cpio.gz followkernel
+# Load the cpio rootfs as initramfs (toram-style: full rootfs in RAM, no SD root).
+# zstd-compressed: faster kernel decompression on ARMv6 than gzip, similar size.
+initramfs rootfs.cpio.zst followkernel
 
 # Headless: minimum GPU memory
 gpu_mem=16
