@@ -39,12 +39,18 @@ rsync -aiv --no-times \
 echo "==> rsync rpi-firmware contents -> /boot/"
 rsync -aiv --no-times "${IMG_DIR}/rpi-firmware/" "${HOST}:/boot/"
 
-if [ -d "${CUSTOMIZE}" ]; then
-    echo "==> rsync customize/ -> /boot/"
-    rsync -aiv --no-times "${CUSTOMIZE}/" "${HOST}:/boot/"
-else
-    echo "WARN: no ${CUSTOMIZE}/ on dev host; Pi will keep its existing /boot/{network-config,user-data}"
-fi
+# Only ever touch the two known customize files. If one isn't present on
+# the dev host, leave whatever's already on the Pi alone — no deletes.
+sent_customize=
+for f in network-config user-data; do
+    if [ -f "${CUSTOMIZE}/${f}" ]; then
+        echo "==> rsync customize/${f} -> /boot/${f}"
+        rsync -aiv --no-times "${CUSTOMIZE}/${f}" "${HOST}:/boot/${f}"
+        sent_customize=1
+    fi
+done
+[ -z "$sent_customize" ] && \
+    echo "==> no customize/{network-config,user-data} found; leaving /boot's existing files alone"
 
 echo "==> sync + remount ro + reboot ${HOST}"
 # The reboot kills our SSH connection; backgrounding it lets ssh exit cleanly.
