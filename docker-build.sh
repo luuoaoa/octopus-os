@@ -1,10 +1,9 @@
 #!/bin/bash
 # Build the pifansrf image inside a pinned Ubuntu 20.04 container.
-# Mounts the parent develop/ dir so buildroot/ (sibling) is reachable.
+# Mounts the pifansrf dir (with the buildroot subtree inside) at /work.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEV_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 IMAGE=pifansrf-builder:ubuntu20.04
 
 docker build \
@@ -14,7 +13,7 @@ docker build \
     "${SCRIPT_DIR}"
 
 docker run --rm \
-    -v "${DEV_DIR}:/work" \
-    -w /work/pifansrf \
+    -v "${SCRIPT_DIR}:/work" \
+    -w /work \
     "${IMAGE}" \
     bash build-pifansrf.sh
