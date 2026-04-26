@@ -1,2 +1,3 @@
 /dev/root       /     auto    rw                                                  0  1
+/dev/mmcblk0p1  /boot vfat    ro,nofail                                           0  0
 /dev/mmcblk0p2  /var  ext4    defaults,noatime,commit=60,x-systemd.makefs         0  2
