@@ -1,0 +1,1 @@
+source "$BR2_EXTERNAL_PIFANSRF_PATH/package/soft-hwclock/Config.in"
