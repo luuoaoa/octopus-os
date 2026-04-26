@@ -1,0 +1,13 @@
+[Unit]
+Description=Capture boot diagnostics to /boot/boot-diag.txt on the FAT partition
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Give wpa_supplicant + networkd time to attempt connecting before we snapshot
+ExecStartPre=/bin/sleep 25
+ExecStart=/usr/local/bin/boot-diag.sh
+
+[Install]
+WantedBy=multi-user.target
