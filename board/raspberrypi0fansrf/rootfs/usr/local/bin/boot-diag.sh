@@ -1,12 +1,28 @@
 #!/bin/sh
-# Every boot, snapshot network/service state to /boot/boot-diag.txt.
-# Pull the SD card and read it on any host (FAT, no ext4 driver needed).
-# Last-resort fallback for when WiFi/SSH didn't come up.
+# Snapshot boot state to /boot/boot-diag.txt. Triggered by boot-diag.timer
+# ~30s after boot. Always finishes by stopping the userspace heartbeat and
+# leaving the ACT LED solid on (signal: "diag done, safe to power off"),
+# even if the diag dump itself fails halfway.
 set -u
 
 OUT=/boot/boot-diag.txt
 
-# /boot is mounted ro per fstab; remount rw briefly to write the diag.
+LED_DIR=
+for d in /sys/class/leds/ACT /sys/class/leds/led0 /sys/class/leds/PWR; do
+    [ -e "$d/brightness" ] && LED_DIR="$d" && break
+done
+
+signal_done() {
+    sync
+    mount -o remount,ro /boot 2>/dev/null || true
+    systemctl stop userspace-heartbeat.service 2>/dev/null || true
+    if [ -n "$LED_DIR" ]; then
+        echo none > "$LED_DIR/trigger" 2>/dev/null || true
+        echo 1    > "$LED_DIR/brightness" 2>/dev/null || true
+    fi
+}
+trap signal_done EXIT INT TERM
+
 mount -o remount,rw /boot 2>/dev/null || true
 
 run() { echo "=== $* ==="; "$@" 2>&1; echo; }
@@ -44,21 +60,3 @@ run() { echo "=== $* ==="; "$@" 2>&1; echo; }
     run journalctl -b --no-pager -u create-var-partition.service
     echo "DONE"
 } > "$OUT" 2>&1
-
-sync
-mount -o remount,ro /boot 2>/dev/null || true
-
-# Settle, then signal "diag captured, safe to power off" via the ACT LED:
-# stop the userspace heartbeat and leave the LED solid on.
-sleep 5
-systemctl stop userspace-heartbeat.service 2>/dev/null || true
-sleep 1
-
-LED_DIR=
-for d in /sys/class/leds/ACT /sys/class/leds/led0 /sys/class/leds/PWR; do
-    [ -e "$d/brightness" ] && LED_DIR="$d" && break
-done
-if [ -n "$LED_DIR" ]; then
-    echo none > "$LED_DIR/trigger" 2>/dev/null || true
-    echo 1 > "$LED_DIR/brightness" 2>/dev/null || true
-fi
