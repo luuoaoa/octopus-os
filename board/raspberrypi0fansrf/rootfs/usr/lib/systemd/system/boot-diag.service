@@ -1,0 +1,13 @@
+[Unit]
+Description=Capture boot diagnostics to /boot/boot-diag.txt and freeze the LED
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Let wpa_supplicant + networkd attempt to associate / DHCP before we snapshot
+ExecStartPre=/bin/sleep 25
+ExecStart=/usr/local/bin/boot-diag.sh
+
+[Install]
+WantedBy=multi-user.target
