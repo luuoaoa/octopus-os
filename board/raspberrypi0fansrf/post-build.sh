@@ -4,3 +4,39 @@
 # that need to survive preset-all, use post-fakeroot.sh instead.
 set -u
 set -e
+
+TARGET_DIR="$1"
+
+# Stamp /etc/motd with the pifansrf git commit + build time so a login tells
+# you which image you booted. Falls back to "unknown" if the build is run
+# from a tarball with no .git.
+GIT_DIR="${BR2_EXTERNAL_PIFANSRF_PATH:-.}"
+COMMIT=unknown
+DIRTY=
+if git -C "${GIT_DIR}" rev-parse --git-dir >/dev/null 2>&1; then
+    COMMIT=$(git -C "${GIT_DIR}" rev-parse --short HEAD)
+    if ! git -C "${GIT_DIR}" diff --quiet 2>/dev/null \
+       || ! git -C "${GIT_DIR}" diff --cached --quiet 2>/dev/null; then
+        DIRTY="-dirty"
+    fi
+fi
+BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+cat > "${TARGET_DIR}/etc/motd" <<EOF
+
+  pifansrf — HomeKit/HA bridge (Casa Vieja TR301A via rpitx)
+  build:  ${COMMIT}${DIRTY}
+  date:   ${BUILD_TIME}
+
+EOF
+
+# Dropbear runs the user's shell directly and skips login(1), so /etc/motd
+# is not printed on SSH login. Print it from /etc/profile.d when we detect
+# an SSH connection — avoids duplicating it on the serial-console path,
+# where busybox login already cats /etc/motd.
+mkdir -p "${TARGET_DIR}/etc/profile.d"
+cat > "${TARGET_DIR}/etc/profile.d/01-pifansrf-motd.sh" <<'EOF'
+if [ -n "${SSH_CONNECTION:-}" ] && [ -f /etc/motd ]; then
+    cat /etc/motd
+fi
+EOF
