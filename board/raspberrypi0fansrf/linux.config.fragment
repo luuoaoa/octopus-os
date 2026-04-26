@@ -48,3 +48,9 @@
 # CONFIG_SND_USB_6FIRE is not set
 # CONFIG_SND_USB_UA101 is not set
 # CONFIG_SND_USB_HIFACE is not set
+
+# Bluetooth: the Pi Zero W's BCM43430 has BT silicon but we don't use it.
+# HomeKit goes over WiFi (mDNS + TCP), shairport-sync goes over WiFi
+# (AirPlay). Disabling BT kills the entire stack (HCI, RFCOMM, L2CAP,
+# BNEP, HIDP, the various transport drivers).
+# CONFIG_BT is not set
