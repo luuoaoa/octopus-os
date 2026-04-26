@@ -32,9 +32,10 @@ run() { echo "=== $* ==="; "$@" 2>&1; echo; }
     echo "uptime: $(cat /proc/uptime)"
     echo
     run hostname
-    run ip -br link
-    run ip -br addr
+    run ip link
+    run ip addr
     run ls /sys/class/net
+    run ls -la /boot
     run mount
     run df -hT
     run ls /var

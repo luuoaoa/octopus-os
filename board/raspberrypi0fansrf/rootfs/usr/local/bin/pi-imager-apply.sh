@@ -25,8 +25,15 @@ BOOT=/boot
 NET="$BOOT/network-config"
 USR="$BOOT/user-data"
 
+# Dump what's actually on /boot so missing-file mysteries are diagnosable.
+log "/boot listing:"
+ls -la "$BOOT" 2>&1 | while IFS= read -r line; do log "  $line"; done
+
 # === network-config -> /etc/wpa_supplicant/wpa_supplicant-wlan0.conf ===
-if [ -r "$NET" ]; then
+if [ -f "$NET" ]; then
+    if [ ! -r "$NET" ]; then
+        log "WARN: $NET exists but is not readable"
+    fi
     log "reading $NET"
 
     # SSID: the first quoted key under `access-points:`.
@@ -82,7 +89,7 @@ else
 fi
 
 # === user-data -> hostname, timezone, ssh_pwauth ===
-if [ -r "$USR" ]; then
+if [ -f "$USR" ]; then
     log "reading $USR"
 
     HOST=$(sed -nE 's/^hostname:[[:space:]]+(.*)[[:space:]]*$/\1/p' "$USR" | head -1)
