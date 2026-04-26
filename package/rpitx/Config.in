@@ -1,0 +1,17 @@
+config BR2_PACKAGE_RPITX
+	bool "rpitx (minimal CLI tools)"
+	depends on BR2_arm || BR2_aarch64
+	select BR2_PACKAGE_LIBRPITX
+	help
+	  A minimal subset of the rpitx CLI tools — the ones that don't
+	  pull in libsndfile / ft8_lib / csdr. Installs:
+
+	    tune     — emit a continuous carrier (frequency calibration)
+	    sendook  — On-Off-Keying transmitter (e.g. 433/304 MHz remotes)
+	    sendiq   — replay an IQ recording
+	    morse    — morse-code transmitter
+
+	  onlyfansd does not depend on this package any more — it links
+	  librpitx directly. These binaries are kept as debugging tools.
+
+	  https://github.com/F5OEO/rpitx

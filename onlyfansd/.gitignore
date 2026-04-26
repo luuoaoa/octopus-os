@@ -1,0 +1,7 @@
+/target
+/config.yaml
+/fan_state.json
+/homekit.state
+/homekit/
+__pycache__/
+*.pyc

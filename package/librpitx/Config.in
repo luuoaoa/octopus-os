@@ -1,0 +1,10 @@
+config BR2_PACKAGE_LIBRPITX
+	bool "librpitx"
+	depends on BR2_arm || BR2_aarch64
+	help
+	  RF transmission library for the Raspberry Pi: drives the BCM2835/2837
+	  clock generator + DMA to emit OOK / FSK / FM / etc. on a GPIO pin
+	  with no extra hardware. Provides librpitx.a + headers under
+	  /usr/include/librpitx/. Used by rpitx and by onlyfansd.
+
+	  https://github.com/F5OEO/librpitx

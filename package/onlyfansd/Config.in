@@ -1,0 +1,11 @@
+config BR2_PACKAGE_ONLYFANSD
+	bool "onlyfansd"
+	depends on BR2_PACKAGE_HOST_RUSTC
+	depends on BR2_PACKAGE_LIBRPITX
+	select BR2_PACKAGE_HOST_CARGO
+	help
+	  HomeKit / Home Assistant bridge for Casa Vieja TR301A ceiling fans.
+	  Transmits the 25-bit OOK frame on 304.30 MHz directly via librpitx
+	  (no `sendook` shell-out — librpitx is linked in).
+
+	  Source is vendored at $(BR2_EXTERNAL_PIFANSRF_PATH)/onlyfansd.

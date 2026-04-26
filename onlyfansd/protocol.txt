@@ -1,0 +1,264 @@
+==============================================================================
+  Fan Remote RF Protocol Reference
+  (as reverse-engineered from the physical remotes + the control_fan.py script)
+==============================================================================
+
+
+==============================================================================
+  1. PHYSICAL LAYER
+==============================================================================
+
+  Carrier frequency : 304.30 MHz
+  Modulation        : ASK / OOK (carrier on = '1', carrier off = '0')
+  Chip duration     : 333 us  (nominal, ~±50 us jitter in practice)
+  Transmit power    : whatever the remote uses; anything > -20 dBm at the
+                      receiver works comfortably.
+
+  On the ESP32 + CC1101 side, the receiver must be tuned to 304.30 MHz; a
+  200 kHz frequency offset (e.g. 304.10) kills reception entirely because
+  the CC1101's default ~200 kHz RX filter cuts it off.
+
+
+==============================================================================
+  2. CHIP ENCODING
+==============================================================================
+
+  Each logical data bit is encoded as 3 chips: '1', '0', bit_value
+  (sometimes written as '10b' where b is the bit's value).
+
+      Bit '0' -> chips  1 0 0   (HIGH 333us, LOW 666us)
+      Bit '1' -> chips  1 0 1   (HIGH 333us, LOW 333us, HIGH 333us)
+
+  Consecutive identical bits merge their boundary chips: e.g. '11' encodes
+  to "101101" which RLE-compresses to HIGH(1) LOW(1) HIGH(2) LOW(1) HIGH(1).
+
+  This is a self-clocking encoding similar to Manchester but with a fixed
+  leading "10" pattern per bit — every bit starts with a HIGH-LOW
+  transition, regardless of value, giving the receiver a clock edge every
+  333 us.
+
+
+==============================================================================
+  3. MESSAGE STRUCTURE
+==============================================================================
+
+  25 bits total = 75 chips = ~25 ms of air time per message.
+
+      +----+--------------------+----------+
+      |prea| FAN_ID             | cmdid    |
+      |mble| (14 bits, unique   | (7 bits) |
+      |1111|  per fan)          |          |
+      +----+--------------------+----------+
+        4 bits     14 bits         7 bits
+
+  - The preamble is always 1111.
+  - The 14-bit FAN_ID is unique per fan and is the entire address — there
+    is no separate "channel" or "family" concept; every fan is independent.
+  - The 7-bit cmdid is the same vocabulary for every fan; no per-fan or
+    per-family transformation is applied.
+
+  After the 25 data bits, the remote transmits ~30 chips of silence
+  (~10 ms) before repeating the message. A single button press emits the
+  message 3-5 times, followed by a few "trailer" bursts (Section 6).
+
+
+==============================================================================
+  4. FAN_IDs (per fan in this house)
+==============================================================================
+
+  Each fan has a unique 14-bit address burned into both the fan's decoder
+  and its paired remote. The IDs are essentially random; no structural
+  meaning beyond uniqueness.
+
+      living_room  : 00110011001100
+
+==============================================================================
+  5. cmdids
+==============================================================================
+
+  Every button maps to a 7-bit code, identical across all fans.
+  Bit positions in the cmdid (left to right, MSB first):
+
+      bit 0 = speed6
+      bit 1 = speed3
+      bit 2 = speed1
+      bit 3 = reverse
+      bit 4 = stop
+      bit 5 = light
+      bit 6 = (unused, always 0)
+
+  Three speed buttons and the pairing button are OR-combinations of two
+  single-bit codes:
+
+      function   cmdid       interpretation
+      --------   ---------   ------------------------------------
+      reverse    0001000     bit 3
+      light      0000010     bit 5
+      stop       0000100     bit 4
+      speed1     0010000     bit 2
+      speed3     0100000     bit 1
+      speed6     1000000     bit 0
+      speed2     0010100     bits 2 + 4   (= speed1 + stop)
+      speed4     0110000     bits 1 + 2   (= speed3 + speed1)
+      speed5     1000100     bits 0 + 4   (= speed6 + stop)
+      pair       0100100     bits 1 + 4   (= speed3 + stop)
+
+  The fan's microcontroller treats certain bit-pair combos as distinct
+  commands (rather than as "two buttons pressed simultaneously"), and the
+  pair button reuses this combo encoding to signal pairing-mode entry.
+
+
+==============================================================================
+  6. TRAILER CODES
+==============================================================================
+
+  After every button press the remote emits 3 extra bursts whose 7-bit
+  cmdid is `0000000` (all zeros). They appear to be a "release / idle"
+  signal — the fan ignores them and they show up in captures as bursts
+  with cmdid `0000000`.
+
+  Note: the trailer's bit pattern often makes the apparent FAN_ID in the
+  captured message slightly different from the regular FAN_ID for that
+  fan (because the trailer's leading bits land in the FAN_ID portion of
+  the 25-bit message instead of the cmdid portion). For example, upstairs
+  normally uses FAN_ID `01111011000010`, but its trailer messages decode
+  with FAN_ID `01111011000011`. This is harmless — the decoder labels
+  them as `trailer` regardless.
+
+
+==============================================================================
+  7. TRANSMIT RECIPE (control_fan.py)
+==============================================================================
+
+  Given (room_name, command_name):
+
+      1. fan_id = FAN_IDS[room_name]      (14 bits)
+      2. cmdid  = CMDS[command_name]      (7 bits)
+      3. bits   = '1111' + fan_id + cmdid (25 bits)
+      4. Encode each bit as 3 chips '10b':
+           chip_stream = ''.join('10' + b for b in bits)        (75 chips)
+      5. Append 30 chips of '0' (pause):
+           chip_stream += '0' * 30                              (105 chips total)
+      6. Pass to sendook:
+           sendook -f 304300000 -0 333 -1 333 <chip_stream>
+
+  The remote repeats the message on its own while a button is held; the
+  script fires once per call. For press-and-hold semantics, loop the call.
+
+
+==============================================================================
+  8. RECEIVE RECIPE (ESPHome binary_sensor / decoder)
+==============================================================================
+
+  Capture-side parameters that work in practice:
+
+      idle            : 8 ms  (shorter than the ~10 ms inter-burst pause so
+                               each repeat becomes its own event; too long
+                               and all repeats fuse into one giant event
+                               the matcher can't align against)
+      filter          : 150 us (rejects sub-chip noise, passes real 333us)
+      tolerance       : 50%  (plenty of margin for the ~20% pulse-width
+                               jitter we see in practice)
+      rx_attenuation  : 6 dB  (reduces AGC gain so idle air doesn't fake
+                               pulses between real messages)
+
+  Observed burst length:
+
+      Captured pulse list ends at the last HIGH chip of the message. Bit
+      24 (the LSB of cmdid) is '0' for every command in CMDS, so its
+      '100' chip encoding ends with two LOW chips that merge with the
+      pause. Result: 49 pulses per clean burst, ending on a +333us mark.
+
+      The very FIRST burst of a press sequence is often only 47 pulses
+      (23 bits decoded) due to AGC settling. The subsequent 3-4 bursts
+      come through cleanly, so consensus over the press's bursts gives
+      the right cmdid.
+
+  Decoding algorithm:
+
+      1. Parse a Received Raw event into +/- microsecond pulses.
+      2. Classify each pulse: round abs(p) / 333 to 1 or 2 chips;
+         positive = HIGH ('1'), negative = LOW ('0').
+      3. Build the chip string.
+      4. Walk in groups of 3, each group is '10b' -> extract b.
+         (Any group not starting with '10' is a misalignment / bad group.)
+      5. After 24 bits decoded, peek at the leftover chip:
+            - leftover == '1' -> bit 24 = 0 (the '00' tail got eaten by
+                                  the pause)
+      6. Split the 25-bit message as 4 + 14 + 7:
+            preamble = bits[0:4]    (must be '1111')
+            FAN_ID   = bits[4:18]   (14 bits)
+            cmdid    = bits[18:25]  (7 bits)
+      7. Look cmdid up in CMDS to identify the button. cmdid `0000000` is
+         a trailer.
+
+
+==============================================================================
+  9. GOTCHAS / BUGS THAT COST HOURS
+==============================================================================
+
+  * "Why doesn't the modify_bit_pos(cmdid, 2, '1') in the script work for
+    upstairs?"
+    There's no per-fan modification. The script's modify_bit_pos was
+    reverse-engineering noise — it happened to produce on-air messages
+    that worked because the modified cmdid landed in chip positions that
+    matched what the downstairs fans' decoders accept. For upstairs, the
+    modified cmdid landed at slightly different chip positions and
+    didn't match. With the correct 14-bit FAN_ID + 7-bit cmdid model,
+    no modification is needed at all and TX works for every fan.
+
+  * "Why does speed2 fire after every press?"
+    Because the original CMDS['speed2'] = 0010000000 was actually the
+    trailer code, not the speed2 button code. The fan accepted the
+    trailer code as "go to default speed (=2)", so TX worked, but RX
+    matched the trailer that's emitted after every button press. Real
+    speed2 button code: 0000010100 (10-bit raw) = 0010100 (7-bit).
+
+  * "Why does the captured burst have 49 pulses when 25 bits × 3 chips
+    should give 50-ish pulses?"
+    Because every cmdid ends in '0', so bit 24 (the last data bit)
+    encodes to chips '100' = HIGH-LOW-LOW. The receiver's capture ends
+    at the last HIGH chip (chip 72), and the trailing two LOW chips fuse
+    with the inter-burst pause. So the captured pulse list naturally
+    terminates at 49 pulses; the decoder reconstructs the full 25 bits
+    by inferring bit 24 = '0' from the leftover '1' chip.
+
+  * "Why do I see no binary_sensor events in the ESPHome log even though
+    patterns seem right?"
+    ESPHome's binary_sensor state-change log is at VERBOSE level, not
+    DEBUG. With the default DEBUG logger level, those lines are
+    suppressed. Workaround: add an explicit `on_press: logger.log: ...`
+    action to each binary_sensor (what we do) or bump logger level to
+    VERBOSE.
+
+  * "Why did my raw-pattern binary_sensor never match even though the
+    pulse list looks right?"
+    The receiver's `idle` parameter was too long (50 ms), causing all
+    5-7 message repeats of a press to fuse into a single giant event.
+    The raw matcher compares a fixed-length pattern against the start
+    of the event, which straddled multiple messages plus an inter-burst
+    gap. Fix: idle < 10 ms (but > any intra-burst silence; 8 ms is the
+    sweet spot).
+
+
+==============================================================================
+  10. RELATED CODE IN THIS REPO
+==============================================================================
+
+  control_fan.py              TX side. Uses CMDS (7-bit) and FAN_IDS
+                              (14-bit) loaded from config.yaml. No
+                              per-fan transformations.
+
+  config.yaml                 Stores 14-bit FAN_IDs per room.
+
+  generate_esphome_config.py  Produces the binary_sensor block for the
+                              ESPHome receiver. Mirrors CMDS and FAN_IDS
+                              from control_fan.py / config.yaml.
+
+  fan-remote1.yaml            Full ESPHome config for the CC1101 receiver
+                              node. Includes SPI + CC1101 + remote_receiver
+                              + 40 binary_sensors (10 buttons × 4 fans).
+
+  decode_fan_remote.py        Offline decoder for ESPHome "Received Raw:"
+                              log events. Splits messages as 4+14+7,
+                              labels trailer cmdids explicitly.

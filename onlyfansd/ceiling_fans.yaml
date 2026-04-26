@@ -1,0 +1,140 @@
+# Template entities for onlyfansd ceiling fans.
+# Mirrors the REST-created fan.<room>_fan / light.<room>_fan_light entities
+# and exposes them with persistent unique_ids so they're fully UI-manageable.
+#
+# Usage in configuration.yaml:
+#   template: !include ceiling_fans.yaml
+
+- fan:
+    - name: "Living Room Ceiling Fan"
+      unique_id: onlyfansd_living_room_fan
+      state: "{{ is_state('fan.living_room_fan', 'on') }}"
+      percentage: "{{ state_attr('fan.living_room_fan', 'percentage') | int(0) }}"
+      direction: "{{ state_attr('fan.living_room_fan', 'direction') or 'forward' }}"
+      speed_count: 6
+      turn_on:
+        - action: fan.turn_on
+          target: { entity_id: fan.living_room_fan }
+          data:
+            percentage: "{{ percentage | default(35) }}"
+      turn_off:
+        - action: fan.turn_off
+          target: { entity_id: fan.living_room_fan }
+      set_percentage:
+        - action: fan.set_percentage
+          target: { entity_id: fan.living_room_fan }
+          data: { percentage: "{{ percentage }}" }
+      set_direction:
+        - action: fan.set_direction
+          target: { entity_id: fan.living_room_fan }
+          data: { direction: "{{ direction }}" }
+
+    - name: "Parents Room Ceiling Fan"
+      unique_id: onlyfansd_parents_room_fan
+      state: "{{ is_state('fan.parents_room_fan', 'on') }}"
+      percentage: "{{ state_attr('fan.parents_room_fan', 'percentage') | int(0) }}"
+      direction: "{{ state_attr('fan.parents_room_fan', 'direction') or 'forward' }}"
+      speed_count: 6
+      turn_on:
+        - action: fan.turn_on
+          target: { entity_id: fan.parents_room_fan }
+          data:
+            percentage: "{{ percentage | default(35) }}"
+      turn_off:
+        - action: fan.turn_off
+          target: { entity_id: fan.parents_room_fan }
+      set_percentage:
+        - action: fan.set_percentage
+          target: { entity_id: fan.parents_room_fan }
+          data: { percentage: "{{ percentage }}" }
+      set_direction:
+        - action: fan.set_direction
+          target: { entity_id: fan.parents_room_fan }
+          data: { direction: "{{ direction }}" }
+
+    - name: "Baby Room Ceiling Fan"
+      unique_id: onlyfansd_baby_room_fan
+      state: "{{ is_state('fan.baby_room_fan', 'on') }}"
+      percentage: "{{ state_attr('fan.baby_room_fan', 'percentage') | int(0) }}"
+      direction: "{{ state_attr('fan.baby_room_fan', 'direction') or 'forward' }}"
+      speed_count: 6
+      turn_on:
+        - action: fan.turn_on
+          target: { entity_id: fan.baby_room_fan }
+          data:
+            percentage: "{{ percentage | default(35) }}"
+      turn_off:
+        - action: fan.turn_off
+          target: { entity_id: fan.baby_room_fan }
+      set_percentage:
+        - action: fan.set_percentage
+          target: { entity_id: fan.baby_room_fan }
+          data: { percentage: "{{ percentage }}" }
+      set_direction:
+        - action: fan.set_direction
+          target: { entity_id: fan.baby_room_fan }
+          data: { direction: "{{ direction }}" }
+
+    - name: "Upstairs Ceiling Fan"
+      unique_id: onlyfansd_upstairs_fan
+      state: "{{ is_state('fan.upstairs_fan', 'on') }}"
+      percentage: "{{ state_attr('fan.upstairs_fan', 'percentage') | int(0) }}"
+      direction: "{{ state_attr('fan.upstairs_fan', 'direction') or 'forward' }}"
+      speed_count: 6
+      turn_on:
+        - action: fan.turn_on
+          target: { entity_id: fan.upstairs_fan }
+          data:
+            percentage: "{{ percentage | default(35) }}"
+      turn_off:
+        - action: fan.turn_off
+          target: { entity_id: fan.upstairs_fan }
+      set_percentage:
+        - action: fan.set_percentage
+          target: { entity_id: fan.upstairs_fan }
+          data: { percentage: "{{ percentage }}" }
+      set_direction:
+        - action: fan.set_direction
+          target: { entity_id: fan.upstairs_fan }
+          data: { direction: "{{ direction }}" }
+
+- light:
+    - name: "Living Room Fan Light"
+      unique_id: onlyfansd_living_room_fan_light
+      state: "{{ is_state('light.living_room_fan_light', 'on') }}"
+      turn_on:
+        - action: light.turn_on
+          target: { entity_id: light.living_room_fan_light }
+      turn_off:
+        - action: light.turn_off
+          target: { entity_id: light.living_room_fan_light }
+
+    - name: "Parents Room Fan Light"
+      unique_id: onlyfansd_parents_room_fan_light
+      state: "{{ is_state('light.parents_room_fan_light', 'on') }}"
+      turn_on:
+        - action: light.turn_on
+          target: { entity_id: light.parents_room_fan_light }
+      turn_off:
+        - action: light.turn_off
+          target: { entity_id: light.parents_room_fan_light }
+
+    - name: "Baby Room Fan Light"
+      unique_id: onlyfansd_baby_room_fan_light
+      state: "{{ is_state('light.baby_room_fan_light', 'on') }}"
+      turn_on:
+        - action: light.turn_on
+          target: { entity_id: light.baby_room_fan_light }
+      turn_off:
+        - action: light.turn_off
+          target: { entity_id: light.baby_room_fan_light }
+
+    - name: "Upstairs Fan Light"
+      unique_id: onlyfansd_upstairs_fan_light
+      state: "{{ is_state('light.upstairs_fan_light', 'on') }}"
+      turn_on:
+        - action: light.turn_on
+          target: { entity_id: light.upstairs_fan_light }
+      turn_off:
+        - action: light.turn_off
+          target: { entity_id: light.upstairs_fan_light }
