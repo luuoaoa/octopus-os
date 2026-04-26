@@ -21,3 +21,15 @@
 # CONFIG_INPUT_JOYDEV is not set
 # CONFIG_INPUT_JOYSTICK is not set
 # CONFIG_INPUT_TOUCHSCREEN is not set
+
+# Networking: this is a single-purpose IPv4/IPv6 LAN device that doesn't
+# firewall, route, bridge, mesh, or do telecom protocols. Disable
+# NETFILTER (kills ip{,6}tables/nftables/ebtables/conntrack modules), the
+# unused L4 protocols, exotic L2 protocols, and overlay tunnels.
+# CONFIG_NETFILTER is not set
+# CONFIG_SCTP is not set
+# CONFIG_BATMAN_ADV is not set
+# CONFIG_ATM is not set
+# CONFIG_LLC is not set
+# CONFIG_NETROM is not set
+# CONFIG_VXLAN is not set
