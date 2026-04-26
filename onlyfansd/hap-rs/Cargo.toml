@@ -33,7 +33,6 @@ futures = "0.3"
 if-addrs = "0.14"
 hkdf = "0.11"
 hyper = { version = "0.14", features = ["server", "http1"] }
-libmdns = "0.9"
 log = "0.4"
 num = "0.4"
 rand = "0.8"
