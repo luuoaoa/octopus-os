@@ -1,0 +1,6 @@
+# Busybox config additions on top of the upstream defconfig.
+#
+# CONFIG_TIMEOUT: needed by /usr/local/bin/boot-diag.sh, which wraps
+# hang-prone systemd/journald calls in `timeout 10` so a wedged /var
+# can't stall the whole diag past its TimeoutStartSec.
+CONFIG_TIMEOUT=y
