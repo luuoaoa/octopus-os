@@ -1,6 +1,11 @@
 #!/bin/sh
-# Slow health blink: a brief flash every ~10 seconds. Visible enough to
-# confirm userspace is still alive, quiet enough to ignore.
+# ACT LED heartbeat with two modes, switched via a flag file:
+#   * Boot-diag pending (default): fast 0.5 on / 0.5 off — "userspace alive,
+#     boot-diag still running, don't power off yet."
+#   * Boot-diag done (/run/boot-diag-done exists): slow 0.5 on / 5 off —
+#     "diag complete, system is idle and healthy, safe to power off."
+# boot-diag.sh creates the flag in its EXIT trap, so the mode switch lands
+# whether the diag dump succeeded or got SIGTERMed past its trap.
 set -u
 
 LED_DIR=
@@ -13,7 +18,11 @@ echo none > "$LED_DIR/trigger" 2>/dev/null || true
 
 while :; do
     echo 1 > "$LED_DIR/brightness"
-    sleep 0.1
+    sleep 0.5
     echo 0 > "$LED_DIR/brightness"
-    sleep 9.9
+    if [ -e /run/boot-diag-done ]; then
+        sleep 5
+    else
+        sleep 0.5
+    fi
 done

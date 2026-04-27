@@ -1,5 +1,5 @@
 [Unit]
-Description=Userspace heartbeat: brief ACT LED flash every ~10s
+Description=Userspace heartbeat: ACT LED fast-blink before boot-diag, slow-blink after
 After=local-fs.target
 
 [Service]
