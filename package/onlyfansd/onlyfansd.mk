@@ -2,15 +2,15 @@
 #
 # onlyfansd
 #
-# Built from the vendored source tree at $(BR2_EXTERNAL_PIFANSRF_PATH)/onlyfansd
-# (a fork of luuoaoa/ceiling-fans-control with librpitx wired in directly via
-# rpitx-shim/shim.cpp + build.rs).
+# Pinned at a specific commit of luuoaoa/ceiling-fans-control. Buildroot's
+# cargo download post-process handles `cargo vendor` + .cargo/config.toml
+# generation at fetch time, so the pinned tarball doesn't need to ship
+# pre-vendored deps.
 #
 ################################################################################
 
-ONLYFANSD_VERSION = 0.1.0
-ONLYFANSD_SITE = $(BR2_EXTERNAL_PIFANSRF_PATH)/onlyfansd
-ONLYFANSD_SITE_METHOD = local
+ONLYFANSD_VERSION = ebbe4eb65e1415a10e726271df69f8ee71cefe92
+ONLYFANSD_SITE = $(call github,luuoaoa,ceiling-fans-control,$(ONLYFANSD_VERSION))
 ONLYFANSD_LICENSE = MIT
 ONLYFANSD_DEPENDENCIES = librpitx
 
