@@ -2,3 +2,12 @@
 # Dropbear is off by default; pi-imager-apply.service starts it only when
 # /boot/user-data sets `ssh_pwauth: true`.
 disable dropbear.service
+
+# We use systemd-networkd for both link-up and DHCP on wl* (see
+# 40-wireless.network). Buildroot's preset enables dhcpcd by default;
+# leaving it on causes both clients to race for wlan0 and the kernel
+# ends up with two `inet` addresses on the interface — and avahi-daemon
+# binds the *secondary*, advertising the wrong IP for HomeKit / mDNS
+# services (clients then can't reach the device). Disabling dhcpcd
+# here gives networkd sole ownership.
+disable dhcpcd.service
