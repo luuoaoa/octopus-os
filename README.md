@@ -116,16 +116,15 @@ Default user is `root`, password `root`. Change it with the
 `BR2_TARGET_GENERIC_ROOT_PASSWD` line in `configs/pifansrf_defconfig`
 if you care.
 
-The Pi regenerates its SSH host key every boot — this is intentional
-(no persistent `/etc/dropbear` to leak), but it means your SSH client
-will warn about a changed key on every reboot. The `bin/update-pi.sh`
-helper bypasses host-key verification for exactly this reason; for
-manual SSH:
-
-```sh
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    root@<host-or-ip>
-```
+The dropbear host key is generated once on first boot and persists on
+the `/var` partition (`/etc/dropbear` is a symlink to
+`/var/lib/dropbear`), so subsequent reboots reuse the same key and
+your SSH client won't warn about it. Reflashing the image preserves
+`/var` (the FAT-only `sdcard.img` doesn't touch p2), so the key
+survives that too — the only thing that resets it is wiping
+`/dev/mmcblk0p2` or running on a brand-new SD card. `bin/update-pi.sh`
+still passes `StrictHostKeyChecking=no` because the very first OTA
+after a fresh flash sees a key it's never seen.
 
 The image advertises itself over mDNS as `<hostname>.local`.
 

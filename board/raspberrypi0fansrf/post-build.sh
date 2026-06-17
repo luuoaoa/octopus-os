@@ -55,3 +55,12 @@ rm -f "${TARGET_DIR}/usr/bin/bootctl" \
       "${TARGET_DIR}/usr/bin/lzma" \
       "${TARGET_DIR}/usr/bin/lzmadec" \
       "${TARGET_DIR}/usr/bin/lzmainfo"
+
+# Repoint /etc/dropbear at the persistent ext4 partition. Buildroot's
+# dropbear package symlinks /etc/dropbear -> /var/run/dropbear (tmpfs),
+# which causes host keys to be regenerated on every boot — defeats
+# known_hosts and trips bin/update-pi.sh into needing sshpass. The
+# shipped dropbear.service ExecStartPre tries `rm -f /etc/dropbear`
+# first; on a read-only rootfs that fails and it falls through to
+# `mkdir -p $(readlink /etc/dropbear)`, so the keys land on /var.
+ln -sfn /var/lib/dropbear "${TARGET_DIR}/etc/dropbear"

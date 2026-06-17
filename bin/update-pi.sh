@@ -8,8 +8,12 @@
 #          with PIFANSRF_SSH_PASSWORD=… in the environment.)
 #
 # Notes:
-#   - Skips host-key verification because the Pi regenerates its host
-#     key every boot (initramfs, no persistent /etc/dropbear).
+#   - sshpass does password auth — the image doesn't ship
+#     authorized_keys, so password is the only auth mechanism.
+#   - Skips host-key verification: the Pi's host key is persistent
+#     (/etc/dropbear -> /var/lib/dropbear on the ext4 partition), but
+#     the very first OTA after a fresh flash sees a key it's never
+#     seen. Tolerant-by-default keeps the script working in both cases.
 #   - Multiplexes ssh/rsync through one ControlMaster connection, so
 #     sshpass auth happens exactly once.
 #   - Customize files (network-config, user-data, onlyfansd.yaml) are

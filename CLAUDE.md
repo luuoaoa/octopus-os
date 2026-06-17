@@ -112,8 +112,13 @@ before starting; it'll save real time.
 
 ## `bin/update-pi.sh`
 
-- Uses `sshpass` (`apt install sshpass`) because dropbear regenerates the
-  host key every boot, defeating any persistent known_hosts approach.
+- Uses `sshpass` (`apt install sshpass`) for password auth — the image
+  doesn't ship an authorized_keys, so password is the only mechanism.
+  (Host keys themselves are persistent now: `/etc/dropbear` is symlinked
+  to `/var/lib/dropbear` on the ext4 partition, so the key stays the
+  same across reboots. The script still passes
+  `StrictHostKeyChecking=no` because the first OTA after a fresh flash
+  hits a key it's never seen.)
 - Default Pi password: `root`. Override with `PIFANSRF_SSH_PASSWORD=...`
   in the env.
 - It auto-deletes `/boot/rootfs.cpio.gz` on the Pi if present —
