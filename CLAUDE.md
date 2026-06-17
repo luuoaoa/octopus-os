@@ -34,6 +34,12 @@ before starting; it'll save real time.
   alone won't make the new content land on `boot.vfat` — you need
   `rpi-firmware-rebuild` to re-stage it. Bit me twice.
 - Kernel config fragment changes need `linux-reconfigure && make`.
+- The image ships **both** Pi Zero DTBs (`BR2_LINUX_KERNEL_INTREE_DTS_NAME`
+  lists `bcm2708-rpi-zero-w` and `bcm2708-rpi-zero`) so one image boots
+  a Zero W and a non-W Zero — the bootloader auto-selects by board
+  revision since config.txt sets no `device_tree=`. Changing that list
+  needs `linux-rebuild && make` to regenerate the .dtb and re-stage the
+  FAT; genimage's boot.vfat `files` list must name each .dtb explicitly.
 - Rootfs overlay changes (`board/raspberrypi0fansrf/rootfs/...`) ARE
   picked up by the next `make` because rootfs assembly always re-runs.
 - `post-build.sh` runs every rootfs assembly. Edits to it take effect

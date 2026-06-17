@@ -1,9 +1,18 @@
 # pifansrf
 
-A minimal Raspberry Pi Zero W image whose rootfs lives **entirely in RAM**.
-The SD card holds the kernel + a compressed cpio.lz4 initramfs on a small
-read-only FAT, plus a 512 MiB ext4 partition for the few daemons that
-genuinely need persistence. Everything else is tmpfs.
+A minimal Raspberry Pi Zero / Zero W image whose rootfs lives
+**entirely in RAM**. The SD card holds the kernel + a compressed
+cpio.lz4 initramfs on a small read-only FAT, plus a 512 MiB ext4
+partition for the few daemons that genuinely need persistence.
+Everything else is tmpfs.
+
+A single image boots both the Pi Zero W and the non-W Pi Zero: both
+`bcm2708-rpi-zero-w.dtb` and `bcm2708-rpi-zero.dtb` are shipped on the
+FAT and the bootloader picks the right one for the detected board.
+Note the non-W Zero has no onboard WiFi — give it a USB WiFi dongle
+(lands on `wl*`, configured exactly like the Zero W) or a USB ethernet
+adapter (lands on `en*`/`eth*` via `40-wired.network`); otherwise it
+boots fine but has no network.
 
 ## Why this is interesting
 
@@ -71,8 +80,9 @@ bash docker-build.sh
 Output lands in `output/images/`:
 
 - `sdcard.img` — flash this to an SD card with `dd`/Etcher/Pi Imager.
-- `rootfs.cpio.zst` + `zImage` + `bcm2708-rpi-zero-w.dtb` — used by
-  `bin/update-pi.sh` for in-place OTA updates.
+- `rootfs.cpio.lz4` + `zImage` + `bcm2708-rpi-zero-w.dtb` +
+  `bcm2708-rpi-zero.dtb` — used by `bin/update-pi.sh` for in-place
+  OTA updates.
 
 If you forgot `--recurse-submodules`, run `git submodule update --init`
 once. Buildroot is pinned at upstream `0141ca3fa5` (release 2026.02.1).
@@ -144,7 +154,7 @@ What it does, in order:
 1. Open one SSH master connection (sshpass-authed) so subsequent
    rsync invocations don't re-prompt.
 2. Remount `/boot` rw on the Pi.
-3. rsync `zImage`, `bcm2708-rpi-zero-w.dtb`, `rootfs.cpio.zst`, and
+3. rsync `zImage`, both `bcm2708-rpi-zero*.dtb`, `rootfs.cpio.lz4`, and
    the rpi-firmware contents.
 4. Push any of `customize/{network-config,user-data,onlyfansd.yaml}`
    that exist locally.

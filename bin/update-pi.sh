@@ -79,6 +79,7 @@ echo "==> rsync kernel + dtb + cpio rootfs -> /boot/"
 rsync -e "${RSYNC_E}" ${RSYNC_OPTS} \
     "${IMG_DIR}/zImage" \
     "${IMG_DIR}/bcm2708-rpi-zero-w.dtb" \
+    "${IMG_DIR}/bcm2708-rpi-zero.dtb" \
     "${IMG_DIR}/rootfs.cpio.lz4" \
     "${HOST}:/boot/"
 
