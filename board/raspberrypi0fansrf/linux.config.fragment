@@ -85,10 +85,20 @@
 # CONFIG_WLAN_VENDOR_ZYDAS is not set
 # CONFIG_WLAN_VENDOR_QUANTENNA is not set
 
-# USB networking: Pi 0W has no Ethernet port. Drop the USB ethernet
-# adapter drivers — smsc95xx (Pi 3+ onboard), ax8817x, rtl815x,
-# pegasus, etc. — none of which would ever bind on this board.
-# CONFIG_USB_NET_DRIVERS is not set
+# USB networking: the onboard Pi has no Ethernet port, but a bare Pi
+# Zero (non-W) — and a Zero W without WiFi configured — reaches the LAN
+# through a USB ethernet adapter that lands on en*/eth* (see
+# 40-wired.network). Keep usbnet + the common adapter drivers; drop the
+# long tail of niche/pro ones. Built as modules: udev autoloads them on
+# hotplug via modalias.
+CONFIG_USB_NET_DRIVERS=y
+CONFIG_USB_USBNET=m
+CONFIG_USB_NET_AX8817X=m       # ASIX AX8817x / AX88772(A/B/C) — 10/100
+CONFIG_USB_NET_AX88179_178A=m  # ASIX AX88179/178A — gigabit
+CONFIG_USB_NET_CDCETHER=m      # CDC-ECM (many generic dongles)
+CONFIG_USB_NET_CDC_NCM=m       # CDC-NCM
+CONFIG_USB_RTL8152=m           # Realtek RTL8152/8153 — very common
+CONFIG_USB_NET_SMSC95XX=m      # SMSC95xx (Pi 3 / Zero-via-hub onboard)
 
 # Filesystems: only vfat (/boot) and ext4 (/var) are mounted from
 # block devices. Everything tmpfs/proc/sysfs is already separate.
