@@ -4,8 +4,10 @@ fixup_file=fixup.dat
 kernel=zImage
 
 # Load the cpio rootfs as initramfs (toram-style: full rootfs in RAM, no SD root).
-# zstd-compressed: faster kernel decompression on ARMv6 than gzip, similar size.
-initramfs rootfs.cpio.zst followkernel
+# lz4-compressed: ~3× faster decompress than zstd on Pi 0W ARMv6 (measured
+# on hardware: 11.5 s userspace zstd vs 3.8 s lz4 for the same cpio), at
+# ~60 % larger compressed size on the FAT (still fits with >400 MB free).
+initramfs rootfs.cpio.lz4 followkernel
 
 # Headless: minimum GPU memory
 gpu_mem=16

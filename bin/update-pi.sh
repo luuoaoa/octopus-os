@@ -41,7 +41,7 @@ IMG_DIR="${SCRIPT_DIR}/output/images"
 CUSTOMIZE="${SCRIPT_DIR}/customize"
 
 [ -f "${IMG_DIR}/zImage" ]         || { echo "no ${IMG_DIR}/zImage; run ./docker-build.sh" >&2; exit 1; }
-[ -f "${IMG_DIR}/rootfs.cpio.zst" ] || { echo "no ${IMG_DIR}/rootfs.cpio.zst" >&2; exit 1; }
+[ -f "${IMG_DIR}/rootfs.cpio.lz4" ] || { echo "no ${IMG_DIR}/rootfs.cpio.lz4" >&2; exit 1; }
 
 SSH_CTL="${TMPDIR:-/tmp}/update-pi-$$.sock"
 SSH_OPTS="\
@@ -79,15 +79,15 @@ echo "==> rsync kernel + dtb + cpio rootfs -> /boot/"
 rsync -e "${RSYNC_E}" ${RSYNC_OPTS} \
     "${IMG_DIR}/zImage" \
     "${IMG_DIR}/bcm2708-rpi-zero-w.dtb" \
-    "${IMG_DIR}/rootfs.cpio.zst" \
+    "${IMG_DIR}/rootfs.cpio.lz4" \
     "${HOST}:/boot/"
 
 echo "==> rsync rpi-firmware contents -> /boot/"
 rsync -e "${RSYNC_E}" ${RSYNC_OPTS} "${IMG_DIR}/rpi-firmware/" "${HOST}:/boot/"
 
 # Drop a stale rootfs.cpio.gz left over from an older gzip-based image —
-# config.txt now references rootfs.cpio.zst, the gz is dead weight on the FAT.
-ssh ${SSH_OPTS} "${HOST}" 'rm -f /boot/rootfs.cpio.gz' || true
+# config.txt now references rootfs.cpio.lz4, the gz is dead weight on the FAT.
+ssh ${SSH_OPTS} "${HOST}" 'rm -f /boot/rootfs.cpio.gz /boot/rootfs.cpio.zst' || true
 
 # Customize: only known names, only if present locally, never delete.
 sent_customize=
