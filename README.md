@@ -1,7 +1,7 @@
 # pifansrf
 
 A minimal Raspberry Pi Zero W image whose rootfs lives **entirely in RAM**.
-The SD card holds the kernel + a compressed cpio.zst initramfs on a small
+The SD card holds the kernel + a compressed cpio.lz4 initramfs on a small
 read-only FAT, plus a 512 MiB ext4 partition for the few daemons that
 genuinely need persistence. Everything else is tmpfs.
 
@@ -18,14 +18,14 @@ genuinely need persistence. Everything else is tmpfs.
 - **A "factory reset" is `rm /dev/mmcblk0p2`.** Delete the partition (or
   just `mkfs.ext4 /dev/mmcblk0p2` over it), reboot, and `create-var-
   partition.service` will recreate it on first boot.
-- **OTA upgrade is rsync.** Push a new kernel + rootfs.cpio.zst to `/boot`
+- **OTA upgrade is rsync.** Push a new kernel + rootfs.cpio.lz4 to `/boot`
   over SSH, reboot — no overlay file system, no A/B partition gymnastics,
   no mid-flash bricks. The system you wrote into RAM at boot can't be
   damaged by a botched update of the SD card files it isn't currently
   reading from.
-- **Boot fast.** zstd-compressed initramfs (~27 MB → ~70 MB unpacked)
-  decompresses in a second or two on ARMv6, and there's no rootfs disk
-  mount to fsck.
+- **Boot fast.** lz4-compressed initramfs decompresses ~3× faster than
+  zstd on ARMv6 (the trade is a larger file on the FAT, immaterial with
+  400+ MB free), and there's no rootfs disk mount to fsck.
 
 The original motivating daemon is `onlyfansd` — a HomeKit bridge for
 Casa Vieja TR301A ceiling fans driven by `librpitx`. That's just an
@@ -40,8 +40,8 @@ depending on writable rootfs semantics.
   DRM/media, netfilter, Bluetooth, exotic sound codecs, etc.). See
   `board/raspberrypi0fansrf/linux.config.fragment`.
 - systemd init.
-- WiFi: `brcmfmac` firmware, `wpa_supplicant`, `dhcpcd`, `systemd-networkd`
-  (which actually brings the link up).
+- WiFi: `brcmfmac` firmware, `wpa_supplicant`, `systemd-networkd`
+  (which brings the link up and does DHCP).
 - mDNS: `avahi-daemon` owns UDP/5353; `systemd-resolved` keeps doing DNS
   but its mDNS responder is disabled to avoid a `SO_REUSEPORT` collision.
 - SSH: `dropbear`, off by default unless `ssh_pwauth: true` is set.
