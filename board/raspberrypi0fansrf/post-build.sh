@@ -30,16 +30,11 @@ cat > "${TARGET_DIR}/etc/motd" <<EOF
 
 EOF
 
-# Dropbear runs the user's shell directly and skips login(1), so /etc/motd
-# is not printed on SSH login. Print it from /etc/profile.d when we detect
-# an SSH connection — avoids duplicating it on the serial-console path,
-# where busybox login already cats /etc/motd.
-mkdir -p "${TARGET_DIR}/etc/profile.d"
-cat > "${TARGET_DIR}/etc/profile.d/01-pifansrf-motd.sh" <<'EOF'
-if [ -n "${SSH_CONNECTION:-}" ] && [ -f /etc/motd ]; then
-    cat /etc/motd
-fi
-EOF
+# Note: dropbear v2025.89's default is to display /etc/motd on
+# interactive login (the -m flag *disables* that — opposite of what
+# you'd expect). We used to print motd from /etc/profile.d/ here
+# under the assumption dropbear didn't, which gave a doubled banner
+# on real interactive SSH sessions. Removed.
 
 # Trim binaries that have no buildroot Kconfig knob to disable individually:
 #   bootctl   — EFI bootloader management; the Pi uses the GPU bootloader.
