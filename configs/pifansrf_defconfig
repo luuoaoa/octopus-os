@@ -25,7 +25,10 @@ BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y
 BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI_WIFI=y
 BR2_PACKAGE_RPI_FIRMWARE=y
 BR2_PACKAGE_RPI_FIRMWARE_BOOTCODE_BIN=y
-BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI=y
+# Cut-down Pi firmware (start_cd.elf / fixup_cd.dat). Drops VC features
+# we don't use (codec accel, HDMI, camera). Goal: claw back some of
+# the 128 MB the firmware reserves for VideoCore even at gpu_mem=16.
+BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI_CD=y
 BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/raspberrypi0fansrf/config.txt"
 BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/raspberrypi0fansrf/cmdline.txt"
 BR2_PACKAGE_HOST_RUSTC=y

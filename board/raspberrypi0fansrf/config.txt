@@ -1,5 +1,5 @@
-start_file=start.elf
-fixup_file=fixup.dat
+start_file=start_cd.elf
+fixup_file=fixup_cd.dat
 
 kernel=zImage
 
