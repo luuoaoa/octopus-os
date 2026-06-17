@@ -40,7 +40,12 @@ BR2_PACKAGE_AVAHI=y
 # BR2_PACKAGE_AVAHI_AUTOIPD is not set
 BR2_PACKAGE_AVAHI_DAEMON=y
 BR2_PACKAGE_DBUS=y
-BR2_PACKAGE_DHCPCD=y
+# dhcpcd was the original DHCP client but conflicts with
+# systemd-networkd on wlan0 (both would race for the same lease and
+# leave the interface with two IPs, breaking mDNS / HomeKit discovery
+# — see project_two_dhcp_clients memory and the systemd preset).
+# We've used networkd exclusively for a while; drop the binary too.
+# BR2_PACKAGE_DHCPCD is not set
 BR2_PACKAGE_DROPBEAR=y
 # BR2_PACKAGE_DROPBEAR_CLIENT is not set
 BR2_PACKAGE_E2FSPROGS=y
