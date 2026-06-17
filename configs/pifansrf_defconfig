@@ -32,6 +32,9 @@ BR2_PACKAGE_HOST_RUSTC=y
 # Headless box, no virtual console: drop systemd-vconsole-setup, which
 # transitively pulls in kbd (loadkeys/setfont/keymaps/consolefonts/...).
 # BR2_PACKAGE_SYSTEMD_VCONSOLE is not set
+# systemd-analyze: `blame`, `plot`, `critical-chain`, `time` for boot
+# tuning. Successor to the long-dead systemd-bootchart. Small (~1 MB).
+BR2_PACKAGE_SYSTEMD_ANALYZE=y
 BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/raspberrypi0fansrf/busybox.config.fragment"
 BR2_PACKAGE_AVAHI=y
 # BR2_PACKAGE_AVAHI_AUTOIPD is not set
