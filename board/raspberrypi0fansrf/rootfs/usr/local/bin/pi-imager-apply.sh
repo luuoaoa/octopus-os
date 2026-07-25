@@ -119,6 +119,39 @@ if [ -n "${USR:-}" ] && [ -f "$USR" ]; then
         log "timezone=$TZ"
     fi
 
+    # Root password: the first `passwd:` value (Pi Imager writes it under a
+    # users: entry). It's already a crypt(3) hash -- $id$salt$hash, typically
+    # $5$ (SHA-256) or $6$ (SHA-512) -- so it goes into /etc/shadow verbatim;
+    # there's nothing to encode here. The image has no `pi` user, so whichever
+    # user block it came from, we apply it to root.
+    #
+    # /etc is tmpfs, so this is re-done every boot and reverts if the file goes
+    # away. Guard hard on the $id$salt$hash shape: a malformed field in
+    # /etc/shadow locks root out of a device we can only reach over the tunnel.
+    PW=$(sed -nE 's/^[[:space:]]*passwd:[[:space:]]+(\$[0-9a-zA-Z]+\$[^[:space:]]+)[[:space:]]*$/\1/p' "$USR" | head -1)
+    if [ -n "$PW" ]; then
+        case "$PW" in
+            *\$*\$*\$*)
+                # awk, not sed: the hash is full of / and . and $, and only
+                # field 2 of the root line may change.
+                if awk -F: -v OFS=: -v h="$PW" \
+                       '$1=="root"{$2=h} 1' /etc/shadow > /etc/shadow.new \
+                   && [ -s /etc/shadow.new ]; then
+                    chmod 600 /etc/shadow.new
+                    mv /etc/shadow.new /etc/shadow
+                    pwid=${PW#\$}; pwid=${pwid%%\$*}
+                    log "root password set from $USR (crypt id \$$pwid\$, ${#PW} chars)"
+                else
+                    rm -f /etc/shadow.new
+                    log "WARN: failed to rewrite /etc/shadow; keeping built-in password"
+                fi
+                ;;
+            *)
+                log "WARN: passwd: field is not a \$id\$salt\$hash crypt string; ignoring"
+                ;;
+        esac
+    fi
+
     # Dropbear is disabled by default (see 30-pifansrf.preset). Only start
     # if user-data explicitly opts in with `ssh_pwauth: true`.
     SSH_PWAUTH=$(sed -nE 's/^ssh_pwauth:[[:space:]]+(.*)[[:space:]]*$/\1/p' "$USR" | head -1)
