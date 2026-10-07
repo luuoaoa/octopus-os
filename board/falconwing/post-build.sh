@@ -18,6 +18,20 @@ mkdir -p "${TARGET_DIR}/lib/modules" "${TARGET_DIR}/lib/firmware"
 rsync -a --delete "${STOCK}/rootfs/lib/modules/" "${TARGET_DIR}/lib/modules/"
 rsync -a "${STOCK}/rootfs/lib/firmware/" "${TARGET_DIR}/lib/firmware/"
 
+# Stock FM radio tool + its glibc 2.8 runtime (/lib/ld-linux.so.3,
+# /lib/libc.so.6). Nothing else on the image uses glibc. fmradio looks
+# for /psp/fmradio_xclk to decide whether to drive the tuner's reference
+# clock from PWM3, so keep a /psp directory around for that flag.
+if [ ! -f "${STOCK}/rootfs/usr/bin/fmradio" ]; then
+    echo "ERROR: ${STOCK} predates FM radio support; re-run extract-stock.sh" >&2
+    exit 1
+fi
+install -m 0755 "${STOCK}/rootfs/usr/bin/fmradio" "${TARGET_DIR}/usr/bin/fmradio"
+install -m 0755 "${STOCK}/rootfs/lib/ld-2.8.so" "${STOCK}/rootfs/lib/libc-2.8.so" "${TARGET_DIR}/lib/"
+ln -sf ld-2.8.so "${TARGET_DIR}/lib/ld-linux.so.3"
+ln -sf libc-2.8.so "${TARGET_DIR}/lib/libc.so.6"
+mkdir -p "${TARGET_DIR}/psp"
+
 # Mountpoint for the FAT config partition, and where sdcard-config-apply
 # writes dropbear's args (empty dirs don't survive in git, so not overlay).
 mkdir -p "${TARGET_DIR}/boot" "${TARGET_DIR}/etc/default"

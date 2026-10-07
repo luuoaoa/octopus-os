@@ -76,3 +76,36 @@ The serial console (ttyAM0, 115200) shows the whole boot.
   `/dev/urandom`) and wpa_supplicant all have fallbacks.
 - devpts on 2.6.28 rejects `ptmxmode=`, hence the board's own `fstab`.
 
+## FM radio
+
+The Chumby One has a Quintic QN8005B FM tuner. How the stock firmware
+drives it (reversed from `/bin/fmradio` and `/usr/bin/chumbyradio`):
+
+- **Control:** I2C on `/dev/i2c-0` (modules `i2c_stmp378x` + `i2c-dev`),
+  8-bit address 0x56. Writes: `I2C_SLAVE 0x56` + `write({reg, val})`.
+  Reads use a quirk of the stock bus driver: one `I2C_RDWR` message to
+  0x57, `flags=0`, `len=2`, buf `{reg, 0}` → the driver writes the
+  register number, repeated-starts and reads the value into `buf[1]`.
+- **Reference clock:** only if `/psp/fmradio_xclk` exists, PWM3 is muxed
+  out (bank1 pin 29) in clock pass-through mode to clock the tuner.
+- **Audio:** analog tuner output → codec LINE1 → ADC; the stock daemon
+  sets the ADC source to LINE1 (HW_AUDIOIN_ADCVOL), maxes the ADC gain and
+  loops capture → playback in software at 44.1 kHz stereo.
+
+This image ships the stock `fmradio` tool unchanged (it links only
+against glibc 2.8, whose `/lib/ld-linux.so.3` + `/lib/libc.so.6` sit
+alongside uClibc-ng) plus a wrapper:
+
+```sh
+radio on 100.3     # init tuner, route LINE1, start the audio loop
+radio tune 101.5
+radio scan         # list stations
+radio rds          # RDS text
+radio vol 70
+radio off
+```
+
+`fmradio` itself is also available: `fmradio i` (init), `fmradio t 10030`
+(tune, 10 kHz units), `fmradio s`, `fmradio rds`, `fmradio r|w|d` (raw
+registers). If tuning works but there's no signal on your unit, create an
+empty `fmradio_xclk` file on the CHUMBY partition (enables the PWM3 clock).

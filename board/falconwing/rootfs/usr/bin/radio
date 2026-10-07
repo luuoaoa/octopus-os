@@ -1,0 +1,119 @@
+#!/bin/sh
+# Chumby One FM radio, driven the same way the stock firmware does it:
+#
+#   - tuner: Quintic QN8005B on /dev/i2c-0, controlled with the stock
+#     /usr/bin/fmradio tool (glibc 2.8 binary, runs from /lib/ld-linux.so.3)
+#   - audio: tuner output -> codec LINE1 -> ADC; looped capture -> playback
+#     in software (arecord | aplay), like the stock chumbyradio daemon.
+#
+# Usage:
+#   radio on [MHz]     init tuner, route LINE1, start audio (default: last station)
+#   radio tune <MHz>   e.g. radio tune 100.3
+#   radio off          stop audio, switch ADC back to the mic
+#   radio scan         list stations
+#   radio rds          print RDS data (Ctrl-C to stop)
+#   radio vol <0-100>  speaker volume
+#   radio status
+#
+# Boards whose tuner needs the reference clock from PWM3: create an empty
+# file "fmradio_xclk" on the CHUMBY config partition (stock: /psp/fmradio_xclk).
+
+STATION_FILE=/etc/radio.station
+PIDFILE=/var/run/radio-loop.pid
+PCM=plughw:0,0
+
+die() { echo "radio: $*" >&2; exit 1; }
+
+# MHz (e.g. 100.3) -> tuner units of 10 kHz (10030)
+mhz_to_ch() {
+	echo "$1" | awk '{ if ($1 < 64 || $1 > 108.5) exit 1; printf "%d\n", $1 * 100 + 0.5 }'
+}
+
+# i.MX23 HW_AUDIOIN_ADCVOL: SELECT_LEFT[13:12], SELECT_RIGHT[5:4];
+# 0 = mic, 1 = LINE1 (the tuner). _SET at +4, _CLR at +8.
+adc_line1() { devmem 0x8004c058 32 0x2020; devmem 0x8004c054 32 0x1010; }
+adc_mic()   { devmem 0x8004c058 32 0x3030; }
+
+setup_i2c() {
+	modprobe i2c_stmp378x 2>/dev/null
+	modprobe i2c-dev 2>/dev/null
+	i=0
+	while [ ! -c /dev/i2c-0 ] && [ $i -lt 5 ]; do
+		mdev -s; sleep 1; i=$((i + 1))
+	done
+	[ -c /dev/i2c-0 ] || die "/dev/i2c-0 not found (i2c_stmp378x / i2c-dev not loaded?)"
+	if [ -e /boot/fmradio_xclk ]; then
+		touch /psp/fmradio_xclk
+	else
+		rm -f /psp/fmradio_xclk
+	fi
+}
+
+tune() {
+	ch=$(mhz_to_ch "$1") || die "bad frequency '$1' (MHz, 64-108)"
+	fmradio t "$ch" || die "tune failed"
+	echo "$1" > "$STATION_FILE"
+}
+
+loop_running() {
+	[ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+start_loop() {
+	loop_running && return 0
+	# Same as stock: max ADC gain, then mixer up (enable_audio.sh defaults).
+	amixer -q set ADC 100% 2>/dev/null
+	amixer -q set DAC 90% on 2>/dev/null
+	amixer -q set HP 100% on 2>/dev/null
+	amixer -q set Speaker 90% on 2>/dev/null
+	setsid sh -c "exec arecord -q -D $PCM -f cd -t raw 2>/dev/null | aplay -q -D $PCM -f cd -t raw 2>/dev/null" &
+	echo $! > "$PIDFILE"
+}
+
+stop_loop() {
+	if [ -f "$PIDFILE" ]; then
+		kill "$(cat "$PIDFILE")" 2>/dev/null
+		rm -f "$PIDFILE"
+	fi
+	killall arecord aplay 2>/dev/null
+}
+
+case "$1" in
+	on)
+		setup_i2c
+		fmradio i || die "tuner init failed"
+		freq=${2:-$(cat "$STATION_FILE" 2>/dev/null)}
+		tune "${freq:-100.3}"
+		adc_line1
+		start_loop
+		echo "radio: on, ${freq:-100.3} MHz"
+		;;
+	tune)
+		[ -n "$2" ] || die "usage: radio tune <MHz>"
+		tune "$2"
+		;;
+	off)
+		stop_loop
+		adc_mic
+		echo "radio: off"
+		;;
+	scan)
+		setup_i2c
+		fmradio s
+		;;
+	rds)
+		fmradio rds
+		;;
+	vol)
+		[ -n "$2" ] || die "usage: radio vol <0-100>"
+		amixer -q set Speaker "$2%" on
+		;;
+	status)
+		if loop_running; then echo "audio loop: running"; else echo "audio loop: stopped"; fi
+		echo "station: $(cat "$STATION_FILE" 2>/dev/null || echo none) MHz"
+		;;
+	*)
+		sed -n '/^# Usage:/,/^$/s/^# \{0,1\}//p' "$0"
+		exit 1
+		;;
+esac

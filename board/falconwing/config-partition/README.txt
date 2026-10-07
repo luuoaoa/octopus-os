@@ -13,3 +13,7 @@ wpa_supplicant.conf  (optional, create it) used verbatim instead of
 SSH: ssh root@<ip>   default password: root
 The device asks DHCP for its hostname, so ssh root@chumby may work if
 your router registers DHCP names in DNS.
+
+FM radio: ssh in and run "radio on 100.3" (see "radio" for options).
+fmradio_xclk     (optional, create an empty file) only if the radio tunes
+                 but receives nothing: clocks the tuner from the SoC.

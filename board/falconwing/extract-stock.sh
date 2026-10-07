@@ -80,6 +80,20 @@ dd if="${IMG}" of="${TMP}/p2.img" bs=512 skip="${P2_START}" count="${P2_COUNT}" 
 debugfs -R "rdump /lib/modules ${OUT}/rootfs/lib" "${TMP}/p2.img" 2>/dev/null || true
 debugfs -R "rdump /lib/firmware ${OUT}/rootfs/lib" "${TMP}/p2.img" 2>/dev/null || true
 
+# Stock FM radio tool (QN8005 tuner over /dev/i2c-0) and the glibc 2.8
+# runtime it links against. It only needs libc.so.6; glibc's loader and
+# libc coexist with uClibc-ng (different sonames / interpreter path).
+mkdir -p "${OUT}/rootfs/usr/bin"
+debugfs -R "dump /bin/fmradio ${OUT}/rootfs/usr/bin/fmradio" "${TMP}/p2.img" 2>/dev/null
+debugfs -R "dump /lib/ld-2.8.so ${OUT}/rootfs/lib/ld-2.8.so" "${TMP}/p2.img" 2>/dev/null
+debugfs -R "dump /lib/libc-2.8.so ${OUT}/rootfs/lib/libc-2.8.so" "${TMP}/p2.img" 2>/dev/null
+ln -sf ld-2.8.so "${OUT}/rootfs/lib/ld-linux.so.3"
+ln -sf libc-2.8.so "${OUT}/rootfs/lib/libc.so.6"
+chmod 755 "${OUT}/rootfs/usr/bin/fmradio" "${OUT}/rootfs/lib/ld-2.8.so" "${OUT}/rootfs/lib/libc-2.8.so"
+for f in usr/bin/fmradio lib/ld-2.8.so lib/libc-2.8.so; do
+    [ -s "${OUT}/rootfs/$f" ] || { echo "failed to extract /$f" >&2; exit 1; }
+done
+
 KVER=2.6.28-chumby
 MODDIR="${OUT}/rootfs/lib/modules/${KVER}"
 [ -f "${MODDIR}/modules.dep" ] || { echo "modules.dep missing in ${MODDIR}" >&2; exit 1; }
@@ -89,4 +103,5 @@ chmod -R u+rwX,go+rX "${OUT}/rootfs"
 
 echo "modules: $(find "${MODDIR}" -name '*.ko' | wc -l) .ko files"
 echo "firmware: $(ls "${OUT}/rootfs/lib/firmware" | tr '\n' ' ')"
+echo "fmradio: $(stat -c %s "${OUT}/rootfs/usr/bin/fmradio") bytes + glibc 2.8 runtime"
 echo "done -> ${OUT}"

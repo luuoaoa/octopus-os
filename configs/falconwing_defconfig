@@ -49,6 +49,12 @@ BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
 BR2_PACKAGE_WPA_SUPPLICANT_WEXT=y
 BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
 BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y
+# FM radio: the QN8005 tuner's audio comes in on the codec's LINE1 and is
+# looped capture -> playback in software (see /usr/bin/radio).
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_ALSA_UTILS_AMIXER=y
+BR2_PACKAGE_ALSA_UTILS_APLAY=y
+# BR2_PACKAGE_ALSA_UTILS_ALSAMIXER is not set
 # S40network in the board overlay replaces ifupdown + /etc/network/interfaces.
 # BR2_PACKAGE_IFUPDOWN_SCRIPTS is not set
 
