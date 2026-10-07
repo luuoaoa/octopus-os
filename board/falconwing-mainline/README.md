@@ -33,7 +33,6 @@ shared via `board/falconwing/rootfs-common`.
 | Backlight | `pwm-backlight`, PWM2 @ 625 Hz |
 | Touchscreen | `mxs-lradc-ts`, 4-wire |
 | Knob | `rotary-encoder` on ROTARYA/B as GPIOs (REL_WHEEL) |
-| Squeeze switch | `gpio-keys`, keycode 130 |
 | Audio | patch 0003: new i.MX23 built-in codec driver + `simple-audio-card`; external speaker amp via `simple-audio-amplifier`; headphone detect |
 | CPU frequency | `cpufreq-dt`, `ondemand`: 454.74 / 227.37 / 151.58 / 113.68 MHz (patch 0004, see below) |
 
@@ -71,6 +70,18 @@ radio scan
 radio off
 ```
 
+## GUI
+
+`chumby-ui` (package/chumby-ui) is an LVGL 9.6 app drawn on `/dev/fb0`
+(mxsfb's fbdev emulation), started by `/etc/init.d/S95chumby-ui`: clock,
+FM station with tune / on-off buttons, volume slider (also on the knob),
+hostname and IP. It switches tty0 to graphics mode so fbcon (the boot log
+on the LCD) doesn't draw over it.
+
+Touch calibration defaults to the vendor's raw ranges (X 3930..125,
+Y 130..4000). To override, write `min_x min_y max_x max_y [swap_xy]` to
+`/etc/chumby-ui/touch.conf` and `/etc/init.d/S95chumby-ui restart`.
+
 ## Unverified until it runs on hardware
 
 - Panel dot clock (vendor: 3.3 MHz ≈ 29 Hz) and LCD reset polarity.
@@ -80,3 +91,4 @@ radio off
 - Audio driver: written against the vendor/Freescale init sequences, never
   run on this kernel.
 - FM tuning matches the stock tool, but the software `scan` is new.
+- Touch axis orientation/calibration on the mainline LRADC driver.

@@ -1,0 +1,5 @@
+config BR2_PACKAGE_LVGL
+	bool
+	help
+	  LVGL graphics library sources (https://lvgl.io), compiled into
+	  the apps that select it with their own lv_conf.h.

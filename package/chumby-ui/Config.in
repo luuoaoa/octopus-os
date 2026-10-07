@@ -1,0 +1,10 @@
+config BR2_PACKAGE_CHUMBY_UI
+	bool "chumby-ui"
+	depends on BR2_TOOLCHAIN_HAS_THREADS # alsa-lib
+	select BR2_PACKAGE_ALSA_LIB
+	select BR2_PACKAGE_ALSA_LIB_MIXER
+	select BR2_PACKAGE_LVGL
+	help
+	  LVGL home screen for the Chumby One: clock, FM radio and volume
+	  (knob), drawn on the framebuffer with touchscreen input.
+	  Uses /usr/bin/radio (falconwing-mainline board) for the tuner.
