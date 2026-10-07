@@ -1,0 +1,26 @@
+config BR2_PACKAGE_WLROOTS_PIXMAN
+	bool "wlroots-pixman"
+	depends on !BR2_STATIC_LIBS # wayland
+	depends on BR2_TOOLCHAIN_HAS_THREADS # libdrm, wayland
+	depends on BR2_PACKAGE_HAS_UDEV # libinput
+	depends on !BR2_PACKAGE_WLROOTS
+	select BR2_PACKAGE_HWDATA
+	select BR2_PACKAGE_HWDATA_PNP_IDS
+	select BR2_PACKAGE_LIBDISPLAY_INFO
+	select BR2_PACKAGE_LIBDRM
+	select BR2_PACKAGE_LIBINPUT
+	select BR2_PACKAGE_LIBXKBCOMMON
+	select BR2_PACKAGE_PIXMAN
+	select BR2_PACKAGE_SEATD
+	select BR2_PACKAGE_WAYLAND
+	select BR2_PACKAGE_WAYLAND_PROTOCOLS
+	help
+	  wlroots built for GPU-less boards: pixman software renderer and
+	  DRM dumb buffers only, no EGL/GLES/GBM (buildroot's wlroots
+	  package requires those).
+
+	  https://gitlab.freedesktop.org/wlroots/wlroots
+
+comment "wlroots-pixman needs udev and a toolchain w/ threads, dynamic library"
+	depends on !BR2_PACKAGE_HAS_UDEV || !BR2_TOOLCHAIN_HAS_THREADS || \
+		BR2_STATIC_LIBS
