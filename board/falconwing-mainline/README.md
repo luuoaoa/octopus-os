@@ -70,24 +70,56 @@ radio scan
 radio off
 ```
 
-## GUI
+## GUI (Wayland)
 
-`chumby-ui` (package/chumby-ui) is an LVGL 9.6 app drawn on `/dev/fb0`
-(mxsfb's fbdev emulation), started by `/etc/init.d/S95chumby-ui`: clock,
-FM station with tune / on-off buttons, volume slider (also on the knob),
-hostname and IP. It switches tty0 to graphics mode so fbcon (the boot log
-on the LCD) doesn't draw over it.
+```
+ ┌────┬──────────────────────────┐   chumby-wm (wlroots, pixman, no GPU)
+ │ ⌂  │                          │     owns DRM + input, places windows
+ │ ♪  │   active app             │   chumby-shell
+ │ 🔔 │   (maximized, one at a   │     panel: home, running apps,
+ │    │    time) or the home     │            volume | brightness
+ │ ▮▮ │    app list behind       │     home:  installed apps
+ └────┴──────────────────────────┘   apps: chumby-clock, chumby-fm, ...
+```
 
-Text is rendered at runtime by FreeType from Noto Sans (package
-font-noto-sans: hinted Regular + Bold TTFs in /usr/share/fonts/noto).
-LVGL's icon glyphs aren't in Noto, so each FreeType font falls back to a
-built-in Montserrat bitmap font for them. No HarfBuzz: LVGL lays text out
-per codepoint, which is fine for Latin/Greek/Cyrillic but not for complex
-scripts.
+- **chumby-wm** (package/chumby-wm): ~800-line compositor on wlroots,
+  built without EGL/GBM (package/wlroots-pixman: pixman renderer, DRM dumb
+  buffers). Window policy by xdg app_id: `chumby-panel` pinned left (56 px),
+  `chumby-home` behind everything, any other window is an app maximized
+  into the rest. Apps are exported via wlr-foreign-toplevel-management;
+  screencopy is enabled for `chumby-screenshot > shot.ppm`.
+- **chumby-shell** (package/chumby-shell): panel + home windows. Tap an
+  icon to switch, long-press to close, ⌂ minimizes all (shows home). Quick
+  volume and brightness sliders; the knob is volume anywhere. Started with
+  the compositor by `/etc/init.d/S95chumby-session` (log in
+  /var/log/chumby-session.log).
+- **libchumby** (package/libchumby): the framework every app links. LVGL
+  9.6 on Wayland (wl_shm), Noto Sans via FreeType (Montserrat bitmaps only
+  as fallback for LVGL's symbol glyphs), the universal dark theme (a child
+  theme of LVGL's default that styles buttons/sliders from the palette),
+  automatic night mode, volume/brightness helpers, and a main loop that can
+  watch extra fds. See `chumby.h`; a minimal app is ~10 lines.
+- **Apps** (package/chumby-apps): `chumby-clock`, `chumby-fm`. An app is a
+  binary plus `/usr/share/chumby/apps/<name>.app` (`Id` = the app_id it
+  passes to `chumby_app_init()`, `Name`, `Exec`, `Icon`).
 
-Touch calibration defaults to the vendor's raw ranges (X 3930..125,
-Y 130..4000). To override, write `min_x min_y max_x max_y [swap_xy]` to
-`/etc/chumby-ui/touch.conf` and `/etc/init.d/S95chumby-ui restart`.
+**Night mode** is policy, not per-app: `/etc/chumby/policy.conf`
+(`night_start = 19:00`, `night_end = 07:00`, `mode = auto|day|night`,
+`day_brightness`, `night_brightness`) is re-read every 30 s by every
+process. At night the palette turns black/warm-red and the shell dims the
+backlight; the brightness slider overrides until the next switch.
+
+**Touch** goes through libinput; the vendor calibration is applied by
+`/etc/udev/rules.d/90-chumby-touch.rules` (`LIBINPUT_CALIBRATION_MATRIX`).
+
+No HarfBuzz: LVGL lays text out per codepoint (fine for Latin, Greek,
+Cyrillic; not for complex scripts). No keyboard layouts are installed
+(xkeyboard-config), so USB keyboards are ignored.
+
+The whole stack can be tried without hardware: run the target's
+`chumby-wm` under qemu-user with `WLR_BACKENDS=headless
+WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1` (`QEMU_LD_PREFIX` = the target
+dir), start apps against it, and grab `chumby-screenshot` PPMs.
 
 ## Unverified until it runs on hardware
 
@@ -99,3 +131,7 @@ Y 130..4000). To override, write `min_x min_y max_x max_y [swap_xy]` to
   run on this kernel.
 - FM tuning matches the stock tool, but the software `scan` is new.
 - Touch axis orientation/calibration on the mainline LRADC driver.
+- The GUI was exercised end to end on wlroots' headless backend under
+  qemu (compositor, shell, apps, switching state, night mode), but not on
+  the DRM/libinput path: mxsfb page flips, libinput touch, CPU/RAM load of
+  pixman compositing at 454 MHz with 64 MB.

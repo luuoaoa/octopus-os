@@ -1,0 +1,6 @@
+config BR2_PACKAGE_CHUMBY_APPS
+	bool "chumby-apps"
+	select BR2_PACKAGE_LIBCHUMBY
+	help
+	  Chumby One apps on libchumby: Clock and FM Radio (the latter
+	  uses /usr/bin/radio from the falconwing-mainline board).
