@@ -168,17 +168,6 @@
 					fsl,voltage = <MXS_VOLTAGE_HIGH>;
 					fsl,pull-up = <MXS_PULL_DISABLE>;
 				};
-
-				/* Top "squeeze"/bend switch on PWM4 (B1P30), active low. */
-				squeeze_pins: squeeze@0 {
-					reg = <0>;
-					fsl,pinmux-ids = <
-						MX23_PAD_PWM4__GPIO_1_30
-					>;
-					fsl,drive-strength = <MXS_DRIVE_4mA>;
-					fsl,voltage = <MXS_VOLTAGE_HIGH>;
-					fsl,pull-up = <MXS_PULL_DISABLE>;
-				};
 			};
 		};
 
@@ -309,19 +298,6 @@
 		gpios = <&gpio2 7 GPIO_ACTIVE_HIGH>, <&gpio2 8 GPIO_ACTIVE_HIGH>;
 		linux,axis = <REL_WHEEL>;	/* what the vendor rotdec reported */
 		rotary-encoder,relative-axis;
-	};
-
-	gpio-keys {
-		compatible = "gpio-keys";
-		pinctrl-names = "default";
-		pinctrl-0 = <&squeeze_pins>;
-
-		squeeze {
-			label = "squeeze";
-			gpios = <&gpio1 30 GPIO_ACTIVE_LOW>;
-			linux,code = <KEY_PROPS>;	/* keycode 130, as chumby_bend.c */
-			debounce-interval = <20>;
-		};
 	};
 
 	/*
