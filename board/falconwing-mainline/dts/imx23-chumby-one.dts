@@ -32,6 +32,40 @@
 		stdout-path = &duart;
 	};
 
+	/*
+	 * CPU frequency scaling. The bootloader runs the CPU at the Chumby
+	 * One's rated 454.74 MHz (PLL 480 MHz * 18/19, DIV_CPU 1) with VDDD
+	 * set for it. There is no mainline i.MX23 regulator driver to raise
+	 * VDDD, so only scale *down* from there: patch 0004 restricts CPU
+	 * rate changes to the integer DIV_CPU divider, and these OPPs are
+	 * that rate / 1..4 (as the divider rounds them). AHB (hbus) is a
+	 * fixed divider of the CPU clock and follows it down; EMI/DRAM is
+	 * clocked separately and unaffected.
+	 */
+	cpu_opp_table: opp-table {
+		compatible = "operating-points-v2";
+
+		opp-113684211 {
+			opp-hz = /bits/ 64 <113684211>;
+			clock-latency-ns = <50000>;
+		};
+
+		opp-151578948 {
+			opp-hz = /bits/ 64 <151578948>;
+			clock-latency-ns = <50000>;
+		};
+
+		opp-227368421 {
+			opp-hz = /bits/ 64 <227368421>;
+			clock-latency-ns = <50000>;
+		};
+
+		opp-454736842 {
+			opp-hz = /bits/ 64 <454736842>;
+			clock-latency-ns = <50000>;
+		};
+	};
+
 	memory@40000000 {
 		device_type = "memory";
 		reg = <0x40000000 0x04000000>;
@@ -331,4 +365,9 @@
 		output-low;	/* deasserted */
 		line-name = "lcd-reset-n";
 	};
+};
+
+&{/cpus/cpu@0} {
+	clocks = <&clks 11>;	/* "cpu" */
+	operating-points-v2 = <&cpu_opp_table>;
 };

@@ -1,0 +1,78 @@
+From: falconwing bring-up
+Subject: [PATCH] clk: mxs: imx23: scale the CPU clock with its integer divider only
+
+cpu_pll is registered with CLK_SET_RATE_PARENT, so a CPU rate request
+(e.g. from cpufreq-dt) can end up rewriting ref_cpu's PLL fractional
+divider while the CPU is clocked from it. Freescale's own code only did
+that with the CPU switched to the 24 MHz bypass. Register cpu_pll
+without CLK_SET_RATE_PARENT so CPU frequency changes only touch the
+glitch-free DIV_CPU divider; the rate can then never rise above what
+the bootloader configured ref_cpu for.
+
+---
+diff -urN a/drivers/clk/mxs/clk-div.c b/drivers/clk/mxs/clk-div.c
+--- a/drivers/clk/mxs/clk-div.c	2026-10-07 05:00:32.009343109 -0700
++++ b/drivers/clk/mxs/clk-div.c	2026-10-07 05:00:32.025511519 -0700
+@@ -67,8 +67,9 @@
+ 	.set_rate = clk_div_set_rate,
+ };
+ 
+-struct clk *mxs_clk_div(const char *name, const char *parent_name,
+-			void __iomem *reg, u8 shift, u8 width, u8 busy)
++struct clk *mxs_clk_div_flags(const char *name, const char *parent_name,
++			      void __iomem *reg, u8 shift, u8 width, u8 busy,
++			      unsigned long flags)
+ {
+ 	struct clk_div *div;
+ 	struct clk *clk;
+@@ -80,7 +81,7 @@
+ 
+ 	init.name = name;
+ 	init.ops = &clk_div_ops;
+-	init.flags = CLK_SET_RATE_PARENT;
++	init.flags = flags;
+ 	init.parent_names = (parent_name ? &parent_name: NULL);
+ 	init.num_parents = (parent_name ? 1 : 0);
+ 
+@@ -101,3 +102,10 @@
+ 
+ 	return clk;
+ }
++
++struct clk *mxs_clk_div(const char *name, const char *parent_name,
++			void __iomem *reg, u8 shift, u8 width, u8 busy)
++{
++	return mxs_clk_div_flags(name, parent_name, reg, shift, width, busy,
++				 CLK_SET_RATE_PARENT);
++}
+diff -urN a/drivers/clk/mxs/clk.h b/drivers/clk/mxs/clk.h
+--- a/drivers/clk/mxs/clk.h	2026-10-07 05:00:32.013592930 -0700
++++ b/drivers/clk/mxs/clk.h	2026-10-07 05:00:32.025526478 -0700
+@@ -26,6 +26,9 @@
+ 
+ struct clk *mxs_clk_div(const char *name, const char *parent_name,
+ 			void __iomem *reg, u8 shift, u8 width, u8 busy);
++struct clk *mxs_clk_div_flags(const char *name, const char *parent_name,
++			      void __iomem *reg, u8 shift, u8 width, u8 busy,
++			      unsigned long flags);
+ 
+ struct clk *mxs_clk_frac(const char *name, const char *parent_name,
+ 			 void __iomem *reg, u8 shift, u8 width, u8 busy);
+diff -urN a/drivers/clk/mxs/clk-imx23.c b/drivers/clk/mxs/clk-imx23.c
+--- a/drivers/clk/mxs/clk-imx23.c	2026-10-07 05:00:32.017519172 -0700
++++ b/drivers/clk/mxs/clk-imx23.c	2026-10-07 05:00:32.025544221 -0700
+@@ -122,7 +122,13 @@
+ 	clks[emi_sel] = mxs_clk_mux("emi_sel", CLKSEQ, 6, 1, emi_sels, ARRAY_SIZE(emi_sels));
+ 	clks[cpu] = mxs_clk_mux("cpu", CLKSEQ, 7, 1, cpu_sels, ARRAY_SIZE(cpu_sels));
+ 	clks[etm_sel] = mxs_clk_mux("etm_sel", CLKSEQ, 8, 1, sel_cpu, ARRAY_SIZE(sel_cpu));
+-	clks[cpu_pll] = mxs_clk_div("cpu_pll", "ref_cpu", CPU, 0, 6, 28);
++	/*
++	 * Don't let CPU rate changes propagate to ref_cpu: rewriting the
++	 * PLL fractional divider while the CPU runs from it needs the CPU
++	 * moved to the crystal bypass first. Scale with the integer
++	 * DIV_CPU divider only (glitch-free, BUSY-synchronised).
++	 */
++	clks[cpu_pll] = mxs_clk_div_flags("cpu_pll", "ref_cpu", CPU, 0, 6, 28, 0);
+ 	clks[cpu_xtal] = mxs_clk_div("cpu_xtal", "ref_xtal", CPU, 16, 10, 29);
+ 	clks[hbus] = mxs_clk_div("hbus", "cpu", HBUS, 0, 5, 29);
+ 	clks[xbus] = mxs_clk_div("xbus", "ref_xtal", XBUS, 0, 10, 31);
