@@ -49,9 +49,11 @@ the PLL fraction (unsafe while the CPU runs from it), so cpufreq only
 changes the integer DIV_CPU divider and the OPPs are the boot rate / 1-4.
 Whatever the bootloader actually programmed, a request can only land at
 or below the boot frequency. AHB follows the CPU (fixed HBUS divider);
-DRAM/EMI is unaffected. Check `cat /sys/kernel/debug/clk/clk_summary` and
-`/sys/devices/system/cpu/cpu0/cpufreq/` on first boot; if the boot rate
-isn't 454.74 MHz the OPPs still work but won't be exact.
+DRAM/EMI is unaffected. On first boot, `cat
+/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq` with the
+`performance` governor shows the real boot rate (454736 expected); if it
+differs the OPPs still work, just not exactly, and the top one may sit
+below the boot rate. `stats/time_in_state` shows the governor at work.
 
 The `krnA` slot is 4 MiB; the image is ~3 MB (xz, DRM/sound/USB/wifi as
 modules). post-image.sh fails the build if it ever outgrows the slot.
