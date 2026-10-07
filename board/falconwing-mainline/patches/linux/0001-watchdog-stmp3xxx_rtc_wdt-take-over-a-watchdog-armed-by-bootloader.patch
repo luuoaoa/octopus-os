@@ -1,0 +1,75 @@
+From: falconwing bring-up
+Subject: [PATCH] watchdog: stmp3xxx_rtc_wdt: take over a watchdog armed by the bootloader
+
+The Chumby One bootloader enables the RTC watchdog (20 s) before booting
+Linux. rtc-stmp3xxx already notices this and skips the block reset so as
+not to stop it, but nothing told the watchdog core, so unless userspace
+opened /dev/watchdog in time the board reset during boot.
+
+Let the RTC driver report whether WATCHDOGEN is set, and have the
+watchdog driver reprogram the timeout and mark the device WDOG_HW_RUNNING
+so the watchdog core pings it until userspace takes over.
+
+---
+diff -urN a/drivers/rtc/rtc-stmp3xxx.c b/drivers/rtc/rtc-stmp3xxx.c
+--- a/drivers/rtc/rtc-stmp3xxx.c	2026-10-07 04:22:57.226212032 -0700
++++ b/drivers/rtc/rtc-stmp3xxx.c	2026-10-07 04:23:11.875786788 -0700
+@@ -92,8 +92,17 @@
+ 	}
+ }
+ 
++static bool stmp3xxx_wdt_is_running(struct device *dev)
++{
++	struct stmp3xxx_rtc_data *rtc_data = dev_get_drvdata(dev);
++
++	return readl(rtc_data->io + STMP3XXX_RTC_CTRL) &
++		STMP3XXX_RTC_CTRL_WATCHDOGEN;
++}
++
+ static struct stmp3xxx_wdt_pdata wdt_pdata = {
+ 	.wdt_set_timeout = stmp3xxx_wdt_set_timeout,
++	.wdt_is_running = stmp3xxx_wdt_is_running,
+ };
+ 
+ static void stmp3xxx_wdt_register(struct platform_device *rtc_pdev)
+diff -urN a/drivers/watchdog/stmp3xxx_rtc_wdt.c b/drivers/watchdog/stmp3xxx_rtc_wdt.c
+--- a/drivers/watchdog/stmp3xxx_rtc_wdt.c	2026-10-07 04:22:57.230981760 -0700
++++ b/drivers/watchdog/stmp3xxx_rtc_wdt.c	2026-10-07 04:23:11.875822585 -0700
+@@ -90,6 +90,7 @@
+ static int stmp3xxx_wdt_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
++	struct stmp3xxx_wdt_pdata *pdata = dev_get_platdata(dev);
+ 	int ret;
+ 
+ 	watchdog_set_drvdata(&stmp3xxx_wdd, dev);
+@@ -97,6 +98,18 @@
+ 	stmp3xxx_wdd.timeout = clamp_t(unsigned, heartbeat, 1, STMP3XXX_MAX_TIMEOUT);
+ 	stmp3xxx_wdd.parent = dev;
+ 
++	/*
++	 * Some bootloaders (e.g. the Chumby One's) arm the watchdog before
++	 * starting Linux. Reprogram it with our timeout and tell the
++	 * watchdog core it is running, so the core keeps it fed until
++	 * userspace opens the device instead of letting the board reset.
++	 */
++	if (pdata->wdt_is_running && pdata->wdt_is_running(dev->parent)) {
++		wdt_start(&stmp3xxx_wdd);
++		set_bit(WDOG_HW_RUNNING, &stmp3xxx_wdd.status);
++		dev_info(dev, "watchdog was enabled by the bootloader\n");
++	}
++
+ 	ret = devm_watchdog_register_device(dev, &stmp3xxx_wdd);
+ 	if (ret < 0)
+ 		return ret;
+diff -urN a/include/linux/stmp3xxx_rtc_wdt.h b/include/linux/stmp3xxx_rtc_wdt.h
+--- a/include/linux/stmp3xxx_rtc_wdt.h	2026-10-07 04:22:57.235442928 -0700
++++ b/include/linux/stmp3xxx_rtc_wdt.h	2026-10-07 04:23:11.875744498 -0700
+@@ -9,6 +9,7 @@
+ 
+ struct stmp3xxx_wdt_pdata {
+ 	void (*wdt_set_timeout)(struct device *dev, u32 timeout);
++	bool (*wdt_is_running)(struct device *dev);
+ };
+ 
+ #endif /* __LINUX_STMP3XXX_RTC_WDT_H */

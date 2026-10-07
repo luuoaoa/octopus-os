@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
+ * Chumby One ("falconwing"): Freescale i.MX233, 64 MiB DDR, boots from
+ * microSD through the stock chumby bootloader (zImage + appended DTB in
+ * the krnA slot of partition 1).
+ *
+ * Hardware facts come from Chumby's 2.6.28 vendor kernel
+ * (linux-2.6.28.mx233, arch/arm/mach-stmp3xxx/ and drivers).
+ * Vendor GPIO notation used below: B<bank>P<pin>.
+ */
+
+/dts-v1/;
+#include <dt-bindings/gpio/gpio.h>
+#include "nxp/mxs/imx23.dtsi"
+
+/ {
+	model = "Chumby One (falconwing)";
+	compatible = "chumby,falconwing", "fsl,imx23";
+
+	aliases {
+		mmc0 = &ssp0;
+	};
+
+	chosen {
+		/*
+		 * The stock bootloader's cmdline (console=ttyAM0, init=/linuxrc,
+		 * rootfstype=ext3) is for the vendor kernel; ARM_ATAG_DTB_COMPAT
+		 * is off, so these bootargs are used instead.
+		 */
+		bootargs = "console=ttyAMA0,115200 earlyprintk root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw";
+		stdout-path = &duart;
+	};
+
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x40000000 0x04000000>;
+	};
+
+	apb@80000000 {
+		apbh-bus@80000000 {
+			/* SSP1 (ssp0 here): microSD, 4-bit. The card is the root
+			 * device and never leaves while running. */
+			ssp0: spi@80010000 {
+				compatible = "fsl,imx23-mmc";
+				pinctrl-names = "default";
+				pinctrl-0 = <&mmc0_4bit_pins_a &mmc0_sck_cfg>;
+				bus-width = <4>;
+				non-removable;
+				status = "okay";
+			};
+		};
+
+		apbx-bus@80040000 {
+			/* DUART on PWM0/PWM1: the 115200 8N1 debug header. */
+			duart: serial@80070000 {
+				pinctrl-names = "default";
+				pinctrl-0 = <&duart_pins_a>;
+				status = "okay";
+			};
+		};
+	};
+};

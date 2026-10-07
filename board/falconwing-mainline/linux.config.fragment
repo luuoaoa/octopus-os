@@ -1,0 +1,90 @@
+# Chumby One (falconwing) on top of arch/arm/configs/mxs_defconfig.
+
+# Boot: the stock chumby bootloader loads the zImage with the DTB appended
+# (buildroot enables ARM_APPENDED_DTB) into the 4 MiB krnA slot. Its ATAG
+# cmdline targets the vendor kernel, so ignore ATAGs and use DT bootargs.
+# CONFIG_ARM_ATAG_DTB_COMPAT is not set
+
+# Earliest possible output on the DUART: the serial RX line is the only
+# way to see a failed boot.
+CONFIG_DEBUG_LL=y
+CONFIG_DEBUG_IMX23_UART=y
+CONFIG_EARLY_PRINTK=y
+
+# Watchdog: armed (20 s) by the bootloader; the board patch makes the
+# watchdog core feed it until userspace takes over.
+CONFIG_WATCHDOG=y
+CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y
+CONFIG_STMP3XXX_RTC_WATCHDOG=y
+CONFIG_RTC_DRV_STMP=y
+
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_EXT4_FS=y
+CONFIG_VFAT_FS=y
+CONFIG_NLS_CODEPAGE_437=y
+CONFIG_NLS_ISO8859_1=y
+
+# Size: mxs_defconfig's debug and board options don't fit the 4 MiB krnA
+# slot together with what this board needs, and none of them apply.
+# CONFIG_PROVE_LOCKING is not set
+# CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT is not set
+CONFIG_DEBUG_INFO_NONE=y
+# CONFIG_BLK_DEV_IO_TRACE is not set
+# CONFIG_DEBUG_USER is not set
+# CONFIG_MTD is not set
+# CONFIG_JFFS2_FS is not set
+# CONFIG_UBIFS_FS is not set
+# CONFIG_NFS_FS is not set
+# CONFIG_ROOT_NFS is not set
+# CONFIG_IP_PNP is not set
+# CONFIG_CAN is not set
+# CONFIG_ENC28J60 is not set
+# CONFIG_ICPLUS_PHY is not set
+# CONFIG_MICREL_PHY is not set
+# CONFIG_REALTEK_PHY is not set
+# CONFIG_EEPROM_AT24 is not set
+# CONFIG_TOUCHSCREEN_EDT_FT5X06 is not set
+# CONFIG_TOUCHSCREEN_TSC2007 is not set
+# CONFIG_DRM_PANEL_SEIKO_43WVF1G is not set
+# CONFIG_SND_SOC_MXS_SGTL5000 is not set
+# CONFIG_SND_SOC_TLV320AIC3X_I2C is not set
+# CONFIG_SPI_MXS is not set
+# CONFIG_USB_GADGET is not set
+# CONFIG_USB_CHIPIDEA_UDC is not set
+# CONFIG_SERIAL_MXS_AUART is not set
+# Lock debugging pulled in by mxs_defconfig's PROVE_LOCKING stays set
+# after disabling PROVE_LOCKING itself; turn it off explicitly.
+# CONFIG_LOCKDEP is not set
+# CONFIG_DEBUG_LOCK_ALLOC is not set
+# CONFIG_DEBUG_RT_MUTEXES is not set
+# CONFIG_DEBUG_SPINLOCK is not set
+# CONFIG_DEBUG_MUTEXES is not set
+# CONFIG_DEBUG_WW_MUTEX_SLOWPATH is not set
+# CONFIG_DEBUG_RWSEMS is not set
+# CONFIG_DEBUG_MEMORY_INIT is not set
+# CONFIG_SLUB_DEBUG is not set
+# CONFIG_SOFTLOCKUP_DETECTOR is not set
+# CONFIG_DETECT_HUNG_TASK is not set
+# CONFIG_FTRACE is not set
+# CONFIG_DEBUG_FS is not set
+# CONFIG_PERF_EVENTS is not set
+# CONFIG_BLK_DEV_INTEGRITY is not set
+# CONFIG_TASKSTATS is not set
+
+# (zImage compression is set in the defconfig: buildroot owns that choice.)
+
+# Not needed to reach userspace: build as modules (loaded from the rootfs)
+# to keep the zImage small and leave room for later bring-up phases.
+CONFIG_DRM=m
+CONFIG_DRM_MXSFB=m
+CONFIG_SND=m
+CONFIG_SND_SOC=m
+CONFIG_USB=m
+CONFIG_USB_EHCI_HCD=m
+CONFIG_USB_CHIPIDEA=m
+CONFIG_USB_STORAGE=m
+CONFIG_USB_USBNET=m
+CONFIG_USB_NET_SMSC95XX=m
+CONFIG_CRYPTO_DEV_MXS_DCP=m
+CONFIG_HID=m
