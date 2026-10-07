@@ -1,0 +1,9 @@
+config BR2_PACKAGE_CHUMBY_SHELL
+	bool "chumby-shell"
+	depends on BR2_PACKAGE_CHUMBY_WM
+	select BR2_PACKAGE_LIBCHUMBY
+	help
+	  The Chumby One system UI: left-edge app switcher with quick
+	  volume/brightness, home screen with the installed apps, knob as
+	  volume, night-mode backlight. Starts the chumby-wm session at
+	  boot (S95chumby-session).
