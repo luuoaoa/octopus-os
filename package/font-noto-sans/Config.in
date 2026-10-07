@@ -1,0 +1,7 @@
+config BR2_PACKAGE_FONT_NOTO_SANS
+	bool "font-noto-sans"
+	help
+	  Noto Sans Regular and Bold (hinted TTF, Latin/Greek/Cyrillic),
+	  installed to /usr/share/fonts/noto.
+
+	  https://notofonts.github.io/

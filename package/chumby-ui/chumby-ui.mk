@@ -8,7 +8,7 @@ CHUMBY_UI_VERSION = 1.0
 CHUMBY_UI_SITE = $(BR2_EXTERNAL_PIFANSRF_PATH)/package/chumby-ui/src
 CHUMBY_UI_SITE_METHOD = local
 CHUMBY_UI_LICENSE = GPL-2.0+
-CHUMBY_UI_DEPENDENCIES = alsa-lib lvgl
+CHUMBY_UI_DEPENDENCIES = alsa-lib freetype host-pkgconf lvgl
 
 # LVGL is compiled straight into the app with our lv_conf.h. (A local
 # package never runs the download step, so LVGL comes from its own
@@ -16,7 +16,9 @@ CHUMBY_UI_DEPENDENCIES = alsa-lib lvgl
 define CHUMBY_UI_BUILD_CMDS
 	rsync -a --delete $(LVGL_DIR)/ $(@D)/lvgl/
 	$(TARGET_MAKE_ENV) $(MAKE) -C $(@D) \
-		CC="$(TARGET_CC)" CFLAGS="$(TARGET_CFLAGS)" LDFLAGS="$(TARGET_LDFLAGS)"
+		CC="$(TARGET_CC)" CFLAGS="$(TARGET_CFLAGS)" LDFLAGS="$(TARGET_LDFLAGS)" \
+		FT_CFLAGS="`$(PKG_CONFIG_HOST_BINARY) --cflags freetype2`" \
+		FT_LIBS="`$(PKG_CONFIG_HOST_BINARY) --libs freetype2`"
 endef
 
 define CHUMBY_UI_INSTALL_TARGET_CMDS

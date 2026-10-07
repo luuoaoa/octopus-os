@@ -15,7 +15,9 @@
 /*
  * Chumby One (falconwing): 320x240 panel via the DRM fbdev emulation
  * (/dev/fb0; the fbdev driver picks the pixel format at runtime), evdev
- * inputs, libc allocator, no OS layer (single-threaded app).
+ * inputs, libc allocator, no OS layer (single-threaded app). Text is
+ * rendered at runtime by FreeType (Noto Sans); the built-in Montserrat
+ * 14/20 bitmap fonts remain only as fallback for LVGL's symbol glyphs.
  * Derived from LVGL 9.6.0's lv_conf_template.h.
  */
 #if 1 /* Set this to "1" to enable content */
@@ -1037,7 +1039,7 @@
 #define LV_FONT_MONTSERRAT_26 0
 
 /** Montserrat 28 */
-#define LV_FONT_MONTSERRAT_28 1
+#define LV_FONT_MONTSERRAT_28 0
 
 /** Montserrat 30 */
 #define LV_FONT_MONTSERRAT_30 0
@@ -1067,7 +1069,7 @@
 #define LV_FONT_MONTSERRAT_46 0
 
 /** Montserrat 48 */
-#define LV_FONT_MONTSERRAT_48 1
+#define LV_FONT_MONTSERRAT_48 0
 
 /** Montserrat 28 (compressed) */
 #define LV_FONT_MONTSERRAT_28_COMPRESSED 0
@@ -1183,7 +1185,7 @@
 #define LV_USE_IMGFONT 0
 
 /** FreeType */
-#define LV_USE_FREETYPE 0
+#define LV_USE_FREETYPE 1
 
 #if LV_USE_FREETYPE
 /** When enabled, FreeType will use LVGL's memory allocator and file system

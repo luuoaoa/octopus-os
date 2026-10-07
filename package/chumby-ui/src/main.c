@@ -7,7 +7,8 @@
  * Inputs: touchscreen (mxs-lradc-ts via LVGL evdev) and the knob
  * ("rotary", REL_WHEEL), which adjusts the volume. The radio itself is
  * driven through /usr/bin/radio, run as a child process so the UI never
- * blocks (tuner init takes ~2.5 s).
+ * blocks (tuner init takes ~2.5 s). Text is Noto Sans rendered by
+ * FreeType at runtime.
  */
 
 #include <alsa/asoundlib.h>
@@ -38,6 +39,8 @@ extern char **environ;
 #define STATION_FILE	"/etc/radio.station"
 #define RADIO_PIDFILE	"/var/run/radio-loop.pid"
 #define TOUCH_CONF	"/etc/chumby-ui/touch.conf"
+#define FONT_REGULAR	"/usr/share/fonts/noto/NotoSans-Regular.ttf"
+#define FONT_BOLD	"/usr/share/fonts/noto/NotoSans-Bold.ttf"
 #define FREQ_MIN	876	/* tenths of MHz */
 #define FREQ_MAX	1080
 
@@ -51,6 +54,7 @@ static int volume = 70;		/* percent */
 static lv_obj_t *lbl_time, *lbl_date, *lbl_freq, *lbl_radio, *btn_power;
 static lv_obj_t *slider_vol, *lbl_vol, *lbl_status;
 static lv_timer_t *tune_timer;
+static const lv_font_t *f_text, *f_freq, *f_clock;
 
 static int knob_fd = -1;
 
@@ -350,6 +354,37 @@ static void status_cb(lv_timer_t *t)
 }
 
 /* ------------------------------------------------------------------ */
+/* Fonts: Noto Sans via FreeType, Montserrat bitmaps as fallback      */
+
+/*
+ * Noto has no glyphs for LVGL's LV_SYMBOL_* icons (Font Awesome code
+ * points), so each FreeType font falls back to a built-in bitmap font
+ * that has them. If a TTF can't be loaded, the bitmap font is used.
+ */
+static const lv_font_t *noto(const char *path, uint32_t size,
+			     const lv_font_t *fallback)
+{
+	lv_font_t *f = lv_freetype_font_create(path,
+					       LV_FREETYPE_FONT_RENDER_MODE_BITMAP,
+					       size, LV_FREETYPE_FONT_STYLE_NORMAL);
+
+	if (!f) {
+		LV_LOG_WARN("cannot load %s at %u px, using built-in font",
+			    path, (unsigned int)size);
+		return fallback;
+	}
+	f->fallback = fallback;
+	return f;
+}
+
+static void load_fonts(void)
+{
+	f_text = noto(FONT_REGULAR, 15, &lv_font_montserrat_14);
+	f_freq = noto(FONT_BOLD, 34, &lv_font_montserrat_20);
+	f_clock = noto(FONT_BOLD, 52, &lv_font_montserrat_20);
+}
+
+/* ------------------------------------------------------------------ */
 /* UI                                                                 */
 
 static void btn_step_cb(lv_event_t *e)
@@ -387,21 +422,23 @@ static void build_ui(void)
 	lv_obj_t *card, *b, *l;
 
 	lv_obj_set_style_bg_color(scr, lv_color_hex(0x101418), 0);
+	/* Default text font for everything on screen (inherited). */
+	lv_obj_set_style_text_font(scr, f_text, 0);
 	lv_obj_set_scrollable(scr, false);
 
 	lbl_time = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_time, &lv_font_montserrat_48, 0);
+	lv_obj_set_style_text_font(lbl_time, f_clock, 0);
 	lv_obj_set_style_text_color(lbl_time, lv_color_white(), 0);
-	lv_obj_align(lbl_time, LV_ALIGN_TOP_MID, 0, 4);
+	lv_obj_align(lbl_time, LV_ALIGN_TOP_MID, 0, -2);
 
 	lbl_date = lv_label_create(scr);
 	lv_obj_set_style_text_color(lbl_date, lv_color_hex(0x9aa4ae), 0);
-	lv_obj_align(lbl_date, LV_ALIGN_TOP_MID, 0, 60);
+	lv_obj_align(lbl_date, LV_ALIGN_TOP_MID, 0, 64);
 
 	/* FM card: [<] 100.3 MHz [>] [power] */
 	card = lv_obj_create(scr);
-	lv_obj_set_size(card, 308, 92);
-	lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 84);
+	lv_obj_set_size(card, 308, 90);
+	lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 88);
 	lv_obj_set_style_pad_all(card, 6, 0);
 	lv_obj_set_scrollable(card, false);
 
@@ -411,7 +448,7 @@ static void build_ui(void)
 	lv_obj_add_event_cb(b, btn_step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)-1);
 
 	lbl_freq = lv_label_create(card);
-	lv_obj_set_style_text_font(lbl_freq, &lv_font_montserrat_28, 0);
+	lv_obj_set_style_text_font(lbl_freq, f_freq, 0);
 	lv_obj_align(lbl_freq, LV_ALIGN_CENTER, -34, 8);
 
 	l = lv_label_create(card);
@@ -531,6 +568,7 @@ int main(void)
 	if (knob_fd < 0)
 		LV_LOG_WARN("no knob found");
 
+	load_fonts();
 	build_ui();
 	mixer_open();
 	load_station();

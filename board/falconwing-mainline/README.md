@@ -78,6 +78,13 @@ FM station with tune / on-off buttons, volume slider (also on the knob),
 hostname and IP. It switches tty0 to graphics mode so fbcon (the boot log
 on the LCD) doesn't draw over it.
 
+Text is rendered at runtime by FreeType from Noto Sans (package
+font-noto-sans: hinted Regular + Bold TTFs in /usr/share/fonts/noto).
+LVGL's icon glyphs aren't in Noto, so each FreeType font falls back to a
+built-in Montserrat bitmap font for them. No HarfBuzz: LVGL lays text out
+per codepoint, which is fine for Latin/Greek/Cyrillic but not for complex
+scripts.
+
 Touch calibration defaults to the vendor's raw ranges (X 3930..125,
 Y 130..4000). To override, write `min_x min_y max_x max_y [swap_xy]` to
 `/etc/chumby-ui/touch.conf` and `/etc/init.d/S95chumby-ui restart`.
