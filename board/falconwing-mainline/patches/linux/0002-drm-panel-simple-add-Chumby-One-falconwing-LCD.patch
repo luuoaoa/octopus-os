@@ -1,0 +1,62 @@
+From: falconwing bring-up
+Subject: [PATCH] drm/panel: simple: add Chumby One (falconwing) LCD
+
+The Chumby One's 320x240 panel is wired to the i.MX23 LCDIF as an
+18-bit RGB666 DPI panel. panel-dpi can't express the bus format, and
+mxsfb then falls back to a 24-bit bus, so add a panel-simple entry with
+the vendor kernel's timings, polarities and MEDIA_BUS_FMT_RGB666_1X18.
+The bootloader initialises the panel controller, so no init sequence.
+
+---
+diff -urN a/drivers/gpu/drm/panel/panel-simple.c b/drivers/gpu/drm/panel/panel-simple.c
+--- a/drivers/gpu/drm/panel/panel-simple.c	2026-10-07 04:36:41.332242640 -0700
++++ b/drivers/gpu/drm/panel/panel-simple.c	2026-10-07 04:36:41.341446977 -0700
+@@ -1764,6 +1764,38 @@
+ 	.flags = DRM_MODE_FLAG_NVSYNC | DRM_MODE_FLAG_NHSYNC,
+ };
+ 
++/*
++ * Chumby One ("falconwing") built-in 3.5" QVGA panel. Timings are the
++ * vendor kernel's (lcd_lms350.c: 303 ns dot clock, 400x282 total); the
++ * panel controller is initialised by the bootloader, so no init sequence.
++ * Wired to LCD_D00-D17 as RGB666.
++ */
++static const struct drm_display_mode chumby_falconwing_lcd_mode = {
++	.clock = 3300,
++	.hdisplay = 320,
++	.hsync_start = 320 + 5,
++	.hsync_end = 320 + 5 + 69,
++	.htotal = 320 + 5 + 69 + 6,
++	.vdisplay = 240,
++	.vsync_start = 240 + 3,
++	.vsync_end = 240 + 3 + 15,
++	.vtotal = 240 + 3 + 15 + 24,
++	.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
++};
++
++static const struct panel_desc chumby_falconwing_lcd = {
++	.modes = &chumby_falconwing_lcd_mode,
++	.num_modes = 1,
++	.bpc = 6,
++	.size = {
++		.width = 71,
++		.height = 53,
++	},
++	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
++	.bus_flags = DRM_BUS_FLAG_DE_LOW | DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE,
++	.connector_type = DRM_MODE_CONNECTOR_DPI,
++};
++
+ static const struct panel_desc chunghwa_claa070wp03xg = {
+ 	.modes = &chunghwa_claa070wp03xg_mode,
+ 	.num_modes = 1,
+@@ -5161,6 +5193,9 @@
+ 		.compatible = "chefree,ch101olhlwh-002",
+ 		.data = &chefree_ch101olhlwh_002,
+ 	}, {
++		.compatible = "chumby,falconwing-lcd",
++		.data = &chumby_falconwing_lcd,
++	}, {
+ 		.compatible = "chunghwa,claa070wp03xg",
+ 		.data = &chunghwa_claa070wp03xg,
+ 	}, {
