@@ -48,9 +48,45 @@
 				non-removable;
 				status = "okay";
 			};
+
+			pinctrl@80018000 {
+				pinctrl-names = "default";
+				pinctrl-0 = <&chumby_hog_pins>;
+
+				/*
+				 * Board power/reset lines the vendor kernel drove with raw
+				 * PINCTRL writes (drivers/power/stmp37xx/linux.c,
+				 * drivers/usb/host/ehci-arc.c). The bootloader leaves
+				 * them configured; mux them as GPIOs so Linux owns them.
+				 */
+				chumby_hog_pins: chumby-hog@0 {
+					reg = <0>;
+					fsl,pinmux-ids = <
+						MX23_PAD_GPMI_D12__GPIO_0_12	/* LOCAL_5V_ON: USB + wifi 5 V */
+						MX23_PAD_AUART1_CTS__GPIO_0_26	/* USB power enable */
+						MX23_PAD_AUART1_TX__GPIO_0_29	/* USB reset, active low */
+					>;
+					fsl,drive-strength = <MXS_DRIVE_4mA>;
+					fsl,voltage = <MXS_VOLTAGE_HIGH>;
+					fsl,pull-up = <MXS_PULL_DISABLE>;
+				};
+			};
 		};
 
 		apbx-bus@80040000 {
+			/* I2C0 on the dedicated I2C_SCL/SDA pads (B0P30/31):
+			 * QN8005 FM tuner at 0x2b (7-bit), plus the accelerometer. */
+			i2c: i2c@80058000 {
+				pinctrl-names = "default";
+				pinctrl-0 = <&i2c_pins_a>;
+				clock-frequency = <100000>;
+				status = "okay";
+			};
+
+			usbphy0: usbphy@8007c000 {
+				status = "okay";
+			};
+
 			/* DUART on PWM0/PWM1: the 115200 8N1 debug header. */
 			duart: serial@80070000 {
 				pinctrl-names = "default";
@@ -58,5 +94,46 @@
 				status = "okay";
 			};
 		};
+	};
+
+	ahb@80080000 {
+		/* Host-only port: internal hub with the wifi module and the
+		 * external USB socket. */
+		usb0: usb@80080000 {
+			dr_mode = "host";
+			vbus-supply = <&reg_usb_vbus>;
+			status = "okay";
+		};
+	};
+
+	/*
+	 * B0P26 high powers the USB port/hub (vendor ehci-arc power-cycles it
+	 * low -> high before probing, which also helps the wifi enumerate).
+	 * Not boot-on, so the regulator core reproduces that power cycle.
+	 */
+	reg_usb_vbus: regulator-usb-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&gpio0 26 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <100000>;
+	};
+};
+
+&gpio0 {
+	local-5v-on-hog {
+		gpio-hog;
+		gpios = <12 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "local-5v-on";
+	};
+
+	usb-reset-hog {
+		gpio-hog;
+		gpios = <29 GPIO_ACTIVE_LOW>;
+		output-low;	/* deasserted */
+		line-name = "usb-reset-n";
 	};
 };
