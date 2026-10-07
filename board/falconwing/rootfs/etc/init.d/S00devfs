@@ -1,0 +1,30 @@
+#!/bin/sh
+#
+# Populate /dev. The 2.6.28 kernel has no devtmpfs, so: tmpfs on /dev,
+# mdev as the kernel hotplug helper, then a coldplug pass with mdev -s.
+# The static nodes baked into the ext3 image (console, null, ...) are
+# what init and this script run with until the tmpfs goes over them.
+#
+
+case "$1" in
+  start)
+	printf "Populating /dev using mdev: "
+	mount -t tmpfs -o size=512k,mode=0755 mdev /dev || { echo "FAIL"; exit 1; }
+	mkdir -p /dev/pts /dev/shm
+	echo /sbin/mdev > /proc/sys/kernel/hotplug
+	mdev -s
+	ln -sf /proc/self/fd /dev/fd
+	ln -sf /proc/self/fd/0 /dev/stdin
+	ln -sf /proc/self/fd/1 /dev/stdout
+	ln -sf /proc/self/fd/2 /dev/stderr
+	# Everything else in fstab (devpts, /dev/shm, /tmp, /run, /boot).
+	mount -a
+	mkdir -p /run/lock/subsys
+	echo "OK"
+	;;
+  stop)
+	;;
+  *)
+	echo "Usage: $0 {start|stop}"
+	exit 1
+esac

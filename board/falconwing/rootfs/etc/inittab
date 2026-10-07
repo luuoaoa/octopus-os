@@ -1,0 +1,18 @@
+# /etc/inittab for falconwing (busybox init).
+#
+# The stock bootloader passes init=/linuxrc, which is a two-line shell
+# wrapper that execs /sbin/init (this file's reader).
+
+::sysinit:/bin/mount -t proc proc /proc
+::sysinit:/bin/mount -t sysfs sysfs /sys
+# Cmdline mounts root ro; ext3 replays its journal on mount, then go rw.
+::sysinit:/bin/mount -o remount,rw /
+::sysinit:/etc/init.d/rcS
+
+# Serial console (115200 8N1 on the debug header).
+ttyAM0::respawn:/sbin/getty -L ttyAM0 115200 vt100
+
+::ctrlaltdel:/sbin/reboot
+::shutdown:/etc/init.d/rcK
+::shutdown:/sbin/swapoff -a
+::shutdown:/bin/umount -a -r

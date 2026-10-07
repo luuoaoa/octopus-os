@@ -1,0 +1,66 @@
+# Chumby One / Chumby "falconwing" (Freescale i.MX233 = STMP378x, ARM926EJ-S,
+# 64 MB RAM). Userland-only build: the stock 2.6.28-chumby kernel, its
+# bootloader and config block are reused verbatim from a stock SD card
+# image (see board/falconwing/extract-stock.sh). We only produce the
+# ext3 rootfs that the stock kernel mounts as /dev/mmcblk0p2.
+BR2_arm=y
+BR2_arm926t=y
+BR2_ARM_EABI=y
+BR2_DL_DIR="$(BR2_EXTERNAL_PIFANSRF_PATH)/dl"
+
+# Toolchain. glibc refuses to run on a 2.6.28 kernel ("FATAL: kernel too
+# old") and needs >= 3.2 headers, so uClibc-ng. Headers are the oldest
+# series buildroot still offers; < 5.1 also keeps uClibc-ng off the
+# time64 syscalls the 2.6.28 kernel doesn't have.
+BR2_TOOLCHAIN_BUILDROOT_UCLIBC=y
+BR2_KERNEL_HEADERS_VERSION=y
+BR2_DEFAULT_KERNEL_VERSION="3.2.102"
+BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_3_2=y
+
+# System
+BR2_TARGET_GENERIC_HOSTNAME="chumby"
+BR2_TARGET_GENERIC_ISSUE="Welcome to falconwing (buildroot)"
+BR2_TARGET_GENERIC_ROOT_PASSWD="root"
+BR2_INIT_BUSYBOX=y
+# 2.6.28 predates devtmpfs. Static nodes in the ext3 image get init as far
+# as /etc/init.d/S00devfs, which mounts a tmpfs /dev and lets mdev
+# (as the kernel hotplug helper) populate it, load modules by MODALIAS
+# and feed firmware to the wifi drivers.
+BR2_ROOTFS_DEVICE_CREATION_STATIC=y
+# Our own inittab provides the ttyAM0 getty.
+# BR2_TARGET_GENERIC_GETTY is not set
+BR2_SYSTEM_BIN_SH_BUSYBOX=y
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing/rootfs"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing/post-build.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing/post-image.sh"
+
+# No kernel build: the stock 2.6.28-chumby kernel lives in partition 1.
+# BR2_LINUX_KERNEL is not set
+
+# Packages
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing/busybox.config.fragment"
+BR2_PACKAGE_DROPBEAR=y
+# BR2_PACKAGE_DROPBEAR_CLIENT is not set
+BR2_PACKAGE_IW=y
+BR2_PACKAGE_WPA_SUPPLICANT=y
+BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
+# The wifi stack is a 2010 compat-wireless backport; keep WEXT as a
+# fallback driver in case its nl80211 is too old for wpa_supplicant.
+BR2_PACKAGE_WPA_SUPPLICANT_WEXT=y
+BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
+BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y
+# S40network in the board overlay replaces ifupdown + /etc/network/interfaces.
+# BR2_PACKAGE_IFUPDOWN_SCRIPTS is not set
+
+# Root filesystem: ext3, mounted by the stock kernel cmdline
+# (root=/dev/mmcblk0p2 rootfstype=ext3 ro init=/linuxrc).
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_3=y
+BR2_TARGET_ROOTFS_EXT2_LABEL="rootfs"
+BR2_TARGET_ROOTFS_EXT2_SIZE="256M"
+# BR2_TARGET_ROOTFS_TAR is not set
+
+# Host tools for post-image.sh (genimage assembles sdcard.img).
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+BR2_PACKAGE_HOST_GENIMAGE=y
+BR2_PACKAGE_HOST_MTOOLS=y

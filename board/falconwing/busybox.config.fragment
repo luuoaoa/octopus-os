@@ -1,0 +1,9 @@
+# Busybox additions on top of buildroot's default busybox.config.
+#
+# mdev is the kernel hotplug helper (2.6.28 has no devtmpfs, no udev here);
+# the backported wifi drivers request rt73.bin / rt2870.bin through it.
+CONFIG_FEATURE_MDEV_LOAD_FIRMWARE=y
+# Used by S40network to bound the wait for USB wifi enumeration.
+CONFIG_TIMEOUT=y
+# modinfo is handy when poking at the stock module set.
+CONFIG_MODINFO=y

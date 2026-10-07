@@ -1,0 +1,7 @@
+#cloud-config
+hostname: chumby
+# false = key-only SSH (put keys in authorized_keys on this partition).
+ssh_pwauth: true
+# Uncomment to replace the default root password ("root").
+# Generate with: mkpasswd -m sha-512   (or: openssl passwd -6)
+#passwd: $6$salt$hash

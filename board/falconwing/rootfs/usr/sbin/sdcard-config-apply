@@ -1,0 +1,142 @@
+#!/bin/sh
+# Apply the user-editable config from the FAT partition (/boot, p3) to
+# the rootfs. Runs every boot from /etc/init.d/S30sdcard-config; edit the
+# files on the card from any PC and reboot to change settings.
+#
+#   /boot/wpa_supplicant.conf  used verbatim if present (power users), else
+#   /boot/network-config       Pi Imager style; first access point wins:
+#                                wifis:
+#                                  wlan0:
+#                                    access-points:
+#                                      "MySSID":
+#                                        password: "passphrase or 64-hex PSK"
+#                                        hidden: true      # optional
+#   /boot/user-data            hostname: chumby
+#                              ssh_pwauth: true|false  (default true)
+#                              passwd: <crypt hash, e.g. from mkpasswd -m sha-512>
+#   /boot/authorized_keys      installed as /root/.ssh/authorized_keys
+#
+# Same file formats as pifansrf's pi-imager-apply.sh.
+set -u
+
+BOOT=/boot
+log() { echo "sdcard-config: $*"; logger -t sdcard-config "$*" 2>/dev/null; }
+
+strip() {
+    s=${1#"${1%%[![:space:]]*}"}
+    s=${s%"${s##*[![:space:]]}"}
+    s=${s#\"}; s=${s%\"}
+    s=${s#\'}; s=${s%\'}
+    printf '%s' "$s"
+}
+
+# FAT tools sometimes leave CRLF line endings; strip them into a temp copy.
+unix() { tr -d '\r' < "$1"; }
+
+WPA=/etc/wpa_supplicant.conf
+
+if ! mountpoint -q "$BOOT"; then
+    mount "$BOOT" 2>/dev/null || { log "no config partition at $BOOT; nothing to apply"; exit 0; }
+fi
+
+# === WiFi ===
+if [ -f "$BOOT/wpa_supplicant.conf" ]; then
+    unix "$BOOT/wpa_supplicant.conf" > "$WPA.new" && mv "$WPA.new" "$WPA"
+    chmod 600 "$WPA"
+    log "using $BOOT/wpa_supplicant.conf verbatim"
+elif [ -f "$BOOT/network-config" ]; then
+    NET=$(unix "$BOOT/network-config")
+    SSID=$(printf '%s\n' "$NET" | sed -nE '/^[[:space:]]+access-points:/,$ {
+        /access-points:/d
+        s/^[[:space:]]+"([^"]+)":[[:space:]]*$/\1/p
+        s/^[[:space:]]+'"'"'([^'"'"']+)'"'"':[[:space:]]*$/\1/p
+        s/^[[:space:]]+([^"'"'"'[:space:]#][^:]*):[[:space:]]*$/\1/p
+    }' | grep -v '^password$\|^hidden$' | head -1)
+    SSID=$(strip "$SSID")
+    PSK=$(printf '%s\n' "$NET" | sed -nE 's/^[[:space:]]+password:[[:space:]]+(.*)$/\1/p' | head -1)
+    PSK=$(strip "$PSK")
+    HIDDEN=
+    printf '%s\n' "$NET" | grep -qE '^[[:space:]]+hidden:[[:space:]]+true[[:space:]]*$' && HIDDEN=1
+
+    if [ -n "$SSID" ]; then
+        if [ -z "$PSK" ]; then
+            KEY="    key_mgmt=NONE"
+        elif [ ${#PSK} -eq 64 ] && ! printf '%s' "$PSK" | grep -q '[^0-9a-fA-F]'; then
+            KEY="    psk=$PSK"
+        else
+            KEY="    psk=\"$PSK\""
+        fi
+        {
+            echo "ctrl_interface=/var/run/wpa_supplicant"
+            echo "ap_scan=1"
+            echo
+            echo "network={"
+            echo "    ssid=\"$SSID\""
+            echo "$KEY"
+            [ -n "$HIDDEN" ] && echo "    scan_ssid=1"
+            echo "}"
+        } > "$WPA.new" && mv "$WPA.new" "$WPA"
+        chmod 600 "$WPA"
+        log "wifi: ssid=[$SSID] psk_len=${#PSK} hidden=${HIDDEN:-0}"
+    else
+        log "WARN: no access point found in $BOOT/network-config"
+    fi
+else
+    log "no network-config on $BOOT; keeping existing $WPA (if any)"
+fi
+
+# === user-data ===
+SSH_PWAUTH=true
+if [ -f "$BOOT/user-data" ]; then
+    USR=$(unix "$BOOT/user-data")
+
+    HOST=$(strip "$(printf '%s\n' "$USR" | sed -nE 's/^hostname:[[:space:]]+(.*)$/\1/p' | head -1)")
+    if [ -n "$HOST" ]; then
+        echo "$HOST" > /etc/hostname
+        hostname "$HOST"
+        log "hostname=$HOST"
+    fi
+
+    V=$(strip "$(printf '%s\n' "$USR" | sed -nE 's/^ssh_pwauth:[[:space:]]+(.*)$/\1/p' | head -1)")
+    case "$V" in
+        false|False|FALSE|no|0) SSH_PWAUTH=false ;;
+    esac
+
+    PW=$(printf '%s\n' "$USR" | sed -nE 's/^[[:space:]]*passwd:[[:space:]]+"?(\$[0-9a-zA-Z]+\$[^"[:space:]]+)"?[[:space:]]*$/\1/p' | head -1)
+    if [ -n "$PW" ]; then
+        case "$PW" in
+            *\$*\$*\$*)
+                if awk -F: -v OFS=: -v h="$PW" '$1=="root"{$2=h} 1' /etc/shadow > /etc/shadow.new \
+                   && [ -s /etc/shadow.new ]; then
+                    chmod 600 /etc/shadow.new
+                    mv /etc/shadow.new /etc/shadow
+                    log "root password hash updated from user-data"
+                else
+                    rm -f /etc/shadow.new
+                    log "WARN: failed to rewrite /etc/shadow"
+                fi
+                ;;
+            *) log "WARN: passwd: is not a \$id\$salt\$hash crypt string; ignoring" ;;
+        esac
+    fi
+fi
+
+# === SSH ===
+if [ -f "$BOOT/authorized_keys" ]; then
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+    unix "$BOOT/authorized_keys" > /root/.ssh/authorized_keys
+    chmod 600 /root/.ssh/authorized_keys
+    log "installed $(grep -c . /root/.ssh/authorized_keys) authorized key(s)"
+fi
+
+if [ "$SSH_PWAUTH" = true ]; then
+    echo 'DROPBEAR_ARGS=""' > /etc/default/dropbear
+    log "ssh: password logins enabled"
+else
+    # -s: disable password logins, -g: disable them for root too.
+    echo 'DROPBEAR_ARGS="-s -g"' > /etc/default/dropbear
+    log "ssh: key-only logins"
+fi
+
+exit 0

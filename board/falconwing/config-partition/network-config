@@ -1,0 +1,10 @@
+# WiFi settings. Replace MySSID / MyPassphrase with your network.
+# password may be the passphrase or the 64-hex-digit PSK from wpa_passphrase.
+# Add "hidden: true" under password for a hidden SSID.
+version: 2
+wifis:
+  wlan0:
+    dhcp4: true
+    access-points:
+      "MySSID":
+        password: "MyPassphrase"
