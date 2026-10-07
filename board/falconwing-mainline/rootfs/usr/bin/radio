@@ -1,0 +1,103 @@
+#!/bin/sh
+# Chumby One FM radio on the mainline kernel.
+#
+#   - tuner: QN8005B on /dev/i2c-0 (7-bit 0x2b), driven by qn8005
+#   - audio: tuner output -> codec LINE1. Either digitised by the ADC and
+#     looped capture -> playback (speaker + headphones, like the stock
+#     firmware), or with "--bypass" routed analog-only to the headphone
+#     amp through the codec's HP Mux (no CPU, headphones only).
+#
+# Usage:
+#   radio on [MHz] [--bypass]   init tuner, route audio (default: last station)
+#   radio tune <MHz>
+#   radio off
+#   radio scan [us|eu|jp]
+#   radio vol <0-100>           DAC / HP volume
+#   radio status
+#
+# If tuning works but nothing is received, create an empty "fmradio_xclk"
+# file on the CHUMBY config partition (clocks the tuner from the SoC PWM3).
+
+STATION_FILE=/etc/radio.station
+PIDFILE=/var/run/radio-loop.pid
+PCM=plughw:0,0
+
+die() { echo "radio: $*" >&2; exit 1; }
+
+loop_running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+
+start_loop() {
+	loop_running && return 0
+	setsid sh -c "exec arecord -q -D $PCM -f cd -t raw 2>/dev/null | aplay -q -D $PCM -f cd -t raw 2>/dev/null" &
+	echo $! > "$PIDFILE"
+}
+
+stop_loop() {
+	[ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
+	rm -f "$PIDFILE"
+	killall arecord aplay 2>/dev/null
+}
+
+tune() {
+	qn8005 tune "$1" || die "tune failed"
+	echo "$1" > "$STATION_FILE"
+}
+
+case "$1" in
+	on)
+		shift
+		freq=; bypass=
+		for a in "$@"; do
+			case "$a" in
+				--bypass) bypass=1 ;;
+				*) freq=$a ;;
+			esac
+		done
+		modprobe i2c-dev 2>/dev/null
+		xclk=; [ -e /boot/fmradio_xclk ] && xclk=--xclk
+		qn8005 init $xclk || die "tuner init failed (is /dev/i2c-0 there?)"
+		freq=${freq:-$(cat "$STATION_FILE" 2>/dev/null)}
+		tune "${freq:-100.3}"
+		if [ -n "$bypass" ]; then
+			stop_loop
+			amixer -q sset 'HP Mux' 'Line In 1'
+			amixer -q sset 'HP Playback Volume' 80%
+		else
+			amixer -q sset 'HP Mux' 'DAC'
+			amixer -q sset 'Left ADC Mux' 'Line In 1'
+			amixer -q sset 'Right ADC Mux' 'Line In 1'
+			amixer -q sset 'ADC PGA Capture Switch' on
+			amixer -q sset 'DAC Playback Volume' 90% unmute
+			start_loop
+		fi
+		echo "radio: on, ${freq:-100.3} MHz${bypass:+ (headphone bypass)}"
+		;;
+	tune)
+		[ -n "$2" ] || die "usage: radio tune <MHz>"
+		tune "$2"
+		;;
+	off)
+		stop_loop
+		qn8005 mute 2>/dev/null
+		amixer -q sset 'HP Mux' 'DAC'
+		amixer -q sset 'Left ADC Mux' 'Mic'
+		amixer -q sset 'Right ADC Mux' 'Mic'
+		echo "radio: off"
+		;;
+	scan)
+		qn8005 scan "$2"
+		;;
+	vol)
+		[ -n "$2" ] || die "usage: radio vol <0-100>"
+		amixer -q sset 'DAC Playback Volume' "$2%"
+		amixer -q sset 'HP Playback Volume' "$2%"
+		;;
+	status)
+		if loop_running; then echo "audio loop: running"; else echo "audio loop: stopped"; fi
+		echo "station: $(qn8005 freq 2>/dev/null || cat "$STATION_FILE" 2>/dev/null) MHz, rssi $(qn8005 rssi 2>/dev/null)"
+		;;
+	*)
+		sed -n '/^# Usage:/,/^$/s/^# \{0,1\}//p' "$0"
+		exit 1
+		;;
+esac

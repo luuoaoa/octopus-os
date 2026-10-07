@@ -1,0 +1,6 @@
+config BR2_PACKAGE_QN8005
+	bool "qn8005"
+	help
+	  Userland control for the Quintic QN8005 FM tuner in the Chumby
+	  One (init, tune, mute, scan, register access) over i2c-dev.
+	  Register sequences follow Chumby's stock fmradio tool.
