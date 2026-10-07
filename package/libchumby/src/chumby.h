@@ -29,6 +29,18 @@
 extern "C" {
 #endif
 
+/* Screen geometry: chumby-wm's left panel and the app area beside it. */
+#define CHUMBY_SCREEN_W	320
+#define CHUMBY_SCREEN_H	240
+#define CHUMBY_PANEL_W	64
+#define CHUMBY_APP_W	(CHUMBY_SCREEN_W - CHUMBY_PANEL_W)
+
+/*
+ * Minimum touch target on the resistive panel (~9 mm). Anything a finger
+ * must hit should be at least this big in both directions.
+ */
+#define CHUMBY_TOUCH_MIN	42
+
 typedef enum {
 	CHUMBY_MODE_DAY,	/* dark theme */
 	CHUMBY_MODE_NIGHT,	/* darker, warm, low-glare theme */
@@ -70,6 +82,7 @@ lv_obj_t *chumby_app_init(const char *app_id);
 /* Lower level, for the shell: framework init, then any number of windows. */
 void chumby_init(void);
 lv_display_t *chumby_window_create(const char *app_id, int width, int height);
+void chumby_window_close(lv_display_t *disp);
 
 /* Run until every window is closed. */
 int chumby_run(void);

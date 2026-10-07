@@ -300,10 +300,23 @@ lv_display_t *chumby_window_create(const char *app_id, int width, int height)
 	return disp;
 }
 
+void chumby_window_close(lv_display_t *disp)
+{
+	int i;
+
+	for (i = 0; i < n_windows; i++) {
+		if (windows[i] != disp)
+			continue;
+		windows[i] = windows[--n_windows];
+		lv_wayland_window_close(disp);
+		return;
+	}
+}
+
 lv_obj_t *chumby_app_init(const char *app_id)
 {
 	/* chumby-wm resizes app windows to the area right of the panel. */
-	lv_display_t *disp = chumby_window_create(app_id, 264, 240);
+	lv_display_t *disp = chumby_window_create(app_id, CHUMBY_APP_W, CHUMBY_SCREEN_H);
 
 	if (!disp) {
 		fprintf(stderr, "%s: cannot open a Wayland window "

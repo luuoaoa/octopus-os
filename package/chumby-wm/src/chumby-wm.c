@@ -5,6 +5,8 @@
  *
  * Window policy, keyed on the xdg app_id:
  *   "chumby-panel"  pinned to the left edge, PANEL_W wide, always on top
+ *   "chumby-popup"  the shell's transient controls (volume, brightness):
+ *                   over the app area, above apps, below the panel
  *   "chumby-home"   the app list, behind every app (background layer)
  *   anything else   an app: maximized into the area right of the panel,
  *                   one visible at a time (the most recently activated)
@@ -43,12 +45,13 @@
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
 
-#define PANEL_W		56
+#define PANEL_W		64	/* big enough for resistive-touch buttons */
 #define APP_PANEL	"chumby-panel"
 #define APP_HOME	"chumby-home"
+#define APP_POPUP	"chumby-popup"
 #define MAX_TOUCH	10
 
-enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_APP };
+enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_APP };
 
 struct server {
 	struct wl_display *display;
@@ -59,8 +62,8 @@ struct server {
 	struct wlr_scene_output_layout *scene_layout;
 	struct wlr_output_layout *output_layout;
 
-	/* Stacking: home below apps below panel. */
-	struct wlr_scene_tree *home_tree, *apps_tree, *panel_tree;
+	/* Stacking: home < apps < popup < panel. */
+	struct wlr_scene_tree *home_tree, *apps_tree, *popup_tree, *panel_tree;
 
 	struct wlr_xdg_shell *xdg_shell;
 	struct wl_listener new_xdg_toplevel;
@@ -117,6 +120,10 @@ static void view_configure(struct view *v)
 	case VIEW_PANEL:
 		wlr_scene_node_set_position(&v->tree->node, 0, 0);
 		wlr_xdg_toplevel_set_size(v->xdg, PANEL_W, s->height);
+		break;
+	case VIEW_POPUP:
+		wlr_scene_node_set_position(&v->tree->node, PANEL_W, 0);
+		wlr_xdg_toplevel_set_size(v->xdg, s->width - PANEL_W, s->height);
 		break;
 	case VIEW_HOME:
 	case VIEW_APP:
@@ -304,6 +311,9 @@ static void view_commit(struct wl_listener *l, void *data)
 	} else if (!strcmp(id, APP_HOME)) {
 		v->kind = VIEW_HOME;
 		wlr_scene_node_reparent(&v->tree->node, s->home_tree);
+	} else if (!strcmp(id, APP_POPUP)) {
+		v->kind = VIEW_POPUP;
+		wlr_scene_node_reparent(&v->tree->node, s->popup_tree);
 	} else {
 		v->kind = VIEW_APP;
 	}
@@ -778,6 +788,7 @@ int main(int argc, char **argv)
 			      (float[4]){ 0.06f, 0.08f, 0.09f, 1.0f });
 	s.home_tree = wlr_scene_tree_create(&s.scene->tree);
 	s.apps_tree = wlr_scene_tree_create(&s.scene->tree);
+	s.popup_tree = wlr_scene_tree_create(&s.scene->tree);
 	s.panel_tree = wlr_scene_tree_create(&s.scene->tree);
 
 	wl_list_init(&s.views);

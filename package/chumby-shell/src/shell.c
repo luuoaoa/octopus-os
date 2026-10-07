@@ -2,9 +2,11 @@
 /*
  * chumby-shell: the Chumby One's system UI on chumby-wm.
  *
- *   panel (app_id "chumby-panel", left edge, 56 px):
+ *   panel (app_id "chumby-panel", left edge, CHUMBY_PANEL_W):
  *     home button, an icon per running app (tap: switch, long press:
- *     close), quick volume and brightness sliders
+ *     close), volume and brightness buttons
+ *   popup (app_id "chumby-popup", over the app area, transient): the
+ *     volume or brightness control, opened from the panel or the knob
  *   home (app_id "chumby-home", behind all apps): the list of installed
  *     apps, one ".app" descriptor each in /usr/share/chumby/apps
  *
@@ -17,6 +19,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <linux/input.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,7 +32,6 @@
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 
 #define APPS_DIR	"/usr/share/chumby/apps"
-#define PANEL_W		56
 #define MAX_APPS	16
 
 /* ------------------------------------------------------------------ */
@@ -322,8 +324,25 @@ static void launch(struct app_info *a)
 /* ------------------------------------------------------------------ */
 /* Panel                                                              */
 
+/*
+ * Everything here is sized for a resistive touchscreen: panel buttons are
+ * the panel's full usable width and at least CHUMBY_TOUCH_MIN tall, and
+ * values are changed in a big popup (tap-to-set bar, - / + buttons)
+ * rather than with small sliders.
+ */
+#define BTN_W		(CHUMBY_PANEL_W - 8)
+#define BTN_H		CHUMBY_TOUCH_MIN
+#define POPUP_IDLE_MS	6000
+
 static lv_obj_t *panel_scr, *home_scr;
-static lv_obj_t *btn_home, *slider_vol, *slider_bri, *lbl_vol, *lbl_bri;
+static lv_obj_t *btn_home, *btn_vol, *btn_bri;
+static int volume_pct = 50;	/* cached: the mixer may not exist yet */
+
+enum popup_kind { POPUP_NONE, POPUP_VOLUME, POPUP_BRIGHTNESS };
+static enum popup_kind popup_kind;
+static lv_display_t *popup_disp;
+static lv_obj_t *popup_bar, *popup_value;
+static lv_timer_t *popup_timer;
 
 static void app_btn_cb(lv_event_t *e)
 {
@@ -341,18 +360,24 @@ static void app_btn_cb(lv_event_t *e)
 	wl_display_flush(wl);
 }
 
+/* Colors come from the libchumby theme; "active" is the only local style. */
+static void set_active(lv_obj_t *b, bool active)
+{
+	if (active)
+		lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	else
+		lv_obj_remove_local_style_prop(b, LV_STYLE_BG_COLOR, 0);
+}
+
 static lv_obj_t *icon_button(lv_obj_t *parent, const char *sym, bool active)
 {
 	lv_obj_t *b = lv_button_create(parent);
 	lv_obj_t *l = lv_label_create(b);
 
-	lv_obj_set_size(b, 46, 40);
-	lv_obj_set_style_radius(b, 8, 0);
-	lv_obj_set_style_shadow_width(b, 0, 0);
-	/* Colors come from the libchumby theme; only "active" is local. */
-	if (active)
-		lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-	lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
+	lv_obj_set_size(b, BTN_W, BTN_H);
+	lv_obj_set_style_radius(b, 10, 0);
+	set_active(b, active);
+	lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
 	lv_label_set_text(l, sym);
 	lv_obj_center(l);
 	return b;
@@ -376,9 +401,7 @@ static void panel_rebuild(void)
 		lv_obj_add_event_cb(b, app_btn_cb, LV_EVENT_LONG_PRESSED, t);
 	}
 	/* Home is "active" when no app is in front. */
-	lv_obj_set_style_bg_color(btn_home, any_active ?
-				  chumby_color(CHUMBY_COLOR_SURFACE) :
-				  chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	set_active(btn_home, !any_active);
 }
 
 static void home_btn_cb(lv_event_t *e)
@@ -387,33 +410,174 @@ static void home_btn_cb(lv_event_t *e)
 	show_home();
 }
 
-static void vol_cb(lv_event_t *e)
+/* ------------------------------------------------------------------ */
+/* Volume / brightness popup ("chumby-popup", over the app area)      */
+
+static void quick_buttons_update(void)
 {
-	(void)e;
-	chumby_volume_set(lv_slider_get_value(slider_vol));
+	set_active(btn_vol, popup_kind == POPUP_VOLUME);
+	set_active(btn_bri, popup_kind == POPUP_BRIGHTNESS);
 }
 
-static void bri_cb(lv_event_t *e)
+static int popup_get(void)
 {
-	(void)e;
-	chumby_brightness_set(lv_slider_get_value(slider_bri));
+	return popup_kind == POPUP_VOLUME ? volume_pct : chumby_brightness_get();
 }
 
-static lv_obj_t *vslider(lv_obj_t *parent, lv_event_cb_t cb)
+/* Keep the popup up while it's being used; it closes after POPUP_IDLE_MS. */
+static void popup_keepalive(void)
 {
-	lv_obj_t *s = lv_slider_create(parent);
+	lv_timer_reset(popup_timer);
+	lv_timer_resume(popup_timer);
+}
 
-	lv_obj_set_size(s, 10, 72);
-	lv_slider_set_range(s, 0, 100);
-	lv_obj_set_ext_click_area(s, 8);
-	lv_obj_add_event_cb(s, cb, LV_EVENT_VALUE_CHANGED, NULL);
-	return s;
+static void popup_set(int v)
+{
+	int min = popup_kind == POPUP_BRIGHTNESS ? 5 : 0;
+
+	if (v < min)
+		v = min;
+	if (v > 100)
+		v = 100;
+	if (popup_kind == POPUP_VOLUME) {
+		volume_pct = v;
+		chumby_volume_set(v);
+	} else {
+		chumby_brightness_set(v);
+	}
+	if (popup_bar) {
+		lv_slider_set_value(popup_bar, v, LV_ANIM_OFF);
+		lv_label_set_text_fmt(popup_value, "%d%%", v);
+	}
+	popup_keepalive();
+}
+
+static void popup_close(void)
+{
+	if (!popup_disp)
+		return;
+	chumby_window_close(popup_disp);
+	popup_disp = NULL;
+	popup_bar = popup_value = NULL;
+	popup_kind = POPUP_NONE;
+	lv_timer_pause(popup_timer);
+	quick_buttons_update();
+}
+
+static void popup_timer_cb(lv_timer_t *t)
+{
+	(void)t;
+	popup_close();
+}
+
+static void popup_bar_cb(lv_event_t *e)
+{
+	if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED)
+		popup_set(lv_slider_get_value(popup_bar));
+	else
+		popup_keepalive();	/* pressing/dragging */
+}
+
+/* - / + : 10 % steps, snapping to multiples of 10. */
+static void popup_step_cb(lv_event_t *e)
+{
+	int dir = (int)(intptr_t)lv_event_get_user_data(e);
+	int v = popup_get();
+
+	popup_set(dir > 0 ? (v / 10 + 1) * 10 : ((v + 9) / 10 - 1) * 10);
+}
+
+static void popup_bg_cb(lv_event_t *e)
+{
+	(void)e;
+	popup_close();
+}
+
+static lv_obj_t *popup_button(lv_obj_t *parent, const char *sym, int dir)
+{
+	lv_obj_t *b = lv_button_create(parent);
+	lv_obj_t *l = lv_label_create(b);
+
+	lv_obj_set_size(b, 108, 60);
+	lv_obj_set_style_radius(b, 12, 0);
+	lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
+	lv_label_set_text(l, sym);
+	lv_obj_center(l);
+	lv_obj_add_event_cb(b, popup_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)dir);
+	lv_obj_add_event_cb(b, popup_step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)dir);
+	return b;
+}
+
+static void popup_open(enum popup_kind kind)
+{
+	bool vol = kind == POPUP_VOLUME;
+	lv_obj_t *scr, *icon, *title;
+
+	if (popup_kind == kind && popup_disp) {
+		popup_keepalive();
+		return;
+	}
+	if (!popup_disp) {
+		popup_disp = chumby_window_create("chumby-popup", CHUMBY_APP_W, CHUMBY_SCREEN_H);
+		if (!popup_disp)
+			return;
+	}
+	popup_kind = kind;
+	scr = lv_display_get_screen_active(popup_disp);
+	lv_obj_clean(scr);
+	lv_obj_set_scrollable(scr, false);
+	/* Tapping empty space closes; widgets don't bubble their clicks up. */
+	lv_obj_add_event_cb(scr, popup_bg_cb, LV_EVENT_CLICKED, NULL);
+
+	icon = lv_label_create(scr);
+	lv_label_set_text(icon, vol ? LV_SYMBOL_VOLUME_MAX : LV_SYMBOL_EYE_OPEN);
+	lv_obj_set_style_text_font(icon, &lv_font_montserrat_28, 0);
+	lv_obj_set_style_text_color(icon, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_align(icon, LV_ALIGN_TOP_LEFT, 16, 20);
+
+	title = lv_label_create(scr);
+	lv_label_set_text(title, vol ? "Volume" : "Brightness");
+	lv_obj_set_style_text_font(title, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_align(title, LV_ALIGN_TOP_LEFT, 56, 18);
+
+	popup_value = lv_label_create(scr);
+	lv_obj_set_style_text_font(popup_value, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_style_text_color(popup_value, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_align(popup_value, LV_ALIGN_TOP_RIGHT, -16, 18);
+
+	/* A thick bar: tapping anywhere on it sets the value, no knob to aim at. */
+	popup_bar = lv_slider_create(scr);
+	lv_obj_set_size(popup_bar, CHUMBY_APP_W - 32, 52);
+	lv_obj_align(popup_bar, LV_ALIGN_TOP_MID, 0, 80);
+	lv_slider_set_range(popup_bar, vol ? 0 : 5, 100);
+	lv_obj_set_style_radius(popup_bar, 12, LV_PART_MAIN);
+	lv_obj_set_style_radius(popup_bar, 12, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_opa(popup_bar, LV_OPA_TRANSP, LV_PART_KNOB);
+	lv_obj_set_style_pad_all(popup_bar, 0, LV_PART_KNOB);
+	lv_obj_set_ext_click_area(popup_bar, 12);
+	lv_obj_add_event_cb(popup_bar, popup_bar_cb, LV_EVENT_VALUE_CHANGED, NULL);
+	lv_obj_add_event_cb(popup_bar, popup_bar_cb, LV_EVENT_PRESSING, NULL);
+
+	lv_obj_align(popup_button(scr, LV_SYMBOL_MINUS, -1), LV_ALIGN_BOTTOM_LEFT, 16, -20);
+	lv_obj_align(popup_button(scr, LV_SYMBOL_PLUS, 1), LV_ALIGN_BOTTOM_RIGHT, -16, -20);
+
+	popup_set(popup_get());
+	quick_buttons_update();
+}
+
+/* Panel button: open its popup, or close it if it's already showing. */
+static void quick_btn_cb(lv_event_t *e)
+{
+	enum popup_kind kind = (enum popup_kind)(intptr_t)lv_event_get_user_data(e);
+
+	if (popup_kind == kind)
+		popup_close();
+	else
+		popup_open(kind);
 }
 
 static void build_panel(lv_obj_t *scr)
 {
-	lv_obj_t *quick, *col, *l;
-
 	lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(scr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
@@ -424,6 +588,7 @@ static void build_panel(lv_obj_t *scr)
 	btn_home = icon_button(scr, LV_SYMBOL_HOME, true);
 	lv_obj_add_event_cb(btn_home, home_btn_cb, LV_EVENT_CLICKED, NULL);
 
+	/* Running apps: two fit; more scroll. */
 	panel_apps = lv_obj_create(scr);
 	lv_obj_remove_style_all(panel_apps);
 	lv_obj_set_width(panel_apps, LV_PCT(100));
@@ -434,36 +599,15 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_set_style_pad_row(panel_apps, 4, 0);
 	lv_obj_set_scroll_dir(panel_apps, LV_DIR_VER);
 
-	/* Quick controls: volume | brightness */
-	quick = lv_obj_create(scr);
-	lv_obj_remove_style_all(quick);
-	lv_obj_set_size(quick, LV_PCT(100), 96);
-	lv_obj_set_flex_flow(quick, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(quick, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
-			      LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_scrollable(quick, false);
+	btn_vol = icon_button(scr, LV_SYMBOL_VOLUME_MAX, false);
+	lv_obj_add_event_cb(btn_vol, quick_btn_cb, LV_EVENT_CLICKED,
+			    (void *)(intptr_t)POPUP_VOLUME);
+	btn_bri = icon_button(scr, LV_SYMBOL_EYE_OPEN, false);
+	lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
+			    (void *)(intptr_t)POPUP_BRIGHTNESS);
 
-	col = lv_obj_create(quick);
-	lv_obj_remove_style_all(col);
-	lv_obj_set_size(col, 22, 96);
-	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(col, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_row(col, 4, 0);
-	slider_vol = vslider(col, vol_cb);
-	lbl_vol = l = lv_label_create(col);
-	lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
-	lv_label_set_text(l, LV_SYMBOL_VOLUME_MAX);
-
-	col = lv_obj_create(quick);
-	lv_obj_remove_style_all(col);
-	lv_obj_set_size(col, 22, 96);
-	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(col, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_row(col, 4, 0);
-	slider_bri = vslider(col, bri_cb);
-	lbl_bri = l = lv_label_create(col);
-	lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
-	lv_label_set_text(l, LV_SYMBOL_EYE_OPEN);
+	popup_timer = lv_timer_create(popup_timer_cb, POPUP_IDLE_MS, NULL);
+	lv_timer_pause(popup_timer);
 }
 
 /* ------------------------------------------------------------------ */
@@ -499,15 +643,14 @@ static void build_home(lv_obj_t *scr)
 	for (i = 0; i < n_apps; i++) {
 		lv_obj_t *tile = lv_button_create(grid), *ic, *nm;
 
-		lv_obj_set_size(tile, 116, 84);
+		/* Two big tiles per row. */
+		lv_obj_set_size(tile, (CHUMBY_APP_W - 3 * 8) / 2, 84);
 		lv_obj_set_style_radius(tile, 12, 0);
-		lv_obj_set_style_shadow_width(tile, 0, 0);
-		lv_obj_set_style_bg_color(tile, chumby_color(CHUMBY_COLOR_SURFACE), 0);
 		lv_obj_add_event_cb(tile, tile_cb, LV_EVENT_CLICKED, &apps[i]);
 
 		ic = lv_label_create(tile);
 		lv_label_set_text(ic, apps[i].icon);
-		lv_obj_set_style_text_font(ic, &lv_font_montserrat_20, 0);
+		lv_obj_set_style_text_font(ic, &lv_font_montserrat_28, 0);
 		lv_obj_set_style_text_color(ic, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 		lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, 6);
 
@@ -534,12 +677,18 @@ static void on_mode(chumby_mode_t mode, void *user)
 		build_home(home_scr);
 	}
 	panel_rebuild();
+	quick_buttons_update();
 	/* Apply the policy brightness on each switch (and at start); the
-	 * slider can override it until the next switch. */
+	 * brightness popup can override it until the next switch. */
 	chumby_brightness_set(mode == CHUMBY_MODE_NIGHT ? p->night_brightness
 							 : p->day_brightness);
-	if (slider_bri)
-		lv_slider_set_value(slider_bri, chumby_brightness_get(), LV_ANIM_OFF);
+	/* Rebuild an open popup in the new colors. */
+	if (popup_disp) {
+		enum popup_kind kind = popup_kind;
+
+		popup_kind = POPUP_NONE;
+		popup_open(kind);
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -566,7 +715,7 @@ static int find_input(const char *name)
 static void knob_readable(int fd, void *user)
 {
 	struct input_event ev;
-	int wheel = 0, v;
+	int wheel = 0;
 
 	(void)user;
 	while (read(fd, &ev, sizeof(ev)) == sizeof(ev))
@@ -574,13 +723,29 @@ static void knob_readable(int fd, void *user)
 			wheel += ev.value;
 	if (!wheel)
 		return;
-	v = lv_slider_get_value(slider_vol) + wheel * 2;
-	if (v < 0)
-		v = 0;
-	if (v > 100)
-		v = 100;
-	lv_slider_set_value(slider_vol, v, LV_ANIM_OFF);
-	chumby_volume_set(v);
+	/* Show the volume popup as feedback while the knob turns. */
+	popup_open(POPUP_VOLUME);
+	popup_set(volume_pct + wheel * 2);
+}
+
+/*
+ * Debug/automation: SIGUSR1 opens the volume popup, SIGUSR2 brightness
+ * (e.g. `killall -USR1 chumby-shell` over ssh, or to screenshot it).
+ */
+static volatile sig_atomic_t popup_request;
+
+static void popup_signal(int sig)
+{
+	popup_request = sig == SIGUSR1 ? POPUP_VOLUME : POPUP_BRIGHTNESS;
+}
+
+static void popup_request_cb(lv_timer_t *t)
+{
+	(void)t;
+	if (popup_request) {
+		popup_open((enum popup_kind)popup_request);
+		popup_request = 0;
+	}
 }
 
 /* Reap apps we launched once they exit. */
@@ -597,7 +762,7 @@ static void volume_sync_cb(lv_timer_t *t)
 	int v = chumby_volume_get();
 
 	if (v >= 0) {
-		lv_slider_set_value(slider_vol, v, LV_ANIM_OFF);
+		volume_pct = v;
 		lv_timer_delete(t);
 	}
 }
@@ -610,8 +775,8 @@ int main(void)
 	load_apps();
 	ftl_init();
 
-	home = chumby_window_create("chumby-home", 320 - PANEL_W, 240);
-	panel = chumby_window_create("chumby-panel", PANEL_W, 240);
+	home = chumby_window_create("chumby-home", CHUMBY_APP_W, CHUMBY_SCREEN_H);
+	panel = chumby_window_create("chumby-panel", CHUMBY_PANEL_W, CHUMBY_SCREEN_H);
 	if (!home || !panel) {
 		fprintf(stderr, "chumby-shell: cannot create windows\n");
 		return 1;
@@ -625,6 +790,9 @@ int main(void)
 	chumby_watch_fd(find_input("rotary"), knob_readable, NULL);
 	lv_timer_ready(lv_timer_create(volume_sync_cb, 2000, NULL));
 	lv_timer_create(reaper_cb, 1000, NULL);
+	signal(SIGUSR1, popup_signal);
+	signal(SIGUSR2, popup_signal);
+	lv_timer_create(popup_request_cb, 100, NULL);
 
 	return chumby_run();
 }

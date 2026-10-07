@@ -16,8 +16,8 @@
  * libchumby: LVGL for Chumby One Wayland clients (chumby-wm). wl_shm
  * windows (no GPU), input from the compositor's seat, libc allocator, no
  * OS layer (each app is single-threaded). Text is rendered at runtime by
- * FreeType (Noto Sans); the built-in Montserrat 14/20 bitmap fonts remain
- * only as fallback for LVGL's symbol glyphs. Gesture recognition stays
+ * FreeType (Noto Sans); the built-in Montserrat 14/20/28 bitmap fonts
+ * remain only for LVGL's symbol glyphs (fallback, and big touch icons). Gesture recognition stays
  * off: the Wayland touch driver then routes touches per window, which the
  * shell (two windows in one process) relies on.
  * Derived from LVGL 9.6.0's lv_conf_template.h.
@@ -1041,7 +1041,7 @@
 #define LV_FONT_MONTSERRAT_26 0
 
 /** Montserrat 28 */
-#define LV_FONT_MONTSERRAT_28 0
+#define LV_FONT_MONTSERRAT_28 1
 
 /** Montserrat 30 */
 #define LV_FONT_MONTSERRAT_30 0

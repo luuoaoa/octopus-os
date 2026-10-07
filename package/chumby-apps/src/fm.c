@@ -160,7 +160,7 @@ static lv_obj_t *round_button(lv_obj_t *parent, const char *sym, int size)
 	lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
 	lv_label_set_text(l, sym);
-	lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
+	lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
 	lv_obj_center(l);
 	return b;
 }

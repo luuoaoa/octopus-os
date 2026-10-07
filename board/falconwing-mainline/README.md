@@ -77,21 +77,30 @@ radio off
  │ ⌂  │                          │     owns DRM + input, places windows
  │ ♪  │   active app             │   chumby-shell
  │ 🔔 │   (maximized, one at a   │     panel: home, running apps,
- │    │    time) or the home     │            volume | brightness
- │ ▮▮ │    app list behind       │     home:  installed apps
+ │ 🔊 │    time) or the home     │            volume, brightness
+ │ 👁 │    app list behind       │     home:  installed apps
  └────┴──────────────────────────┘   apps: chumby-clock, chumby-fm, ...
 ```
 
+Sized for the resistive touchscreen: every touch target is at least 42 px
+(~9 mm) in both directions (`CHUMBY_TOUCH_MIN` in chumby.h); the panel is
+64 px wide so its buttons are 56x42.
+
 - **chumby-wm** (package/chumby-wm): ~800-line compositor on wlroots,
   built without EGL/GBM (package/wlroots-pixman: pixman renderer, DRM dumb
-  buffers). Window policy by xdg app_id: `chumby-panel` pinned left (56 px),
-  `chumby-home` behind everything, any other window is an app maximized
-  into the rest. Apps are exported via wlr-foreign-toplevel-management;
+  buffers). Window policy by xdg app_id: `chumby-panel` pinned left (64 px),
+  `chumby-home` behind everything, `chumby-popup` (the shell's transient
+  controls) over the app area, any other window is an app maximized into
+  the rest. Apps are exported via wlr-foreign-toplevel-management;
   screencopy is enabled for `chumby-screenshot > shot.ppm`.
 - **chumby-shell** (package/chumby-shell): panel + home windows. Tap an
-  icon to switch, long-press to close, ⌂ minimizes all (shows home). Quick
-  volume and brightness sliders; the knob is volume anywhere. Started with
-  the compositor by `/etc/init.d/S95chumby-session` (log in
+  icon to switch, long-press to close, ⌂ minimizes all (shows home). The
+  volume and brightness buttons open a big popup over the app area: a thick
+  bar you tap to set (no knob to aim at) and - / + buttons in 10 % steps;
+  it closes on the same button, a tap on empty space, or after 6 s idle.
+  Turning the knob changes the volume from anywhere and shows the popup.
+  `killall -USR1 chumby-shell` / `-USR2` opens the popups (debugging).
+  Started with the compositor by `/etc/init.d/S95chumby-session` (log in
   /var/log/chumby-session.log).
 - **libchumby** (package/libchumby): the framework every app links. LVGL
   9.6 on Wayland (wl_shm), Noto Sans via FreeType (Montserrat bitmaps only
@@ -107,7 +116,7 @@ radio off
 (`night_start = 19:00`, `night_end = 07:00`, `mode = auto|day|night`,
 `day_brightness`, `night_brightness`) is re-read every 30 s by every
 process. At night the palette turns black/warm-red and the shell dims the
-backlight; the brightness slider overrides until the next switch.
+backlight; the brightness control overrides until the next switch.
 
 **Touch** goes through libinput; the vendor calibration is applied by
 `/etc/udev/rules.d/90-chumby-touch.rules` (`LIBINPUT_CALIBRATION_MATRIX`).
