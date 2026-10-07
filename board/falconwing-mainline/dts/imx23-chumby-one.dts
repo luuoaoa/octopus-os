@@ -79,6 +79,8 @@
 						MX23_PAD_AUART1_CTS__GPIO_0_26	/* USB power enable */
 						MX23_PAD_AUART1_TX__GPIO_0_29	/* USB reset, active low */
 						MX23_PAD_LCD_RESET__GPIO_1_18	/* panel reset, active low */
+						MX23_PAD_GPMI_D08__GPIO_0_8	/* external speaker amp, high = mute */
+						MX23_PAD_GPMI_D11__GPIO_0_11	/* headphone detect, low = plugged */
 					>;
 					fsl,drive-strength = <MXS_DRIVE_4mA>;
 					fsl,voltage = <MXS_VOLTAGE_HIGH>;
@@ -167,6 +169,24 @@
 				status = "okay";
 			};
 
+			/*
+			 * Built-in codec (AUDIOOUT + AUDIOIN), driven by the
+			 * board's imx23-audio patch. DAI 0 = CPU, DAI 1 = codec.
+			 * The FM tuner's output is wired to LINE1.
+			 */
+			audio: audio-out@80048000 {
+				compatible = "fsl,imx23-audio";
+				reg = <0x80048000 0x2000>, <0x8004c000 0x2000>,
+				      <0x8005c000 0x2000>;
+				reg-names = "audioout", "audioin", "rtc";
+				clocks = <&clks 31>;
+				clock-names = "filt";
+				dmas = <&dma_apbx 0>, <&dma_apbx 1>;
+				dma-names = "rx", "tx";
+				#sound-dai-cells = <1>;
+				status = "okay";
+			};
+
 			/* PWM2 (B1P28): backlight. */
 			pwm: pwm@80064000 {
 				pinctrl-names = "default";
@@ -210,6 +230,42 @@
 		pwms = <&pwm 2 1600000 0>;
 		brightness-levels = <0 1 2 4 7 11 16 23 32 43 56 72 100>;
 		default-brightness-level = <10>;
+	};
+
+	sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "Chumby One";
+		simple-audio-card,widgets =
+			"Speaker", "Speaker",
+			"Headphone", "Headphones",
+			"Line", "FM Tuner";
+		simple-audio-card,routing =
+			"Speaker Amp INL", "SPEAKER",
+			"Speaker Amp INR", "SPEAKER",
+			"Speaker", "Speaker Amp OUTL",
+			"Speaker", "Speaker Amp OUTR",
+			"Headphones", "HPL",
+			"Headphones", "HPR",
+			"LINE1L", "FM Tuner",
+			"LINE1R", "FM Tuner";
+		simple-audio-card,hp-det-gpios = <&gpio0 11 GPIO_ACTIVE_LOW>;
+		simple-audio-card,aux-devs = <&speaker_amp>;
+
+		simple-audio-card,cpu {
+			sound-dai = <&audio 0>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&audio 1>;
+		};
+	};
+
+	/* External speaker amplifier behind the codec's speaker output
+	 * (vendor stmp3xxx_dai.c: B0P8 high = muted). */
+	speaker_amp: audio-amplifier {
+		compatible = "simple-audio-amplifier";
+		enable-gpios = <&gpio0 8 GPIO_ACTIVE_LOW>;
+		sound-name-prefix = "Speaker Amp";
 	};
 
 	rotary {

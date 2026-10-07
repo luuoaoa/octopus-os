@@ -1,0 +1,794 @@
+From: falconwing bring-up
+Subject: [PATCH] ASoC: mxs: add i.MX23 built-in audio codec driver
+
+The i.MX23 has an on-chip codec (AUDIOOUT: DAC, headphone and speaker
+amplifiers; AUDIOIN: stereo ADC with mic and line inputs) that has never
+had a mainline driver. Add one, based on Freescale's 2.6.28/2.6.35
+stmp378x/mxs-adc drivers and Michal Ulianko's 3.x port, rewritten for
+current ASoC.
+
+One "fsl,imx23-audio" device registers a CPU DAI (index 0) with a generic
+dmaengine PCM on APBX channels 0/1 and a codec DAI (index 1), so it plugs
+into simple-audio-card. Like the vendor driver, the analog blocks are
+powered once at probe and outputs are only unmuted while playback runs.
+
+---
+diff -urN a/sound/soc/mxs/imx23-audio.c b/sound/soc/mxs/imx23-audio.c
+--- a/sound/soc/mxs/imx23-audio.c	1969-12-31 16:00:00.000000000 -0800
++++ b/sound/soc/mxs/imx23-audio.c	2026-10-07 04:45:39.041666504 -0700
+@@ -0,0 +1,748 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * i.MX23 built-in audio codec (AUDIOOUT DAC + headphone/speaker amps,
++ * AUDIOIN ADC) and its APBX DMA interface.
++ *
++ * One device provides three ASoC components:
++ *   - DAI 0: the CPU DAI (stream run/stop, generic dmaengine PCM)
++ *   - DAI 1: the codec (mixer controls, input/output routing)
++ * so a simple-audio-card can bind <&audio 0> as CPU and <&audio 1> as codec.
++ *
++ * The analog blocks are powered up once at probe and left on; outputs are
++ * only unmuted while a stream runs. That is how the vendor (Chumby/
++ * Freescale 2.6.28) driver handled this hardware, and it avoids
++ * re-running the slow, pop-prone VAG/headphone power sequence.
++ *
++ * Based on Freescale's stmp378x/mxs-adc codec drivers (2.6.28/2.6.35) and
++ * Michal Ulianko's 3.x port, rewritten for current ASoC.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/spinlock.h>
++#include <sound/dmaengine_pcm.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/tlv.h>
++
++#define SET	0x4
++#define CLR	0x8
++
++/* AUDIOOUT */
++#define AOUT_CTRL		0x000
++#define  AOUT_CTRL_SFTRST		BIT(31)
++#define  AOUT_CTRL_CLKGATE		BIT(30)
++#define  AOUT_CTRL_WORD_LENGTH		BIT(6)
++#define  AOUT_CTRL_RUN			BIT(0)
++#define AOUT_DACSRR		0x020
++#define AOUT_DACVOLUME		0x030
++#define  AOUT_DACVOLUME_EN_ZCD		BIT(25)
++#define  AOUT_DACVOLUME_MUTE_LEFT	BIT(24)
++#define  AOUT_DACVOLUME_MUTE_RIGHT	BIT(8)
++#define AOUT_HPVOL		0x050
++#define  AOUT_HPVOL_EN_MSTR_ZCD		BIT(25)
++#define  AOUT_HPVOL_MUTE		BIT(24)
++#define  AOUT_HPVOL_SELECT		BIT(16)
++#define AOUT_PWRDN		0x070
++#define  AOUT_PWRDN_SPEAKER		BIT(24)
++#define  AOUT_PWRDN_RIGHT_ADC		BIT(16)
++#define  AOUT_PWRDN_DAC			BIT(12)
++#define  AOUT_PWRDN_ADC			BIT(8)
++#define  AOUT_PWRDN_CAPLESS		BIT(4)
++#define  AOUT_PWRDN_HEADPHONE		BIT(0)
++#define AOUT_REFCTRL		0x080
++#define  AOUT_REFCTRL_RAISE_REF		BIT(25)
++#define  AOUT_REFCTRL_XTAL_BGR_BIAS	BIT(24)
++#define  AOUT_REFCTRL_VBG_ADJ		GENMASK(22, 20)
++#define  AOUT_REFCTRL_LOW_PWR		BIT(19)
++#define  AOUT_REFCTRL_BIAS_CTRL		GENMASK(17, 16)
++#define  AOUT_REFCTRL_ADJ_ADC		BIT(13)
++#define  AOUT_REFCTRL_ADJ_VAG		BIT(12)
++#define  AOUT_REFCTRL_ADC_REFVAL	GENMASK(11, 8)
++#define  AOUT_REFCTRL_VAG_VAL		GENMASK(7, 4)
++#define AOUT_ANACTRL		0x090
++#define  AOUT_ANACTRL_SHORT_LR_STS	BIT(24)
++#define  AOUT_ANACTRL_SHORTMODE_LR	GENMASK(18, 17)
++#define  AOUT_ANACTRL_SHORT_LVLADJL	GENMASK(14, 12)
++#define  AOUT_ANACTRL_SHORT_LVLADJR	GENMASK(10, 8)
++#define  AOUT_ANACTRL_HP_HOLD_GND	BIT(5)
++#define  AOUT_ANACTRL_HP_CLASSAB	BIT(4)
++#define AOUT_TEST		0x0a0
++#define  AOUT_TEST_HP_I1_ADJ		GENMASK(23, 22)
++#define AOUT_ANACLKCTRL		0x0e0
++#define  AOUT_ANACLKCTRL_CLKGATE	BIT(31)
++#define AOUT_DATA		0x0f0
++#define AOUT_SPEAKERCTRL	0x100
++#define  AOUT_SPEAKERCTRL_MUTE		BIT(24)
++
++/* AUDIOIN */
++#define AIN_CTRL		0x000
++#define  AIN_CTRL_SFTRST		BIT(31)
++#define  AIN_CTRL_CLKGATE		BIT(30)
++#define  AIN_CTRL_WORD_LENGTH		BIT(5)
++#define  AIN_CTRL_RUN			BIT(0)
++#define AIN_ADCSRR		0x020
++#define AIN_ADCVOLUME		0x030
++#define  AIN_ADCVOLUME_VOLUME_LEFT	GENMASK(23, 16)
++#define  AIN_ADCVOLUME_VOLUME_RIGHT	GENMASK(7, 0)
++#define AIN_ADCVOL		0x050
++#define  AIN_ADCVOL_MUTE		BIT(24)
++#define  AIN_ADCVOL_SELECT_LEFT		GENMASK(13, 12)
++#define  AIN_ADCVOL_GAIN_LEFT		GENMASK(11, 8)
++#define  AIN_ADCVOL_SELECT_RIGHT	GENMASK(5, 4)
++#define  AIN_ADCVOL_GAIN_RIGHT		GENMASK(3, 0)
++#define AIN_MICLINE		0x060
++#define  AIN_MICLINE_MIC_SELECT		BIT(24)
++#define  AIN_MICLINE_MIC_RESISTOR	GENMASK(21, 20)
++#define  AIN_MICLINE_MIC_BIAS		GENMASK(18, 16)
++#define  AIN_MICLINE_MIC_GAIN		GENMASK(1, 0)
++#define AIN_ANACLKCTRL		0x070
++#define  AIN_ANACLKCTRL_CLKGATE		BIT(31)
++
++/* RTC: PERSISTENT0 SPARE_ANALOG[31:18] = 2 releases the headphone ground */
++#define RTC_PERSISTENT0		0x060
++#define  RTC_PERSISTENT0_RELEASE_GND	(0x2 << 18)
++
++/*
++ * Component register space: AUDIOOUT and AUDIOIN are separate blocks, so
++ * the codec component addresses them as (block << 12) | offset.
++ */
++#define AOUT(r)		(r)
++#define AIN(r)		(0x1000 | (r))
++
++#define VAG_BASE_VALUE	((1400 / 2 - 625) / 25)
++#define ADC_VOLUME_MAX	0xfe
++
++enum { IMX23_DAI_CPU, IMX23_DAI_CODEC };
++
++struct imx23_audio {
++	struct device *dev;
++	void __iomem *aout;
++	void __iomem *ain;
++	void __iomem *rtc;
++	struct clk *clk;
++	spinlock_t lock;		/* output mute state vs trigger */
++	bool hp_enable;
++	bool spk_enable;
++	bool playing;
++};
++
++static void imx23_apply_mutes(struct imx23_audio *a)
++{
++	bool hp_on = a->playing && a->hp_enable;
++	bool spk_on = a->playing && a->spk_enable;
++
++	writel(AOUT_HPVOL_MUTE, a->aout + AOUT_HPVOL + (hp_on ? CLR : SET));
++	writel(AOUT_SPEAKERCTRL_MUTE,
++	       a->aout + AOUT_SPEAKERCTRL + (spk_on ? CLR : SET));
++}
++
++/* ------------------------------------------------------------------ */
++/* Codec component                                                    */
++
++static void __iomem *imx23_reg(struct imx23_audio *a, unsigned int reg)
++{
++	return (reg & 0x1000 ? a->ain : a->aout) + (reg & 0xfff);
++}
++
++static unsigned int imx23_codec_read(struct snd_soc_component *c,
++				     unsigned int reg)
++{
++	struct imx23_audio *a = snd_soc_component_get_drvdata(c);
++
++	return readl(imx23_reg(a, reg));
++}
++
++static int imx23_codec_write(struct snd_soc_component *c, unsigned int reg,
++			     unsigned int val)
++{
++	struct imx23_audio *a = snd_soc_component_get_drvdata(c);
++
++	writel(val, imx23_reg(a, reg));
++	return 0;
++}
++
++/* Output switches gate the trigger-time unmute rather than the hw bit. */
++static int imx23_out_switch_get(struct snd_kcontrol *kc,
++				struct snd_ctl_elem_value *uc)
++{
++	struct snd_soc_component *c = snd_kcontrol_chip(kc);
++	struct imx23_audio *a = snd_soc_component_get_drvdata(c);
++	bool hp = kc->private_value;
++
++	uc->value.integer.value[0] = hp ? a->hp_enable : a->spk_enable;
++	return 0;
++}
++
++static int imx23_out_switch_put(struct snd_kcontrol *kc,
++				struct snd_ctl_elem_value *uc)
++{
++	struct snd_soc_component *c = snd_kcontrol_chip(kc);
++	struct imx23_audio *a = snd_soc_component_get_drvdata(c);
++	bool hp = kc->private_value;
++	bool on = !!uc->value.integer.value[0];
++	bool *state = hp ? &a->hp_enable : &a->spk_enable;
++	unsigned long flags;
++	int changed;
++
++	spin_lock_irqsave(&a->lock, flags);
++	changed = *state != on;
++	*state = on;
++	imx23_apply_mutes(a);
++	spin_unlock_irqrestore(&a->lock, flags);
++
++	return changed;
++}
++
++#define IMX23_OUT_SWITCH(xname, is_hp) {			\
++	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname,	\
++	.info = snd_ctl_boolean_mono_info,			\
++	.get = imx23_out_switch_get, .put = imx23_out_switch_put, \
++	.private_value = is_hp }
++
++/* DAC/ADC digital volume: 0xfe = 0 dB, 0.5 dB steps. */
++static const DECLARE_TLV_DB_SCALE(dac_tlv, -12700, 50, 1);
++static const DECLARE_TLV_DB_SCALE(adc_tlv, -12700, 50, 1);
++/* HP volume: register 0 = +6 dB, 0x7f = -57.5 dB (inverted below). */
++static const DECLARE_TLV_DB_SCALE(hp_tlv, -5750, 50, 0);
++/* ADC PGA: 0..15 x 1.5 dB. */
++static const DECLARE_TLV_DB_SCALE(pga_tlv, 0, 150, 0);
++static const DECLARE_TLV_DB_RANGE(mic_tlv,
++	0, 0, TLV_DB_SCALE_ITEM(0, 0, 0),
++	1, 3, TLV_DB_SCALE_ITEM(2000, 1000, 0));
++
++static const char * const adc_input_sel[] = {
++	"Mic", "Line In 1", "Head Phone", "Line In 2"
++};
++static const char * const hp_output_sel[] = { "DAC", "Line In 1" };
++
++static SOC_ENUM_SINGLE_DECL(left_adc_enum, AIN(AIN_ADCVOL), 12, adc_input_sel);
++static SOC_ENUM_SINGLE_DECL(right_adc_enum, AIN(AIN_ADCVOL), 4, adc_input_sel);
++static SOC_ENUM_SINGLE_DECL(hp_enum, AOUT(AOUT_HPVOL), 16, hp_output_sel);
++
++static const struct snd_kcontrol_new imx23_codec_controls[] = {
++	SOC_DOUBLE_TLV("DAC Playback Volume", AOUT(AOUT_DACVOLUME),
++		       16, 0, 0xfe, 0, dac_tlv),
++	SOC_DOUBLE("DAC Playback Switch", AOUT(AOUT_DACVOLUME), 24, 8, 1, 1),
++	SOC_DOUBLE_TLV("HP Playback Volume", AOUT(AOUT_HPVOL),
++		       8, 0, 0x7f, 1, hp_tlv),
++	IMX23_OUT_SWITCH("HP Playback Switch", true),
++	IMX23_OUT_SWITCH("Speaker Playback Switch", false),
++	SOC_DOUBLE_TLV("ADC Capture Volume", AIN(AIN_ADCVOLUME),
++		       16, 0, 0xfe, 0, adc_tlv),
++	SOC_DOUBLE_TLV("ADC PGA Capture Volume", AIN(AIN_ADCVOL),
++		       8, 0, 0xf, 0, pga_tlv),
++	SOC_SINGLE("ADC PGA Capture Switch", AIN(AIN_ADCVOL), 24, 1, 1),
++	SOC_SINGLE_TLV("Mic PGA Capture Volume", AIN(AIN_MICLINE),
++		       0, 3, 0, mic_tlv),
++};
++
++static const struct snd_kcontrol_new left_adc_mux =
++	SOC_DAPM_ENUM("Route", left_adc_enum);
++static const struct snd_kcontrol_new right_adc_mux =
++	SOC_DAPM_ENUM("Route", right_adc_enum);
++static const struct snd_kcontrol_new hp_mux =
++	SOC_DAPM_ENUM("Route", hp_enum);
++
++/* Power is static (see top of file): widgets only describe routing. */
++static const struct snd_soc_dapm_widget imx23_codec_widgets[] = {
++	SND_SOC_DAPM_ADC("ADC", "Capture", SND_SOC_NOPM, 0, 0),
++	SND_SOC_DAPM_DAC("DAC", "Playback", SND_SOC_NOPM, 0, 0),
++	SND_SOC_DAPM_MUX("Left ADC Mux", SND_SOC_NOPM, 0, 0, &left_adc_mux),
++	SND_SOC_DAPM_MUX("Right ADC Mux", SND_SOC_NOPM, 0, 0, &right_adc_mux),
++	SND_SOC_DAPM_MUX("HP Mux", SND_SOC_NOPM, 0, 0, &hp_mux),
++	SND_SOC_DAPM_INPUT("LINE1L"),
++	SND_SOC_DAPM_INPUT("LINE1R"),
++	SND_SOC_DAPM_INPUT("LINE2L"),
++	SND_SOC_DAPM_INPUT("LINE2R"),
++	SND_SOC_DAPM_INPUT("MIC"),
++	SND_SOC_DAPM_OUTPUT("SPEAKER"),
++	SND_SOC_DAPM_OUTPUT("HPL"),
++	SND_SOC_DAPM_OUTPUT("HPR"),
++};
++
++static const struct snd_soc_dapm_route imx23_codec_routes[] = {
++	{ "Left ADC Mux", "Mic", "MIC" },
++	{ "Left ADC Mux", "Line In 1", "LINE1L" },
++	{ "Left ADC Mux", "Line In 2", "LINE2L" },
++	{ "Right ADC Mux", "Mic", "MIC" },
++	{ "Right ADC Mux", "Line In 1", "LINE1R" },
++	{ "Right ADC Mux", "Line In 2", "LINE2R" },
++	{ "ADC", NULL, "Left ADC Mux" },
++	{ "ADC", NULL, "Right ADC Mux" },
++	{ "HP Mux", "DAC", "DAC" },
++	{ "HP Mux", "Line In 1", "LINE1L" },
++	{ "HP Mux", "Line In 1", "LINE1R" },
++	{ "HPL", NULL, "HP Mux" },
++	{ "HPR", NULL, "HP Mux" },
++	{ "SPEAKER", NULL, "DAC" },
++};
++
++static int imx23_reset_block(void __iomem *ctrl, u32 sftrst, u32 clkgate)
++{
++	u32 val;
++
++	writel(sftrst, ctrl + SET);
++	return readl_poll_timeout(ctrl, val, val & clkgate, 10, 10000);
++}
++
++static int imx23_codec_hw_init(struct imx23_audio *a)
++{
++	u32 reg;
++	int ret;
++
++	ret = imx23_reset_block(a->aout + AOUT_CTRL, AOUT_CTRL_SFTRST,
++				AOUT_CTRL_CLKGATE);
++	if (!ret)
++		ret = imx23_reset_block(a->ain + AIN_CTRL, AIN_CTRL_SFTRST,
++					AIN_CTRL_CLKGATE);
++	if (ret) {
++		dev_err(a->dev, "audio block soft reset timed out\n");
++		return ret;
++	}
++
++	/* --- DAC side --- */
++	writel(AOUT_CTRL_SFTRST, a->aout + AOUT_CTRL + CLR);
++
++	/* Reduce analog power */
++	writel(AOUT_TEST_HP_I1_ADJ, a->aout + AOUT_TEST + CLR);
++	writel(FIELD_PREP(AOUT_TEST_HP_I1_ADJ, 1), a->aout + AOUT_TEST + SET);
++	writel(AOUT_REFCTRL_LOW_PWR | AOUT_REFCTRL_XTAL_BGR_BIAS,
++	       a->aout + AOUT_REFCTRL + SET);
++	writel(AOUT_REFCTRL_BIAS_CTRL, a->aout + AOUT_REFCTRL + CLR);
++
++	/* VAG reference */
++	reg = readl(a->aout + AOUT_REFCTRL);
++	reg &= ~(AOUT_REFCTRL_VAG_VAL | AOUT_REFCTRL_VBG_ADJ |
++		 AOUT_REFCTRL_ADC_REFVAL);
++	reg |= FIELD_PREP(AOUT_REFCTRL_VAG_VAL, VAG_BASE_VALUE) |
++	       AOUT_REFCTRL_ADJ_VAG |
++	       FIELD_PREP(AOUT_REFCTRL_ADC_REFVAL, 0xf) |
++	       AOUT_REFCTRL_ADJ_ADC |
++	       FIELD_PREP(AOUT_REFCTRL_VBG_ADJ, 0x3) |
++	       AOUT_REFCTRL_RAISE_REF;
++	writel(reg, a->aout + AOUT_REFCTRL);
++
++	/* Ungate DAC clocks, capless headphone mode, 16-bit samples */
++	writel(AOUT_CTRL_CLKGATE, a->aout + AOUT_CTRL + CLR);
++	writel(AOUT_ANACLKCTRL_CLKGATE, a->aout + AOUT_ANACLKCTRL + CLR);
++	writel(AOUT_PWRDN_CAPLESS, a->aout + AOUT_PWRDN + CLR);
++	writel(AOUT_CTRL_WORD_LENGTH, a->aout + AOUT_CTRL + SET);
++
++	/* Arm headphone L/R short protection at the lowest trip level */
++	writel(AOUT_ANACTRL_SHORT_LVLADJL | AOUT_ANACTRL_SHORT_LVLADJR |
++	       AOUT_ANACTRL_SHORTMODE_LR | AOUT_ANACTRL_SHORT_LR_STS,
++	       a->aout + AOUT_ANACTRL + CLR);
++	writel(FIELD_PREP(AOUT_ANACTRL_SHORTMODE_LR, 1),
++	       a->aout + AOUT_ANACTRL + SET);
++
++	/* DAC on, volume changes on zero crossings, start muted */
++	writel(AOUT_PWRDN_DAC, a->aout + AOUT_PWRDN + CLR);
++	writel(AOUT_DACVOLUME_EN_ZCD | AOUT_DACVOLUME_MUTE_LEFT |
++	       AOUT_DACVOLUME_MUTE_RIGHT, a->aout + AOUT_DACVOLUME + SET);
++
++	/* Headphone amp: power up with the output held to ground */
++	writel(AOUT_HPVOL_EN_MSTR_ZCD | AOUT_HPVOL_MUTE,
++	       a->aout + AOUT_HPVOL + SET);
++	writel(AOUT_ANACTRL_HP_HOLD_GND, a->aout + AOUT_ANACTRL + SET);
++	writel(RTC_PERSISTENT0_RELEASE_GND, a->rtc + RTC_PERSISTENT0 + SET);
++	writel(AOUT_PWRDN_HEADPHONE, a->aout + AOUT_PWRDN + CLR);
++	writel(AOUT_ANACTRL_HP_CLASSAB, a->aout + AOUT_ANACTRL + SET);
++	writel(AOUT_ANACTRL_HP_HOLD_GND, a->aout + AOUT_ANACTRL + CLR);
++
++	/* Speaker amp on, muted until playback starts */
++	writel(AOUT_PWRDN_SPEAKER, a->aout + AOUT_PWRDN + CLR);
++	writel(AOUT_SPEAKERCTRL_MUTE, a->aout + AOUT_SPEAKERCTRL + SET);
++
++	/* --- ADC side --- */
++	writel(AIN_CTRL_SFTRST, a->ain + AIN_CTRL + CLR);
++	writel(AIN_CTRL_CLKGATE, a->ain + AIN_CTRL + CLR);
++	writel(AIN_ANACLKCTRL_CLKGATE, a->ain + AIN_ANACLKCTRL + CLR);
++	writel(AOUT_PWRDN_ADC | AOUT_PWRDN_RIGHT_ADC,
++	       a->aout + AOUT_PWRDN + CLR);
++	writel(AIN_CTRL_WORD_LENGTH, a->ain + AIN_CTRL + SET);
++	writel(AIN_ADCVOL_MUTE, a->ain + AIN_ADCVOL + CLR);
++	/* Undocumented MUTE_LEFT/RIGHT bits, cleared by the vendor driver */
++	writel(0x01000100, a->ain + AIN_ADCVOLUME + CLR);
++
++	/* +3 dB PGA gain, input: microphone */
++	writel(AIN_ADCVOL_GAIN_LEFT | AIN_ADCVOL_GAIN_RIGHT |
++	       AIN_ADCVOL_SELECT_LEFT | AIN_ADCVOL_SELECT_RIGHT,
++	       a->ain + AIN_ADCVOL + CLR);
++	writel(FIELD_PREP(AIN_ADCVOL_GAIN_LEFT, 2) |
++	       FIELD_PREP(AIN_ADCVOL_GAIN_RIGHT, 2),
++	       a->ain + AIN_ADCVOL + SET);
++
++	/* Microphone bias */
++	writel(FIELD_PREP(AIN_MICLINE_MIC_RESISTOR, 1) |
++	       AIN_MICLINE_MIC_SELECT |
++	       FIELD_PREP(AIN_MICLINE_MIC_GAIN, 1) |
++	       FIELD_PREP(AIN_MICLINE_MIC_BIAS, 7),
++	       a->ain + AIN_MICLINE + SET);
++
++	/* 0 dB digital ADC volume */
++	reg = readl(a->ain + AIN_ADCVOLUME);
++	reg &= ~(AIN_ADCVOLUME_VOLUME_LEFT | AIN_ADCVOLUME_VOLUME_RIGHT);
++	reg |= FIELD_PREP(AIN_ADCVOLUME_VOLUME_LEFT, ADC_VOLUME_MAX) |
++	       FIELD_PREP(AIN_ADCVOLUME_VOLUME_RIGHT, ADC_VOLUME_MAX);
++	writel(reg, a->ain + AIN_ADCVOLUME);
++
++	return 0;
++}
++
++static void imx23_codec_hw_shutdown(struct imx23_audio *a)
++{
++	writel(AOUT_CTRL_RUN, a->aout + AOUT_CTRL + CLR);
++	writel(AIN_CTRL_RUN, a->ain + AIN_CTRL + CLR);
++	writel(AOUT_ANACTRL_HP_CLASSAB, a->aout + AOUT_ANACTRL + CLR);
++	writel(AOUT_ANACTRL_HP_HOLD_GND, a->aout + AOUT_ANACTRL + SET);
++	writel(AOUT_HPVOL_MUTE, a->aout + AOUT_HPVOL + SET);
++	writel(AOUT_SPEAKERCTRL_MUTE, a->aout + AOUT_SPEAKERCTRL + SET);
++	writel(AOUT_DACVOLUME_MUTE_LEFT | AOUT_DACVOLUME_MUTE_RIGHT,
++	       a->aout + AOUT_DACVOLUME + SET);
++	writel(AOUT_PWRDN_HEADPHONE | AOUT_PWRDN_SPEAKER | AOUT_PWRDN_DAC |
++	       AOUT_PWRDN_ADC | AOUT_PWRDN_RIGHT_ADC,
++	       a->aout + AOUT_PWRDN + SET);
++	writel(AIN_ADCVOL_MUTE, a->ain + AIN_ADCVOL + SET);
++	writel(RTC_PERSISTENT0_RELEASE_GND, a->rtc + RTC_PERSISTENT0 + CLR);
++	writel(AOUT_ANACLKCTRL_CLKGATE, a->aout + AOUT_ANACLKCTRL + SET);
++	writel(AOUT_CTRL_CLKGATE, a->aout + AOUT_CTRL + SET);
++	writel(AIN_ANACLKCTRL_CLKGATE, a->ain + AIN_ANACLKCTRL + SET);
++	writel(AIN_CTRL_CLKGATE, a->ain + AIN_CTRL + SET);
++}
++
++static int imx23_codec_probe(struct snd_soc_component *c)
++{
++	struct imx23_audio *a = snd_soc_component_get_drvdata(c);
++
++	return imx23_codec_hw_init(a);
++}
++
++static void imx23_codec_remove(struct snd_soc_component *c)
++{
++	imx23_codec_hw_shutdown(snd_soc_component_get_drvdata(c));
++}
++
++/* Sample rate converter settings for DACSRR/ADCSRR. */
++static const struct {
++	unsigned int rate;
++	u32 srr;
++} imx23_srr[] = {
++#define SRR(r, basemult, hold, sint, frac) \
++	{ r, ((basemult) << 28) | ((hold) << 24) | ((sint) << 16) | (frac) }
++	SRR(192000, 0x4, 0x0, 0x0f, 0x13ff),
++	SRR(176400, 0x4, 0x0, 0x11, 0x0037),
++	SRR(128000, 0x4, 0x0, 0x17, 0x0e00),
++	SRR(96000,  0x2, 0x0, 0x0f, 0x13ff),
++	SRR(88200,  0x2, 0x0, 0x11, 0x0037),
++	SRR(64000,  0x2, 0x0, 0x17, 0x0e00),
++	SRR(48000,  0x1, 0x0, 0x0f, 0x13ff),
++	SRR(44100,  0x1, 0x0, 0x11, 0x0037),
++	SRR(32000,  0x1, 0x0, 0x17, 0x0e00),
++	SRR(24000,  0x1, 0x1, 0x0f, 0x13ff),
++	SRR(22050,  0x1, 0x1, 0x11, 0x0037),
++	SRR(16000,  0x1, 0x1, 0x17, 0x0e00),
++	SRR(12000,  0x1, 0x3, 0x0f, 0x13ff),
++	SRR(11025,  0x1, 0x3, 0x11, 0x0037),
++	SRR(8000,   0x1, 0x3, 0x17, 0x0e00),
++#undef SRR
++};
++
++static int imx23_codec_hw_params(struct snd_pcm_substream *substream,
++				 struct snd_pcm_hw_params *params,
++				 struct snd_soc_dai *dai)
++{
++	struct imx23_audio *a = snd_soc_dai_get_drvdata(dai);
++	bool playback = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
++	unsigned int rate = params_rate(params);
++	u32 wl = playback ? AOUT_CTRL_WORD_LENGTH : AIN_CTRL_WORD_LENGTH;
++	void __iomem *ctrl = playback ? a->aout + AOUT_CTRL : a->ain + AIN_CTRL;
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(imx23_srr); i++)
++		if (imx23_srr[i].rate == rate)
++			break;
++	if (i == ARRAY_SIZE(imx23_srr)) {
++		dev_err(a->dev, "unsupported rate %u\n", rate);
++		return -EINVAL;
++	}
++	writel(imx23_srr[i].srr,
++	       playback ? a->aout + AOUT_DACSRR : a->ain + AIN_ADCSRR);
++
++	switch (params_format(params)) {
++	case SNDRV_PCM_FORMAT_S16_LE:
++		writel(wl, ctrl + SET);
++		break;
++	case SNDRV_PCM_FORMAT_S32_LE:
++		writel(wl, ctrl + CLR);
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static int imx23_codec_mute(struct snd_soc_dai *dai, int mute, int stream)
++{
++	struct imx23_audio *a = snd_soc_dai_get_drvdata(dai);
++
++	writel(AOUT_DACVOLUME_MUTE_LEFT | AOUT_DACVOLUME_MUTE_RIGHT,
++	       a->aout + AOUT_DACVOLUME + (mute ? SET : CLR));
++	return 0;
++}
++
++static const struct snd_soc_dai_ops imx23_codec_dai_ops = {
++	.hw_params	= imx23_codec_hw_params,
++	.mute_stream	= imx23_codec_mute,
++	.no_capture_mute = 1,
++};
++
++#define IMX23_RATES	(SNDRV_PCM_RATE_8000_192000 & ~SNDRV_PCM_RATE_5512)
++#define IMX23_FORMATS	(SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S32_LE)
++
++static struct snd_soc_dai_driver imx23_codec_dai = {
++	.name = "imx23-codec",
++	.playback = {
++		.stream_name	= "Playback",
++		.channels_min	= 2,
++		.channels_max	= 2,
++		.rates		= IMX23_RATES,
++		.formats	= IMX23_FORMATS,
++	},
++	.capture = {
++		.stream_name	= "Capture",
++		.channels_min	= 2,
++		.channels_max	= 2,
++		.rates		= IMX23_RATES,
++		.formats	= IMX23_FORMATS,
++	},
++	.ops = &imx23_codec_dai_ops,
++};
++
++static int imx23_xlate(const struct of_phandle_args *args, const char **name,
++		       int index, const char *dai_name)
++{
++	if (args->args_count != 1 || args->args[0] != index)
++		return -EINVAL;
++	*name = dai_name;
++	return 0;
++}
++
++static int imx23_codec_xlate(struct snd_soc_component *c,
++			     const struct of_phandle_args *args,
++			     const char **name)
++{
++	return imx23_xlate(args, name, IMX23_DAI_CODEC, imx23_codec_dai.name);
++}
++
++static const struct snd_soc_component_driver imx23_codec_component = {
++	.name			= "imx23-codec",
++	.probe			= imx23_codec_probe,
++	.remove			= imx23_codec_remove,
++	.read			= imx23_codec_read,
++	.write			= imx23_codec_write,
++	.controls		= imx23_codec_controls,
++	.num_controls		= ARRAY_SIZE(imx23_codec_controls),
++	.dapm_widgets		= imx23_codec_widgets,
++	.num_dapm_widgets	= ARRAY_SIZE(imx23_codec_widgets),
++	.dapm_routes		= imx23_codec_routes,
++	.num_dapm_routes	= ARRAY_SIZE(imx23_codec_routes),
++	.of_xlate_dai_name	= imx23_codec_xlate,
++	.idle_bias_on		= 1,
++	.endianness		= 1,
++};
++
++/* ------------------------------------------------------------------ */
++/* CPU DAI component                                                  */
++
++static int imx23_cpu_trigger(struct snd_pcm_substream *substream, int cmd,
++			     struct snd_soc_dai *dai)
++{
++	struct imx23_audio *a = snd_soc_dai_get_drvdata(dai);
++	bool playback = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
++	unsigned long flags;
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		if (playback) {
++			/*
++			 * Vendor: poke the data register before RUN, or the
++			 * speaker occasionally fails to start.
++			 */
++			writel(0, a->aout + AOUT_DATA);
++			udelay(200);
++			writel(1, a->aout + AOUT_DATA);
++			udelay(200);
++			writel(AOUT_CTRL_RUN, a->aout + AOUT_CTRL + SET);
++			spin_lock_irqsave(&a->lock, flags);
++			a->playing = true;
++			imx23_apply_mutes(a);
++			spin_unlock_irqrestore(&a->lock, flags);
++		} else {
++			writel(AIN_CTRL_RUN, a->ain + AIN_CTRL + SET);
++		}
++		return 0;
++
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		if (playback) {
++			spin_lock_irqsave(&a->lock, flags);
++			a->playing = false;
++			imx23_apply_mutes(a);
++			spin_unlock_irqrestore(&a->lock, flags);
++			udelay(100);
++			writel(AOUT_CTRL_RUN, a->aout + AOUT_CTRL + CLR);
++		} else {
++			writel(AIN_CTRL_RUN, a->ain + AIN_CTRL + CLR);
++		}
++		return 0;
++	}
++
++	return -EINVAL;
++}
++
++static const struct snd_soc_dai_ops imx23_cpu_dai_ops = {
++	.trigger = imx23_cpu_trigger,
++};
++
++static struct snd_soc_dai_driver imx23_cpu_dai = {
++	.name = "imx23-cpu",
++	.playback = {
++		.channels_min	= 2,
++		.channels_max	= 2,
++		.rates		= IMX23_RATES,
++		.formats	= IMX23_FORMATS,
++	},
++	.capture = {
++		.channels_min	= 2,
++		.channels_max	= 2,
++		.rates		= IMX23_RATES,
++		.formats	= IMX23_FORMATS,
++	},
++	.ops = &imx23_cpu_dai_ops,
++};
++
++static int imx23_cpu_xlate(struct snd_soc_component *c,
++			   const struct of_phandle_args *args,
++			   const char **name)
++{
++	return imx23_xlate(args, name, IMX23_DAI_CPU, imx23_cpu_dai.name);
++}
++
++static const struct snd_soc_component_driver imx23_cpu_component = {
++	.name			= "imx23-cpu",
++	.of_xlate_dai_name	= imx23_cpu_xlate,
++};
++
++/* APBX DMA: channel 1 feeds AUDIOOUT, channel 0 drains AUDIOIN. */
++static const struct snd_pcm_hardware imx23_pcm_hardware = {
++	.info			= SNDRV_PCM_INFO_MMAP |
++				  SNDRV_PCM_INFO_MMAP_VALID |
++				  SNDRV_PCM_INFO_PAUSE |
++				  SNDRV_PCM_INFO_RESUME |
++				  SNDRV_PCM_INFO_INTERLEAVED,
++	.period_bytes_min	= 32,
++	.period_bytes_max	= 8192,
++	.periods_min		= 1,
++	.periods_max		= 52,
++	.buffer_bytes_max	= 64 * 1024,
++	.fifo_size		= 32,
++};
++
++static const struct snd_dmaengine_pcm_config imx23_pcm_config = {
++	.pcm_hardware		= &imx23_pcm_hardware,
++	.prealloc_buffer_size	= 64 * 1024,
++};
++
++/* ------------------------------------------------------------------ */
++
++static void imx23_clk_disable(void *data)
++{
++	clk_disable_unprepare(data);
++}
++
++static int imx23_audio_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct imx23_audio *a;
++	struct resource *res;
++	int ret;
++
++	a = devm_kzalloc(dev, sizeof(*a), GFP_KERNEL);
++	if (!a)
++		return -ENOMEM;
++	a->dev = dev;
++	a->hp_enable = true;
++	a->spk_enable = true;
++	spin_lock_init(&a->lock);
++	platform_set_drvdata(pdev, a);
++
++	a->aout = devm_platform_ioremap_resource_byname(pdev, "audioout");
++	if (IS_ERR(a->aout))
++		return PTR_ERR(a->aout);
++	a->ain = devm_platform_ioremap_resource_byname(pdev, "audioin");
++	if (IS_ERR(a->ain))
++		return PTR_ERR(a->ain);
++	/* Shared with the RTC driver: map without claiming the region. */
++	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "rtc");
++	if (!res)
++		return dev_err_probe(dev, -EINVAL, "no rtc registers\n");
++	a->rtc = devm_ioremap(dev, res->start, resource_size(res));
++	if (!a->rtc)
++		return -ENOMEM;
++
++	a->clk = devm_clk_get(dev, "filt");
++	if (IS_ERR(a->clk))
++		return dev_err_probe(dev, PTR_ERR(a->clk), "no filt clock\n");
++	ret = clk_prepare_enable(a->clk);
++	if (ret)
++		return ret;
++	ret = devm_add_action_or_reset(dev, imx23_clk_disable, a->clk);
++	if (ret)
++		return ret;
++
++	ret = devm_snd_soc_register_component(dev, &imx23_cpu_component,
++					      &imx23_cpu_dai, 1);
++	if (ret)
++		return dev_err_probe(dev, ret, "registering CPU DAI\n");
++
++	ret = devm_snd_dmaengine_pcm_register(dev, &imx23_pcm_config, 0);
++	if (ret)
++		return dev_err_probe(dev, ret, "registering PCM\n");
++
++	ret = devm_snd_soc_register_component(dev, &imx23_codec_component,
++					      &imx23_codec_dai, 1);
++	if (ret)
++		return dev_err_probe(dev, ret, "registering codec\n");
++
++	return 0;
++}
++
++static const struct of_device_id imx23_audio_of_match[] = {
++	{ .compatible = "fsl,imx23-audio" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, imx23_audio_of_match);
++
++static struct platform_driver imx23_audio_driver = {
++	.driver = {
++		.name = "imx23-audio",
++		.of_match_table = imx23_audio_of_match,
++	},
++	.probe = imx23_audio_probe,
++};
++module_platform_driver(imx23_audio_driver);
++
++MODULE_DESCRIPTION("i.MX23 built-in audio codec and DAI");
++MODULE_LICENSE("GPL");
+diff -urN a/sound/soc/mxs/Kconfig b/sound/soc/mxs/Kconfig
+--- a/sound/soc/mxs/Kconfig	2026-10-07 04:45:39.040205066 -0700
++++ b/sound/soc/mxs/Kconfig	2026-10-07 04:45:39.047920814 -0700
+@@ -19,4 +19,12 @@
+ 	  Say Y if you want to add support for SoC audio on an MXS board with
+ 	  a sgtl5000 codec.
+ 
++config SND_SOC_IMX23_AUDIO
++	tristate "i.MX23 built-in audio codec"
++	depends on ARCH_MXS || COMPILE_TEST
++	help
++	  Say Y or M to support the audio codec built into the i.MX23
++	  (DAC with headphone and speaker amplifiers, stereo ADC with
++	  microphone and line inputs). Use it with simple-audio-card.
++
+ endif	# SND_MXS_SOC
+diff -urN a/sound/soc/mxs/Makefile b/sound/soc/mxs/Makefile
+--- a/sound/soc/mxs/Makefile	2026-10-07 04:45:39.040217860 -0700
++++ b/sound/soc/mxs/Makefile	2026-10-07 04:45:39.047940331 -0700
+@@ -9,3 +9,7 @@
+ snd-soc-mxs-sgtl5000-y := mxs-sgtl5000.o
+ 
+ obj-$(CONFIG_SND_SOC_MXS_SGTL5000) += snd-soc-mxs-sgtl5000.o
++
++# i.MX23 built-in codec
++snd-soc-imx23-audio-y := imx23-audio.o
++obj-$(CONFIG_SND_SOC_IMX23_AUDIO) += snd-soc-imx23-audio.o
