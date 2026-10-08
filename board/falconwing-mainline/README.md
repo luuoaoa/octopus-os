@@ -71,6 +71,15 @@ radio scan
 radio off
 ```
 
+**RDS**: the QN8005 decodes RDS itself (the stock tool had an `rds`
+command: reg 0x00 bit 1 enables it, bit 7 of reg 0x1b flips per group,
+blocks A-D in regs 0x10-0x17). While the radio is on, `qn8005 rds
+/run/chumby/rds` polls it every 20 ms and keeps `ps=` (station name),
+`rt=` (RadioText), `title=`/`artist=` (RadioText+) up to date; the radio
+script restarts it on every tune. The chip has no block error flags, so
+each segment is only taken once it arrives twice in a row. The FM app
+shows the station name and "title - artist" (or the RadioText).
+
 ## GUI (Wayland)
 
 ```
@@ -186,6 +195,8 @@ dir), start apps against it, and grab `chumby-screenshot` PPMs.
 - Audio driver: written against the vendor/Freescale init sequences, never
   run on this kernel.
 - FM tuning matches the stock tool, but the software `scan` is new.
+- RDS: enable bit and registers are from the stock tool, the decoder was
+  only tested against synthetic groups.
 - Touch axis orientation/calibration on the mainline LRADC driver.
 - The GUI was exercised end to end on wlroots' headless backend under
   qemu (compositor, shell, apps, switching state, night mode), but not on

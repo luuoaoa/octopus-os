@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * chumby-fm: FM radio. Station display, tune (0.1 MHz, long-press
- * repeat), on/off. Drives /usr/bin/radio in child processes so the UI
- * never blocks on the ~2.5 s tuner init. Volume lives in the shell.
+ * chumby-fm: FM radio. Frequency, the station's RDS name and what's
+ * playing (RadioText+ title/artist, else RadioText), tune (0.1 MHz,
+ * long-press repeat), on/off. Drives /usr/bin/radio in child processes so
+ * the UI never blocks on the ~2.5 s tuner init; the radio script keeps
+ * "qn8005 rds" writing the RDS state to $run_dir/rds while it plays.
+ * Volume lives in the shell.
  */
 
 #include <signal.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/wait.h>
 #include <chumby.h>
 
@@ -21,6 +25,7 @@ static int freq = 1003;
 static bool radio_on;
 static int child = -1, pending = REQ_NONE;
 static lv_obj_t *lbl_freq, *lbl_unit, *lbl_status, *btn_power, *btn_prev, *btn_next;
+static lv_obj_t *lbl_station, *lbl_now;
 static lv_timer_t *tune_timer;
 
 static bool radio_running(void)
@@ -165,6 +170,47 @@ static lv_obj_t *round_button(lv_obj_t *parent, const char *sym, int size)
 	return b;
 }
 
+/* Station name and now playing from the RDS decoder's key=value file. */
+static void rds_show(void)
+{
+	char path[256], line[160], ps[16] = "", rt[80] = "", title[80] = "",
+	     artist[80] = "", now[170];
+	FILE *f = NULL;
+
+	if (radio_on) {
+		snprintf(path, sizeof(path), "%s/rds", chumby_run_dir());
+		f = fopen(path, "r");
+	}
+	while (f && fgets(line, sizeof(line), f)) {
+		line[strcspn(line, "\n")] = '\0';
+		if (!strncmp(line, "ps=", 3))
+			snprintf(ps, sizeof(ps), "%.15s", line + 3);
+		else if (!strncmp(line, "rt=", 3))
+			snprintf(rt, sizeof(rt), "%.79s", line + 3);
+		else if (!strncmp(line, "title=", 6))
+			snprintf(title, sizeof(title), "%.79s", line + 6);
+		else if (!strncmp(line, "artist=", 7))
+			snprintf(artist, sizeof(artist), "%.79s", line + 7);
+	}
+	if (f)
+		fclose(f);
+	if (title[0])
+		snprintf(now, sizeof(now), "%s%s%s", title, artist[0] ? " - " : "", artist);
+	else
+		snprintf(now, sizeof(now), "%s", rt);
+	/* Only touch the labels on change: no redraw once a second. */
+	if (strcmp(lv_label_get_text(lbl_station), ps))
+		lv_label_set_text(lbl_station, ps);
+	if (strcmp(lv_label_get_text(lbl_now), now))
+		lv_label_set_text(lbl_now, now);
+}
+
+static void rds_timer_cb(lv_timer_t *t)
+{
+	(void)t;
+	rds_show();
+}
+
 static void on_mode(chumby_mode_t mode, void *user)
 {
 	(void)mode;
@@ -172,6 +218,8 @@ static void on_mode(chumby_mode_t mode, void *user)
 	lv_obj_set_style_text_color(lbl_freq, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_text_color(lbl_unit, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_style_text_color(lbl_status, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(lbl_station, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(lbl_now, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_bg_color(btn_prev, chumby_color(CHUMBY_COLOR_SURFACE), 0);
 	lv_obj_set_style_bg_color(btn_next, chumby_color(CHUMBY_COLOR_SURFACE), 0);
 	lv_obj_set_style_bg_color(btn_power, chumby_color(CHUMBY_COLOR_SURFACE), 0);
@@ -189,19 +237,33 @@ int main(void)
 	lv_obj_set_style_text_font(title, chumby_font(CHUMBY_FONT_SMALL), 0);
 	lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 8);
 
-	/* Dial: frequency with "MHz" on its baseline, status underneath. */
+	/*
+	 * Dial: frequency with "MHz" on its baseline, the RDS station name,
+	 * now playing (two lines, kept tall when empty so nothing jumps),
+	 * and the status.
+	 */
 	dial = chumby_group(scr, LV_FLEX_FLOW_COLUMN, 6);
 	freq = chumby_group(dial, LV_FLEX_FLOW_ROW, 6);
 	lv_obj_set_flex_align(freq, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
 			      LV_FLEX_ALIGN_END);
 	lbl_freq = lv_label_create(freq);
-	lv_obj_set_style_text_font(lbl_freq, chumby_font(CHUMBY_FONT_HUGE), 0);
+	lv_obj_set_style_text_font(lbl_freq, chumby_font(CHUMBY_FONT_XL), 0);
 	lbl_unit = lv_label_create(freq);
 	lv_label_set_text(lbl_unit, "MHz");
 	/* Bottom-aligned boxes: lift "MHz" by the difference in descent. */
-	lv_obj_set_style_pad_bottom(lbl_unit, chumby_font(CHUMBY_FONT_HUGE)->base_line -
+	lv_obj_set_style_pad_bottom(lbl_unit, chumby_font(CHUMBY_FONT_XL)->base_line -
 				    chumby_font(CHUMBY_FONT_BODY)->base_line, 0);
+	lbl_station = lv_label_create(dial);
+	lv_obj_set_style_text_font(lbl_station, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_label_set_text(lbl_station, "");
+	lbl_now = lv_label_create(dial);
+	lv_obj_set_size(lbl_now, CHUMBY_APP_W - 24,
+			2 * chumby_font(CHUMBY_FONT_BODY)->line_height);
+	lv_label_set_long_mode(lbl_now, LV_LABEL_LONG_MODE_DOTS);
+	lv_obj_set_style_text_align(lbl_now, LV_TEXT_ALIGN_CENTER, 0);
+	lv_label_set_text(lbl_now, "");
 	lbl_status = lv_label_create(dial);
+	lv_obj_set_style_text_font(lbl_status, chumby_font(CHUMBY_FONT_SMALL), 0);
 	lv_obj_align(dial, LV_ALIGN_TOP_MID, 0, 0);
 
 	btn_prev = round_button(scr, LV_SYMBOL_LEFT, 56);
@@ -229,6 +291,7 @@ int main(void)
 	tune_timer = lv_timer_create(tune_timer_cb, 400, NULL);
 	lv_timer_pause(tune_timer);
 	lv_timer_create(child_poll, 100, NULL);
+	lv_timer_ready(lv_timer_create(rds_timer_cb, 1000, NULL));
 
 	return chumby_run();
 }
