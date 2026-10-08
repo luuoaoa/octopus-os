@@ -7,10 +7,10 @@
 LIBCHUMBY_VERSION = 1.0
 LIBCHUMBY_SITE = $(BR2_EXTERNAL_PIFANSRF_PATH)/package/libchumby/src
 LIBCHUMBY_SITE_METHOD = local
-LIBCHUMBY_LICENSE = GPL-2.0+ (framework), MIT (LVGL)
+LIBCHUMBY_LICENSE = GPL-2.0+ (framework, Nimbus fonts from Rockbox), MIT (LVGL)
 LIBCHUMBY_INSTALL_STAGING = YES
 LIBCHUMBY_DEPENDENCIES = host-pkgconf host-wayland wayland wayland-protocols \
-	libxkbcommon freetype alsa-lib lvgl
+	libxkbcommon alsa-lib lvgl
 
 # LVGL is compiled into the library with our lv_conf.h. (A local package
 # never runs the download step, so LVGL comes from its own package.)

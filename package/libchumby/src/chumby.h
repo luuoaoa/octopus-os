@@ -4,7 +4,8 @@
  *
  * Every app (and the shell) gets the same look and behaviour from here:
  *   - a Wayland window driven by LVGL (app_id = the name you pass)
- *   - Noto Sans fonts (FreeType), with LVGL symbols as fallback
+ *   - Rockbox's Nimbus bitmap fonts (the only text font), with LVGL's
+ *     symbol font for icons
  *   - the universal dark theme, and night mode switched automatically by
  *     the system policy (/etc/chumby/policy.conf, default 19:00-07:00)
  *   - volume / brightness / screen power helpers and a main loop that can
@@ -51,11 +52,11 @@ typedef enum {
 } chumby_mode_t;
 
 typedef enum {
-	CHUMBY_FONT_SMALL,	/* 13 px: captions, status */
-	CHUMBY_FONT_BODY,	/* 15 px: default text */
-	CHUMBY_FONT_LARGE,	/* 24 px bold: headings */
-	CHUMBY_FONT_XL,		/* 34 px bold: big values */
-	CHUMBY_FONT_HUGE,	/* 56 px bold: clock */
+	CHUMBY_FONT_SMALL,	/* Nimbus 14: captions, status */
+	CHUMBY_FONT_BODY,	/* Nimbus 14: default text */
+	CHUMBY_FONT_LARGE,	/* Nimbus 19: headings */
+	CHUMBY_FONT_XL,		/* Nimbus 35: big values */
+	CHUMBY_FONT_HUGE,	/* Nimbus 35 at 2x: clock */
 	CHUMBY_FONT_COUNT
 } chumby_font_t;
 

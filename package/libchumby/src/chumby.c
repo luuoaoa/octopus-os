@@ -24,7 +24,6 @@ extern char **environ;
 #define POLICY_FILE	"/etc/chumby/policy.conf"
 #define ALARMS_FILE	"/etc/chumby/alarms.conf"
 #define RUN_DIR		"/run/chumby"
-#define FONT_DIR	"/usr/share/fonts/noto/"
 #define BACKLIGHT	"/sys/class/backlight/backlight/"
 #define MAX_WINDOWS	4
 #define MAX_FDS		8
@@ -154,32 +153,25 @@ chumby_mode_t chumby_mode(void)
 	return mode;
 }
 
+/* Rockbox's Nimbus bitmap fonts, generated from the BDFs in fonts/ at build time. */
+extern lv_font_t nimbus_14, nimbus_19, nimbus_35, nimbus_35x2;
+
 static const lv_font_t *fonts[CHUMBY_FONT_COUNT];
 
-static const lv_font_t *noto(const char *file, uint32_t size,
-			     const lv_font_t *fallback)
+static const lv_font_t *nimbus(lv_font_t *f, const lv_font_t *symbols)
 {
-	lv_font_t *f = lv_freetype_font_create(file,
-					       LV_FREETYPE_FONT_RENDER_MODE_BITMAP,
-					       size, LV_FREETYPE_FONT_STYLE_NORMAL);
-
-	/* Noto has no LV_SYMBOL_* glyphs: fall back to a bitmap font for those. */
-	if (!f) {
-		LV_LOG_WARN("cannot load %s at %u px, using built-in font",
-			    file, (unsigned int)size);
-		return fallback;
-	}
-	f->fallback = fallback;
+	/* Nimbus has no LV_SYMBOL_* icons: those come from LVGL's own font. */
+	f->fallback = symbols;
 	return f;
 }
 
 static void fonts_load(void)
 {
-	fonts[CHUMBY_FONT_SMALL] = noto(FONT_DIR "NotoSans-Regular.ttf", 13, &lv_font_montserrat_14);
-	fonts[CHUMBY_FONT_BODY] = noto(FONT_DIR "NotoSans-Regular.ttf", 15, &lv_font_montserrat_14);
-	fonts[CHUMBY_FONT_LARGE] = noto(FONT_DIR "NotoSans-Bold.ttf", 24, &lv_font_montserrat_20);
-	fonts[CHUMBY_FONT_XL] = noto(FONT_DIR "NotoSans-Bold.ttf", 34, &lv_font_montserrat_20);
-	fonts[CHUMBY_FONT_HUGE] = noto(FONT_DIR "NotoSans-Bold.ttf", 56, &lv_font_montserrat_20);
+	fonts[CHUMBY_FONT_SMALL] = nimbus(&nimbus_14, &lv_font_montserrat_14);
+	fonts[CHUMBY_FONT_BODY] = nimbus(&nimbus_14, &lv_font_montserrat_14);
+	fonts[CHUMBY_FONT_LARGE] = nimbus(&nimbus_19, &lv_font_montserrat_20);
+	fonts[CHUMBY_FONT_XL] = nimbus(&nimbus_35, &lv_font_montserrat_28);
+	fonts[CHUMBY_FONT_HUGE] = nimbus(&nimbus_35x2, &lv_font_montserrat_28);
 }
 
 const lv_font_t *chumby_font(chumby_font_t f)

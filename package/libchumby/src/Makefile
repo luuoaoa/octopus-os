@@ -2,13 +2,18 @@
 # as one shared library. The package passes PKG_CONFIG, WAYLAND_SCANNER
 # and WAYLAND_PROTOCOLS.
 PKG_CONFIG ?= pkg-config
-PKGS := freetype2 wayland-client wayland-cursor xkbcommon alsa
+PKGS := wayland-client wayland-cursor xkbcommon alsa
 SONAME := libchumby.so.1
 
 LVGL_PATH := lvgl
 PROTO_SRCS := wayland_xdg_shell.c wayland_xdg_output.c
 PROTO_HDRS := $(PROTO_SRCS:.c=.h)
-CSRCS := $(shell find $(LVGL_PATH)/src -type f -name '*.c') chumby.c $(PROTO_SRCS)
+# Nimbus bitmap fonts (BDF from Rockbox), converted at build time:
+# name = file, scale. The clock face is the 35 px font doubled.
+FONTS := nimbus_14 nimbus_19 nimbus_35 nimbus_35x2
+FONT_SRCS := $(FONTS:=.c)
+CSRCS := $(shell find $(LVGL_PATH)/src -type f -name '*.c') chumby.c $(PROTO_SRCS) \
+	$(FONT_SRCS)
 OBJS := $(CSRCS:.c=.o)
 
 override CFLAGS += -fPIC -Wall -DLV_CONF_INCLUDE_SIMPLE -I. -I$(LVGL_PATH) \
@@ -26,12 +31,18 @@ wayland_xdg_output.h:
 wayland_xdg_output.c:
 	$(WAYLAND_SCANNER) private-code $(WAYLAND_PROTOCOLS)/unstable/xdg-output/xdg-output-unstable-v1.xml $@
 
+PYTHON ?= python3
+nimbus_%x2.c: fonts/%-Nimbus.bdf fonts/bdf2lvgl.py
+	$(PYTHON) fonts/bdf2lvgl.py $< nimbus_$*x2 2 > $@.tmp && mv $@.tmp $@
+nimbus_%.c: fonts/%-Nimbus.bdf fonts/bdf2lvgl.py
+	$(PYTHON) fonts/bdf2lvgl.py $< nimbus_$* > $@.tmp && mv $@.tmp $@
+
 $(OBJS): lv_conf.h $(PROTO_HDRS)
 
 $(SONAME): $(OBJS)
 	$(CC) -shared -Wl,-soname,$(SONAME) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
-	rm -f $(SONAME) $(OBJS) $(PROTO_SRCS) $(PROTO_HDRS)
+	rm -f $(SONAME) $(OBJS) $(PROTO_SRCS) $(PROTO_HDRS) $(FONT_SRCS)
 
 .PHONY: all clean

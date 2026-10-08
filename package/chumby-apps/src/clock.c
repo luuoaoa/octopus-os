@@ -453,7 +453,7 @@ static void build_ring(void)
 	lv_obj_align(ic, LV_ALIGN_TOP_MID, -44, 14);
 	t = label(view_ring, CHUMBY_FONT_LARGE, CHUMBY_COLOR_ACCENT);
 	lv_label_set_text(t, "Alarm");
-	lv_obj_align(t, LV_ALIGN_TOP_MID, 16, 12);
+	lv_obj_align(t, LV_ALIGN_TOP_MID, 16, 20);	/* centred on the bell */
 
 	lbl_ring_time = label(view_ring, CHUMBY_FONT_HUGE, CHUMBY_COLOR_TEXT);
 	lv_obj_align(lbl_ring_time, LV_ALIGN_TOP_MID, 0, 44);

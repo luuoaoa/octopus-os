@@ -1187,7 +1187,7 @@
 #define LV_USE_IMGFONT 0
 
 /** FreeType */
-#define LV_USE_FREETYPE 1
+#define LV_USE_FREETYPE 0
 
 #if LV_USE_FREETYPE
 /** When enabled, FreeType will use LVGL's memory allocator and file system
