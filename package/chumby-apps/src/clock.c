@@ -139,13 +139,12 @@ static void alarms_btn_cb(lv_event_t *e)
 
 static void build_clock(void)
 {
-	lv_obj_t *b;
+	lv_obj_t *b, *face;
 
-	lbl_time = label(view_clock, CHUMBY_FONT_HUGE, CHUMBY_COLOR_TEXT);
-	lv_obj_align(lbl_time, LV_ALIGN_CENTER, 0, -42);
-
-	lbl_date = label(view_clock, CHUMBY_FONT_BODY, CHUMBY_COLOR_TEXT_DIM);
-	lv_obj_align(lbl_date, LV_ALIGN_CENTER, 0, 4);
+	face = chumby_group(view_clock, LV_FLEX_FLOW_COLUMN, 4);
+	lbl_time = label(face, CHUMBY_FONT_HUGE, CHUMBY_COLOR_TEXT);
+	lbl_date = label(face, CHUMBY_FONT_BODY, CHUMBY_COLOR_TEXT_DIM);
+	lv_obj_align(face, LV_ALIGN_TOP_MID, 0, 0);
 
 	/* The whole bottom bar opens the alarms. */
 	b = lv_button_create(view_clock);
@@ -158,7 +157,10 @@ static void build_clock(void)
 	lv_obj_set_style_text_font(ic_next, &lv_font_montserrat_28, 0);
 	lv_obj_align(ic_next, LV_ALIGN_LEFT_MID, 4, 0);
 	lbl_next = lv_label_create(b);
-	lv_obj_align(lbl_next, LV_ALIGN_LEFT_MID, 44, 0);
+	lv_obj_align_to(lbl_next, ic_next, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+
+	/* The face is centred in the space above the bar. */
+	chumby_center_y_at(face, (CHUMBY_SCREEN_H - 16 - 52) / 2);
 }
 
 /* ------------------------------------------------------------------ */
@@ -276,7 +278,7 @@ static lv_obj_t *step_button(const char *sym, int which, int x, int y)
 
 static void build_edit(void)
 {
-	lv_obj_t *b, *colon;
+	lv_obj_t *b, *colon, *h_up, *h_down, *m_up, *m_down;
 	const int col1 = 16, col2 = CHUMBY_APP_W - 16 - 100;
 
 	b = button(view_edit, LV_SYMBOL_CLOSE, &lv_font_montserrat_28, 56, BAR_H,
@@ -290,22 +292,25 @@ static void build_edit(void)
 	lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 	lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -GAP, 4);
 
-	step_button(LV_SYMBOL_PLUS, 1, col1, 52);
-	step_button(LV_SYMBOL_MINUS, -1, col1, 140);
-	step_button(LV_SYMBOL_PLUS, 2, col2, 52);
-	step_button(LV_SYMBOL_MINUS, -2, col2, 140);
+	h_up = step_button(LV_SYMBOL_PLUS, 1, col1, 52);
+	h_down = step_button(LV_SYMBOL_MINUS, -1, col1, 140);
+	m_up = step_button(LV_SYMBOL_PLUS, 2, col2, 52);
+	m_down = step_button(LV_SYMBOL_MINUS, -2, col2, 140);
 
 	lbl_hour = label(view_edit, CHUMBY_FONT_XL, CHUMBY_COLOR_TEXT);
 	lv_obj_set_width(lbl_hour, 100);
 	lv_obj_set_style_text_align(lbl_hour, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_pos(lbl_hour, col1, 94);
+	lv_obj_set_pos(lbl_hour, col1, 0);
+	chumby_center_y_between(lbl_hour, h_up, h_down);
 	lbl_min = label(view_edit, CHUMBY_FONT_XL, CHUMBY_COLOR_TEXT);
 	lv_obj_set_width(lbl_min, 100);
 	lv_obj_set_style_text_align(lbl_min, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_pos(lbl_min, col2, 94);
+	lv_obj_set_pos(lbl_min, col2, 0);
+	chumby_center_y_between(lbl_min, m_up, m_down);
 	colon = label(view_edit, CHUMBY_FONT_XL, CHUMBY_COLOR_TEXT_DIM);
 	lv_label_set_text(colon, ":");
-	lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 92);
+	lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 0);
+	chumby_center_y_between(colon, h_up, h_down);
 
 	b = lv_button_create(view_edit);
 	lv_obj_set_size(b, CHUMBY_APP_W - 2 * 16, 44);
@@ -358,7 +363,7 @@ static void list_rebuild(void)
 	lv_obj_clean(list);
 	for (i = 0; i < n_alarms; i++) {
 		const struct chumby_alarm *a = &alarms[i];
-		lv_obj_t *row = lv_button_create(list), *t, *d, *sw;
+		lv_obj_t *row = lv_button_create(list), *text, *t, *d, *sw;
 
 		/* Row: tap to edit; the On/Off button on the right toggles. */
 		lv_obj_set_size(row, CHUMBY_APP_W - 2 * GAP, 56);
@@ -366,13 +371,16 @@ static void list_rebuild(void)
 		lv_obj_set_style_pad_all(row, 0, 0);
 		lv_obj_add_event_cb(row, row_edit_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
-		t = label(row, CHUMBY_FONT_LARGE, a->enabled ? CHUMBY_COLOR_TEXT :
+		text = chumby_group(row, LV_FLEX_FLOW_COLUMN, 2);
+		lv_obj_set_flex_align(text, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+				      LV_FLEX_ALIGN_START);
+		lv_obj_align(text, LV_ALIGN_LEFT_MID, 12, 0);
+		t = label(text, CHUMBY_FONT_LARGE, a->enabled ? CHUMBY_COLOR_TEXT :
 			  CHUMBY_COLOR_TEXT_DIM);
 		lv_label_set_text_fmt(t, "%02d:%02d", a->time / 60, a->time % 60);
-		lv_obj_align(t, LV_ALIGN_TOP_LEFT, 12, 2);
-		d = label(row, CHUMBY_FONT_SMALL, CHUMBY_COLOR_TEXT_DIM);
+		d = label(text, CHUMBY_FONT_SMALL, CHUMBY_COLOR_TEXT_DIM);
 		lv_label_set_text(d, chumby_alarm_days_text(a->days, buf, sizeof(buf)));
-		lv_obj_align(d, LV_ALIGN_BOTTOM_LEFT, 12, -4);
+		chumby_center_y_on(text, row);
 
 		sw = button(row, a->enabled ? "On" : "Off", chumby_font(CHUMBY_FONT_BODY),
 			    72, BAR_H, row_toggle_cb, (void *)(intptr_t)i);
@@ -410,7 +418,8 @@ static void build_list(void)
 	lv_obj_set_pos(b, GAP, 4);
 	title = label(view_list, CHUMBY_FONT_LARGE, CHUMBY_COLOR_TEXT);
 	lv_label_set_text(title, "Alarms");
-	lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+	lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
+	chumby_center_y_on(title, b);
 	btn_add = button(view_list, LV_SYMBOL_PLUS, &lv_font_montserrat_28, 56, BAR_H,
 			 list_add_cb, NULL);
 	lv_obj_align(btn_add, LV_ALIGN_TOP_RIGHT, -GAP, 4);
@@ -439,24 +448,24 @@ static void ring_cmd_cb(lv_event_t *e)
 
 static void build_ring(void)
 {
-	lv_obj_t *ic, *t, *b, *hint;
+	lv_obj_t *head, *ic, *t, *b, *hint;
 
 	/* Opaque, over all views, swallowing touches meant for them. */
 	lv_obj_set_style_bg_opa(view_ring, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(view_ring, chumby_color(CHUMBY_COLOR_BG), 0);
 	lv_obj_set_clickable(view_ring, true);
 
-	ic = lv_label_create(view_ring);
+	head = chumby_group(view_ring, LV_FLEX_FLOW_ROW, 10);
+	lv_obj_align(head, LV_ALIGN_TOP_MID, 0, 12);
+	ic = lv_label_create(head);
 	lv_label_set_text(ic, LV_SYMBOL_BELL);
 	lv_obj_set_style_text_font(ic, &lv_font_montserrat_28, 0);
 	lv_obj_set_style_text_color(ic, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-	lv_obj_align(ic, LV_ALIGN_TOP_MID, -44, 14);
-	t = label(view_ring, CHUMBY_FONT_LARGE, CHUMBY_COLOR_ACCENT);
+	t = label(head, CHUMBY_FONT_LARGE, CHUMBY_COLOR_ACCENT);
 	lv_label_set_text(t, "Alarm");
-	lv_obj_align(t, LV_ALIGN_TOP_MID, 16, 20);	/* centred on the bell */
 
 	lbl_ring_time = label(view_ring, CHUMBY_FONT_HUGE, CHUMBY_COLOR_TEXT);
-	lv_obj_align(lbl_ring_time, LV_ALIGN_TOP_MID, 0, 44);
+	lv_obj_align(lbl_ring_time, LV_ALIGN_TOP_MID, 0, 0);
 
 	b = button(view_ring, "Snooze", chumby_font(CHUMBY_FONT_LARGE),
 		   (CHUMBY_APP_W - 3 * 12) / 2, 72, ring_cmd_cb, "snooze");
@@ -465,10 +474,12 @@ static void build_ring(void)
 		   (CHUMBY_APP_W - 3 * 12) / 2, 72, ring_cmd_cb, "stop");
 	lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 	lv_obj_align(b, LV_ALIGN_BOTTOM_RIGHT, -12, -28);
+	chumby_center_y_between(lbl_ring_time, head, b);
 
 	hint = label(view_ring, CHUMBY_FONT_SMALL, CHUMBY_COLOR_TEXT_DIM);
 	lv_label_set_text(hint, "The top button snoozes too");
-	lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -6);
+	lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 0);
+	chumby_center_y_at(hint, CHUMBY_SCREEN_H - 28 / 2);
 }
 
 /* ------------------------------------------------------------------ */

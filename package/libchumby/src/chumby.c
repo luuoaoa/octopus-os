@@ -179,6 +179,168 @@ const lv_font_t *chumby_font(chumby_font_t f)
 	return fonts[f < CHUMBY_FONT_COUNT ? f : CHUMBY_FONT_BODY];
 }
 
+/* ------------------------------------------------------------------ */
+/* Layout                                                             */
+
+static int group_tag;	/* user_data marker of chumby_group() objects */
+
+lv_obj_t *chumby_group(lv_obj_t *parent, lv_flex_flow_t flow, int32_t gap)
+{
+	lv_obj_t *g = lv_obj_create(parent);
+
+	lv_obj_remove_style_all(g);
+	lv_obj_set_size(g, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(g, flow);
+	lv_obj_set_flex_align(g, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_gap(g, gap, 0);
+	/* Taps go to whatever the group sits in (e.g. a list row). */
+	lv_obj_set_clickable(g, false);
+	lv_obj_set_scrollable(g, false);
+	lv_obj_set_user_data(g, &group_tag);
+	return g;
+}
+
+/* Next code point of a UTF-8 string, advancing *i; 0 at the end. */
+static uint32_t utf8_next(const char *s, uint32_t *i)
+{
+	const unsigned char *p = (const unsigned char *)s + *i;
+	uint32_t cp;
+	int n;
+
+	if (!*p)
+		return 0;
+	if (*p < 0x80) {
+		(*i)++;
+		return *p;
+	}
+	n = *p >= 0xf0 ? 3 : *p >= 0xe0 ? 2 : 1;
+	cp = *p & (0x3f >> n);
+	while (n-- && (*++p & 0xc0) == 0x80)
+		cp = cp << 6 | (*p & 0x3f);
+	*i = (uint32_t)(p - (const unsigned char *)s) + (n < 0);
+	return cp;
+}
+
+static bool is_icon(uint32_t cp)
+{
+	return cp >= 0xe000 && cp <= 0xf8ff;	/* LV_SYMBOL_* live here */
+}
+
+static bool is_alnum(uint32_t cp)
+{
+	return (cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') ||
+	       (cp >= 'a' && cp <= 'z') || (cp >= 0xc0 && !is_icon(cp));
+}
+
+/*
+ * What a label visibly occupies, in pixels above its baseline: text is
+ * capital height down to the baseline (descenders don't count, and an
+ * empty label counts as text, so it can be placed before its text is
+ * set); icons and punctuation-only text count by their actual glyphs.
+ */
+static void label_ink(lv_obj_t *label, int32_t *top, int32_t *bottom)
+{
+	const lv_font_t *f = lv_obj_get_style_text_font(label, LV_PART_MAIN);
+	const char *txt = lv_label_get_text(label);
+	bool text = true;
+	lv_font_glyph_dsc_t g;
+	uint32_t i = 0, cp;
+
+	*top = INT32_MIN;
+	*bottom = INT32_MAX;
+	if (txt && *txt) {
+		text = false;
+		while ((cp = utf8_next(txt, &i)) != 0)
+			text |= is_alnum(cp);
+	}
+	if (text && lv_font_get_glyph_dsc(f, &g, 'H', 0)) {
+		*top = g.ofs_y + g.box_h;
+		*bottom = 0;
+	}
+	for (i = 0; txt && (cp = utf8_next(txt, &i)) != 0; ) {
+		if (is_alnum(cp) || !lv_font_get_glyph_dsc(f, &g, cp, 0) || !g.box_h)
+			continue;
+		if (text && !is_icon(cp))
+			continue;	/* punctuation inside text: cap box rules */
+		*top = LV_MAX(*top, g.ofs_y + g.box_h);
+		*bottom = LV_MIN(*bottom, g.ofs_y);
+	}
+}
+
+/* The visible extent of obj: labels by their ink, groups by their
+ * children's, anything else by its box. */
+static void visual_area(lv_obj_t *obj, lv_area_t *a)
+{
+	lv_obj_get_coords(obj, a);
+	if (lv_obj_check_type(obj, &lv_label_class)) {
+		const lv_font_t *f = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
+		int32_t top, bottom;
+		lv_area_t c;
+
+		label_ink(obj, &top, &bottom);
+		if (top == INT32_MIN)
+			return;
+		/* First line's caps to last line's baseline. */
+		lv_obj_get_content_coords(obj, &c);
+		a->y1 = c.y1 + f->line_height - f->base_line - top;
+		a->y2 = c.y2 + 1 - f->base_line - bottom - 1;
+	} else if (lv_obj_get_user_data(obj) == &group_tag &&
+		   lv_obj_get_child_count(obj)) {
+		uint32_t i;
+
+		a->y1 = INT32_MAX;
+		a->y2 = INT32_MIN;
+		for (i = 0; i < lv_obj_get_child_count(obj); i++) {
+			lv_area_t ca;
+
+			visual_area(lv_obj_get_child(obj, i), &ca);
+			a->y1 = LV_MIN(a->y1, ca.y1);
+			a->y2 = LV_MAX(a->y2, ca.y2);
+		}
+	}
+}
+
+static int32_t center_y_of(lv_obj_t *obj)
+{
+	lv_area_t a;
+
+	visual_area(obj, &a);
+	return (a.y1 + a.y2 + 1) / 2;
+}
+
+/* Shift obj's y offset so its visible centre lands on absolute y `cy`. */
+static void center_y_abs(lv_obj_t *obj, int32_t cy)
+{
+	lv_obj_update_layout(obj);
+	lv_obj_set_y(obj, lv_obj_get_style_y(obj, LV_PART_MAIN) + cy - center_y_of(obj));
+}
+
+void chumby_center_y_on(lv_obj_t *obj, lv_obj_t *ref)
+{
+	lv_obj_update_layout(ref);
+	center_y_abs(obj, center_y_of(ref));
+}
+
+void chumby_center_y_between(lv_obj_t *obj, lv_obj_t *above, lv_obj_t *below)
+{
+	lv_area_t a, b;
+
+	lv_obj_update_layout(above);
+	visual_area(above, &a);
+	visual_area(below, &b);
+	center_y_abs(obj, (a.y2 + 1 + b.y1) / 2);
+}
+
+void chumby_center_y_at(lv_obj_t *obj, int32_t y)
+{
+	lv_area_t p;
+
+	lv_obj_update_layout(obj);
+	lv_obj_get_coords(lv_obj_get_parent(obj), &p);
+	center_y_abs(obj, p.y1 + y);
+}
+
 static struct {
 	chumby_mode_cb_t cb;
 	void *user;

@@ -107,6 +107,30 @@ chumby_mode_t chumby_mode(void);
 /* Called once now and on every day/night switch: restyle custom objects. */
 void chumby_on_mode_change(chumby_mode_cb_t cb, void *user);
 
+/*
+ * Layout. The fonts' line boxes are balanced on the capitals (and the
+ * icon glyphs on their box), so centring boxes centres what you see.
+ * Position things relative to what they belong to, never at a guessed y:
+ *
+ *  - chumby_group(): a transparent, content-sized flex row or column
+ *    whose children are centred on each other (icon + label, number +
+ *    caption). Align the group itself like any object.
+ *  - chumby_center_y_on/between/at(): move an object vertically so its
+ *    *visible* centre is on another object's, midway between two
+ *    objects, or at a y in its parent. Visible means: text from the top
+ *    of its capitals to its baseline, icons and lone punctuation (":")
+ *    by their glyphs, a group by its children - so a big clock over a
+ *    small date centres as you see it, not by the empty line padding.
+ *    They only change the y offset, so an LV_ALIGN_*_MID / RIGHT
+ *    alignment keeps working when text changes. One-shot: call once the
+ *    reference objects are placed (an empty label measures like text).
+ *    Not for children of a flex container (the layout owns those).
+ */
+lv_obj_t *chumby_group(lv_obj_t *parent, lv_flex_flow_t flow, int32_t gap);
+void chumby_center_y_on(lv_obj_t *obj, lv_obj_t *ref);
+void chumby_center_y_between(lv_obj_t *obj, lv_obj_t *above, lv_obj_t *below);
+void chumby_center_y_at(lv_obj_t *obj, int32_t y);
+
 /* Policy */
 const struct chumby_policy *chumby_policy(void);
 /* Is the local time now in [start, end) (minutes, may wrap midnight)? */

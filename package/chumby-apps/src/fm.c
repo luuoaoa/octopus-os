@@ -180,7 +180,7 @@ static void on_mode(chumby_mode_t mode, void *user)
 
 int main(void)
 {
-	lv_obj_t *scr = chumby_app_init("FM Radio"), *title;
+	lv_obj_t *scr = chumby_app_init("FM Radio"), *title, *dial, *freq;
 
 	lv_obj_set_scrollable(scr, false);
 
@@ -189,16 +189,20 @@ int main(void)
 	lv_obj_set_style_text_font(title, chumby_font(CHUMBY_FONT_SMALL), 0);
 	lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 8);
 
-	lbl_freq = lv_label_create(scr);
+	/* Dial: frequency with "MHz" on its baseline, status underneath. */
+	dial = chumby_group(scr, LV_FLEX_FLOW_COLUMN, 6);
+	freq = chumby_group(dial, LV_FLEX_FLOW_ROW, 6);
+	lv_obj_set_flex_align(freq, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
+			      LV_FLEX_ALIGN_END);
+	lbl_freq = lv_label_create(freq);
 	lv_obj_set_style_text_font(lbl_freq, chumby_font(CHUMBY_FONT_HUGE), 0);
-	lv_obj_align(lbl_freq, LV_ALIGN_TOP_MID, -16, 30);
-
-	lbl_unit = lv_label_create(scr);
+	lbl_unit = lv_label_create(freq);
 	lv_label_set_text(lbl_unit, "MHz");
-	lv_obj_align(lbl_unit, LV_ALIGN_TOP_RIGHT, -14, 70);
-
-	lbl_status = lv_label_create(scr);
-	lv_obj_align(lbl_status, LV_ALIGN_TOP_MID, 0, 108);
+	/* Bottom-aligned boxes: lift "MHz" by the difference in descent. */
+	lv_obj_set_style_pad_bottom(lbl_unit, chumby_font(CHUMBY_FONT_HUGE)->base_line -
+				    chumby_font(CHUMBY_FONT_BODY)->base_line, 0);
+	lbl_status = lv_label_create(dial);
+	lv_obj_align(dial, LV_ALIGN_TOP_MID, 0, 0);
 
 	btn_prev = round_button(scr, LV_SYMBOL_LEFT, 56);
 	lv_obj_align(btn_prev, LV_ALIGN_BOTTOM_LEFT, 18, -20);
@@ -214,6 +218,8 @@ int main(void)
 	lv_obj_align(btn_next, LV_ALIGN_BOTTOM_RIGHT, -18, -20);
 	lv_obj_add_event_cb(btn_next, step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
 	lv_obj_add_event_cb(btn_next, step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)1);
+
+	chumby_center_y_between(dial, title, btn_power);
 
 	load_station();
 	radio_on = radio_running();

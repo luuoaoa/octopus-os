@@ -7,7 +7,8 @@ Convert a BDF bitmap font to an LVGL 9 font (lv_font_fmt_txt, 1 bpp).
 
 SCALE (default 1) enlarges every glyph by an integer factor with
 nearest-neighbour pixels, so a pixel font stays crisp at twice or three
-times its size. The result defines `const lv_font_t NAME`.
+times its size. The line box is padded so the capitals sit exactly in its
+middle. The result defines `lv_font_t NAME`.
 """
 
 import sys
@@ -80,6 +81,15 @@ def main():
     props, glyphs = parse_bdf(path)
     ascent = props["FONT_ASCENT"] * scale
     descent = props["FONT_DESCENT"] * scale
+
+    # Balance the line box on the capitals: equal room above "H" and below
+    # the baseline, so centring a label's box centres its text visually.
+    cap = next(g for g in glyphs if g["cp"] == ord("H"))
+    above = ascent - (cap["y"] + cap["h"]) * scale
+    if above < descent:
+        ascent += descent - above
+    else:
+        descent += above - descent
 
     bitmap, dscs = [], []
     for g in glyphs:

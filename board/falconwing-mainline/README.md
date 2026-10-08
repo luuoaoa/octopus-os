@@ -83,6 +83,14 @@ radio off
  └────┴──────────────────────────┘   apps: chumby-clock, chumby-fm, ...
 ```
 
+**Alignment**: nothing is placed at a hand-tuned y. The generated fonts'
+line boxes are balanced on the capitals, and layouts use libchumby's
+`chumby_group()` (content-sized flex row/column, children centred on each
+other) and `chumby_center_y_on/between/at()`, which centre by what is
+visible: text from cap height to baseline, icons and lone punctuation by
+their glyphs, groups by their children. E.g. the alarm editor's HH and MM
+sit exactly midway between their + and − buttons.
+
 Sized for the resistive touchscreen: every touch target is at least 42 px
 (~9 mm) in both directions (`CHUMBY_TOUCH_MIN` in chumby.h); the panel is
 64 px wide so its buttons are 56x42.

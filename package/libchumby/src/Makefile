@@ -46,3 +46,5 @@ clean:
 	rm -f $(SONAME) $(OBJS) $(PROTO_SRCS) $(PROTO_HDRS) $(FONT_SRCS)
 
 .PHONY: all clean
+# Keep the generated font sources (make would delete them as intermediates).
+.SECONDARY: $(FONT_SRCS)

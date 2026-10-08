@@ -600,7 +600,7 @@ static lv_obj_t *popup_button(lv_obj_t *parent, const char *sym, int dir)
 static void popup_open(enum popup_kind kind)
 {
 	bool vol = kind == POPUP_VOLUME;
-	lv_obj_t *scr, *icon, *title;
+	lv_obj_t *scr, *icon, *title, *minus;
 
 	panel_wake();
 	if (popup_kind == kind && popup_disp) {
@@ -623,22 +623,25 @@ static void popup_open(enum popup_kind kind)
 	lv_label_set_text(icon, vol ? LV_SYMBOL_VOLUME_MAX : LV_SYMBOL_EYE_OPEN);
 	lv_obj_set_style_text_font(icon, &lv_font_montserrat_28, 0);
 	lv_obj_set_style_text_color(icon, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-	lv_obj_align(icon, LV_ALIGN_TOP_LEFT, 16, 20);
+	lv_obj_align(icon, LV_ALIGN_TOP_LEFT, 16, 14);
 
+	/* Header: title beside the icon, value at the right, all on the
+	 * icon's centre line. */
 	title = lv_label_create(scr);
 	lv_label_set_text(title, vol ? "Volume" : "Brightness");
 	lv_obj_set_style_text_font(title, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_align(title, LV_ALIGN_TOP_LEFT, 56, 26);	/* centred on the icon */
+	lv_obj_align_to(title, icon, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 
 	popup_value = lv_label_create(scr);
 	lv_obj_set_style_text_font(popup_value, chumby_font(CHUMBY_FONT_LARGE), 0);
 	lv_obj_set_style_text_color(popup_value, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_align(popup_value, LV_ALIGN_TOP_RIGHT, -16, 26);
+	lv_obj_align(popup_value, LV_ALIGN_TOP_RIGHT, -16, 0);
+	chumby_center_y_on(popup_value, icon);
 
 	/* A thick bar: tapping anywhere on it sets the value, no knob to aim at. */
 	popup_bar = lv_slider_create(scr);
 	lv_obj_set_size(popup_bar, CHUMBY_APP_W - 32, 52);
-	lv_obj_align(popup_bar, LV_ALIGN_TOP_MID, 0, 80);
+	lv_obj_align(popup_bar, LV_ALIGN_TOP_MID, 0, 0);
 	lv_slider_set_range(popup_bar, vol ? 0 : 5, 100);
 	lv_obj_set_style_radius(popup_bar, 12, LV_PART_MAIN);
 	lv_obj_set_style_radius(popup_bar, 12, LV_PART_INDICATOR);
@@ -648,8 +651,11 @@ static void popup_open(enum popup_kind kind)
 	lv_obj_add_event_cb(popup_bar, popup_bar_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(popup_bar, popup_bar_cb, LV_EVENT_PRESSING, NULL);
 
-	lv_obj_align(popup_button(scr, LV_SYMBOL_MINUS, -1), LV_ALIGN_BOTTOM_LEFT, 16, -20);
+	minus = popup_button(scr, LV_SYMBOL_MINUS, -1);
+	lv_obj_align(minus, LV_ALIGN_BOTTOM_LEFT, 16, -20);
 	lv_obj_align(popup_button(scr, LV_SYMBOL_PLUS, 1), LV_ALIGN_BOTTOM_RIGHT, -16, -20);
+	/* The bar sits midway between the header and the buttons. */
+	chumby_center_y_between(popup_bar, icon, minus);
 
 	popup_set(popup_get());
 	quick_buttons_update();
@@ -725,7 +731,10 @@ static void build_home(lv_obj_t *scr)
 	home_title = lv_label_create(scr);
 	lv_label_set_text(home_title, "Apps");
 	lv_obj_set_style_text_font(home_title, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_align(home_title, LV_ALIGN_TOP_LEFT, 12, 12);
+	lv_obj_align(home_title, LV_ALIGN_TOP_LEFT, 12, 0);
+	/* Centred in the band above the first row of tiles (grid top 44 +
+	 * its 8 px padding). */
+	chumby_center_y_at(home_title, (CHUMBY_SCREEN_H - 196 + 8) / 2);
 
 	grid = lv_obj_create(scr);
 	lv_obj_remove_style_all(grid);
@@ -737,23 +746,25 @@ static void build_home(lv_obj_t *scr)
 	lv_obj_set_scroll_dir(grid, LV_DIR_VER);
 
 	for (i = 0; i < n_apps; i++) {
-		lv_obj_t *tile = lv_button_create(grid), *ic, *nm;
+		lv_obj_t *tile = lv_button_create(grid), *pair, *ic, *nm;
 
 		/* Two big tiles per row. */
 		lv_obj_set_size(tile, (CHUMBY_APP_W - 3 * 8) / 2, 84);
 		lv_obj_set_style_radius(tile, 12, 0);
 		lv_obj_add_event_cb(tile, tile_cb, LV_EVENT_CLICKED, &apps[i]);
+		/* Icon over name, the pair centred in the tile. */
+		pair = chumby_group(tile, LV_FLEX_FLOW_COLUMN, 8);
+		lv_obj_align(pair, LV_ALIGN_TOP_MID, 0, 0);
 
-		ic = lv_label_create(tile);
+		ic = lv_label_create(pair);
 		lv_label_set_text(ic, apps[i].icon);
 		lv_obj_set_style_text_font(ic, &lv_font_montserrat_28, 0);
 		lv_obj_set_style_text_color(ic, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-		lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, 6);
 
-		nm = lv_label_create(tile);
+		nm = lv_label_create(pair);
 		lv_label_set_text(nm, apps[i].name);
 		lv_obj_set_style_text_color(nm, chumby_color(CHUMBY_COLOR_TEXT), 0);
-		lv_obj_align(nm, LV_ALIGN_BOTTOM_MID, 0, -4);
+		chumby_center_y_on(pair, tile);
 	}
 	if (!n_apps) {
 		lv_obj_t *l = lv_label_create(grid);
