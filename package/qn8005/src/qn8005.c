@@ -21,6 +21,8 @@
  *   rssi              print the RSSI of the current channel
  *   freq              print the current frequency
  *   scan [us|eu|jp]   software scan of the band, print channels above threshold
+ *   rds <file>        keep decoding RDS (station name, RadioText, RT+
+ *                     title/artist) into <file> until killed
  *   r <reg> | w <reg> <val> | dump
  */
 
@@ -28,13 +30,17 @@
 #include <fcntl.h>
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
+#include "rds.h"
 
 static int fd = -1;
 static int addr = 0x2b;
@@ -307,12 +313,93 @@ static int scan(const char *region)
 	return wr(0x52, 0x00);
 }
 
+/*
+ * RDS (stock QND_RDSEnable / QND_RDSCheckBufferReady / QND_RDSLoadData):
+ * reg 0x00 bit 1 enables it; bit 7 of reg 0x1b flips each time a group
+ * is ready in regs 0x10..0x17 (blocks A..D, high byte first). Groups come
+ * every ~88 ms; poll at 20 ms. Decoded state goes to `out` as key=value
+ * lines (ps, rt, title, artist, pty, pi), rewritten atomically on change.
+ */
+static volatile sig_atomic_t rds_quit;
+
+static void rds_signal(int sig)
+{
+	(void)sig;
+	rds_quit = 1;
+}
+
+static void rds_write(const char *out, const struct rds *r)
+{
+	char tmp[512];
+	FILE *f;
+
+	snprintf(tmp, sizeof(tmp), "%s.tmp", out);
+	f = fopen(tmp, "w");
+	if (!f)
+		return;
+	fprintf(f, "pi=%04x\npty=%d\nps=%s\nrt=%s\ntitle=%s\nartist=%s\n",
+		r->pi, r->pty, r->ps, r->rt, r->title, r->artist);
+	fclose(f);
+	rename(tmp, out);
+}
+
+static int rds_run(const char *out)
+{
+	char dir[256], *slash;
+	struct rds r;
+	int prev, v, i;
+
+	/* The output usually lives in /run/chumby, which may not exist yet. */
+	snprintf(dir, sizeof(dir), "%s", out);
+	slash = strrchr(dir, '/');
+	if (slash && slash != dir) {
+		*slash = '\0';
+		mkdir(dir, 0755);
+	}
+	signal(SIGTERM, rds_signal);
+	signal(SIGINT, rds_signal);
+	rds_init(&r);
+	rds_write(out, &r);
+	if (setbits(0x00, 0x02, 0x02) < 0 || (prev = rd(0x1b)) < 0)
+		return -1;
+	prev &= 0x80;
+
+	while (!rds_quit) {
+		uint8_t raw[8];
+		uint16_t blk[4];
+
+		msleep(20);
+		v = rd(0x1b);
+		if (v < 0 || (v & 0x80) == prev)
+			continue;
+		prev = v & 0x80;
+		for (i = 0; i < 8; i++) {
+			int b = rd(0x10 + i);
+
+			if (b < 0)
+				break;
+			raw[i] = b;
+		}
+		if (i < 8)
+			continue;
+		for (i = 0; i < 4; i++)
+			blk[i] = raw[2 * i] << 8 | raw[2 * i + 1];
+		rds_group(&r, blk);
+		if (r.changed) {
+			r.changed = false;
+			rds_write(out, &r);
+		}
+	}
+	return 0;
+}
+
 static void usage(void)
 {
 	fprintf(stderr,
 		"usage: qn8005 [-d /dev/i2c-N] [-a addr] <command>\n"
 		"  init [--xclk] | tune <MHz> | mute | unmute | mono | stereo\n"
-		"  rssi | freq | scan [us|eu|jp] | r <reg> | w <reg> <val> | dump\n");
+		"  rssi | freq | scan [us|eu|jp] | rds <file>\n"
+		"  r <reg> | w <reg> <val> | dump\n");
 	exit(2);
 }
 
@@ -376,6 +463,10 @@ int main(int argc, char **argv)
 			ret = -1;
 		else
 			printf("%d.%02d\n", f / 100, f % 100);
+	} else if (!strcmp(cmd, "rds")) {
+		if (optind >= argc)
+			usage();
+		ret = rds_run(argv[optind]);
 	} else if (!strcmp(cmd, "scan")) {
 		ret = scan(optind < argc ? argv[optind] : NULL);
 	} else if (!strcmp(cmd, "r")) {

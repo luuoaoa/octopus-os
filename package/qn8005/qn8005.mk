@@ -11,7 +11,7 @@ QN8005_LICENSE = GPL-2.0+
 
 define QN8005_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -Wall -Wextra \
-		-o $(@D)/qn8005 $(@D)/qn8005.c
+		-o $(@D)/qn8005 $(@D)/qn8005.c $(@D)/rds.c
 endef
 
 define QN8005_INSTALL_TARGET_CMDS
