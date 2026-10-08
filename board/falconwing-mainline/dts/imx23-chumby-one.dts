@@ -168,6 +168,19 @@
 					fsl,voltage = <MXS_VOLTAGE_HIGH>;
 					fsl,pull-up = <MXS_PULL_DISABLE>;
 				};
+
+				/* Snooze button on top of the case: the vendor
+				 * chumby_bend driver ("2.3-Falconwing") read it as
+				 * B1P30 (the PWM4 pad), low = pressed. */
+				snooze_pins: snooze@0 {
+					reg = <0>;
+					fsl,pinmux-ids = <
+						MX23_PAD_PWM4__GPIO_1_30
+					>;
+					fsl,drive-strength = <MXS_DRIVE_4mA>;
+					fsl,voltage = <MXS_VOLTAGE_HIGH>;
+					fsl,pull-up = <MXS_PULL_ENABLE>;
+				};
 			};
 		};
 
@@ -298,6 +311,22 @@
 		gpios = <&gpio2 7 GPIO_ACTIVE_HIGH>, <&gpio2 8 GPIO_ACTIVE_HIGH>;
 		linux,axis = <REL_WHEEL>;	/* what the vendor rotdec reported */
 		rotary-encoder,relative-axis;
+	};
+
+	/* The vendor driver reported KEY_ENTER; the shell finds the device by
+	 * its "snooze" name, and chumby-wm keeps it away from apps. */
+	gpio-keys {
+		compatible = "gpio-keys";
+		label = "snooze";
+		pinctrl-names = "default";
+		pinctrl-0 = <&snooze_pins>;
+
+		button-snooze {
+			label = "Snooze";
+			gpios = <&gpio1 30 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_PROG1>;
+			debounce-interval = <20>;
+		};
 	};
 
 	/*
