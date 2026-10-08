@@ -12,11 +12,19 @@
  *
  * Running apps are tracked and switched with wlr-foreign-toplevel-
  * management on a second Wayland connection. The knob changes the volume
- * from anywhere; the backlight follows the day/night policy.
+ * from anywhere; the backlight follows the day/night policy and is off
+ * altogether in the policy's screen-off hours.
+ *
+ * The snooze button (top of the case) brings up the clock from anywhere,
+ * lights the screen for a few seconds at night, and snoozes a ringing
+ * alarm. Alarms are rung here rather than in the clock app, so they go
+ * off whatever is open; the clock app edits them and shows the ringing
+ * state, talking to us through the run dir (see chumby.h).
  */
 
 #define _GNU_SOURCE
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <linux/input.h>
 #include <signal.h>
@@ -24,7 +32,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include <wayland-client.h>
 
@@ -33,6 +43,11 @@
 
 #define APPS_DIR	"/usr/share/chumby/apps"
 #define MAX_APPS	16
+#define CLOCK_ID	"Clock"		/* app the snooze button brings up */
+#define ALARM_TONE	"/usr/bin/chumby-alarm-tone"
+#define RADIO		"/usr/bin/radio"
+#define RADIO_PIDFILE	"/var/run/radio-loop.pid"
+#define RING_MAX_S	(10 * 60)	/* give up ringing after this */
 
 /* ------------------------------------------------------------------ */
 /* Installed apps                                                     */
@@ -712,6 +727,8 @@ static int find_input(const char *name)
 	return -1;
 }
 
+static void screen_wake(void);
+
 static void knob_readable(int fd, void *user)
 {
 	struct input_event ev;
@@ -723,37 +740,312 @@ static void knob_readable(int fd, void *user)
 			wheel += ev.value;
 	if (!wheel)
 		return;
+	screen_wake();
 	/* Show the volume popup as feedback while the knob turns. */
 	popup_open(POPUP_VOLUME);
 	popup_set(volume_pct + wheel * 2);
 }
 
-/*
- * Debug/automation: SIGUSR1 opens the volume popup, SIGUSR2 brightness
- * (e.g. `killall -USR1 chumby-shell` over ssh, or to screenshot it).
- */
-static volatile sig_atomic_t popup_request;
+/* ------------------------------------------------------------------ */
+/* Screen power                                                       */
 
-static void popup_signal(int sig)
+static uint64_t wake_until;	/* monotonic ms: lit until then at night */
+static int screen_applied = -1;	/* what we last wrote, -1 = nothing yet */
+
+static chumby_alarm_state_t alarm_state;
+
+static uint64_t mono_ms(void)
 {
-	popup_request = sig == SIGUSR1 ? POPUP_VOLUME : POPUP_BRIGHTNESS;
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec * 1000ull + ts.tv_nsec / 1000000;
 }
 
-static void popup_request_cb(lv_timer_t *t)
+/* On outside the screen-off hours, while an alarm rings, or while woken. */
+static void screen_update(void)
 {
-	(void)t;
-	if (popup_request) {
-		popup_open((enum popup_kind)popup_request);
-		popup_request = 0;
+	const struct chumby_policy *p = chumby_policy();
+	bool on = alarm_state == CHUMBY_ALARM_RINGING ||
+		  p->screen_off_start == p->screen_off_end ||
+		  !chumby_in_window(p->screen_off_start, p->screen_off_end) ||
+		  mono_ms() < wake_until;
+
+	if (on == screen_applied)
+		return;
+	screen_applied = on;
+	chumby_screen_power(on);
+	if (!on)
+		popup_close();
+}
+
+static void screen_wake(void)
+{
+	wake_until = mono_ms() + chumby_policy()->wake_seconds * 1000ull;
+	screen_update();
+}
+
+/* Touches keep a woken screen on (they don't wake a dark one: chumby-wm
+ * drops those, so nothing gets pressed blind). */
+static void touch_readable(int fd, void *user)
+{
+	struct input_event ev;
+	bool any = false;
+
+	(void)user;
+	while (read(fd, &ev, sizeof(ev)) == sizeof(ev))
+		any = true;
+	if (any && mono_ms() < wake_until)
+		screen_wake();
+}
+
+/* ------------------------------------------------------------------ */
+/* Alarms                                                             */
+
+static struct chumby_alarm alarms[CHUMBY_MAX_ALARMS];
+static int n_alarms;
+static struct timespec alarms_mtime;
+static bool alarms_stat_ok;
+static time_t ring_started, snooze_until;
+static long last_minute = -1;
+static int tone_pid = -1, volume_before = -1;
+
+static void alarms_reload(void)
+{
+	struct stat st;
+	bool ok = stat(chumby_alarms_path(), &st) == 0;
+
+	if (ok == alarms_stat_ok && (!ok ||
+	    (st.st_mtim.tv_sec == alarms_mtime.tv_sec &&
+	     st.st_mtim.tv_nsec == alarms_mtime.tv_nsec)))
+		return;
+	alarms_stat_ok = ok;
+	if (ok)
+		alarms_mtime = st.st_mtim;
+	n_alarms = chumby_alarms_load(alarms, CHUMBY_MAX_ALARMS);
+}
+
+/* For the clock app: "ringing", "snoozed <epoch>", or no file. */
+static void alarm_publish(void)
+{
+	char path[240], tmp[256];
+	FILE *f;
+
+	snprintf(path, sizeof(path), "%s/alarm", chumby_run_dir());
+	if (alarm_state == CHUMBY_ALARM_IDLE) {
+		unlink(path);
+		return;
 	}
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+	f = fopen(tmp, "w");
+	if (!f)
+		return;
+	if (alarm_state == CHUMBY_ALARM_RINGING)
+		fputs("ringing\n", f);
+	else
+		fprintf(f, "snoozed %lld\n", (long long)snooze_until);
+	fclose(f);
+	rename(tmp, path);
+}
+
+static bool radio_playing(void)
+{
+	FILE *f = fopen(RADIO_PIDFILE, "r");
+	int pid = 0;
+
+	if (!f)
+		return false;
+	if (fscanf(f, "%d", &pid) != 1)
+		pid = 0;
+	fclose(f);
+	return pid > 0 && kill(pid, 0) == 0;
+}
+
+static void tone_stop(void)
+{
+	if (tone_pid > 0)
+		kill(tone_pid, SIGTERM);
+	tone_pid = -1;
+	if (volume_before >= 0) {
+		volume_pct = volume_before;
+		chumby_volume_set(volume_before);
+		volume_before = -1;
+	}
+}
+
+static void show_clock(void)
+{
+	struct app_info *clock = app_by_id(CLOCK_ID);
+
+	popup_close();
+	if (clock)
+		launch(clock);
+}
+
+static void alarm_ring(void)
+{
+	const struct chumby_policy *p = chumby_policy();
+	char *tone_argv[] = { "chumby-alarm-tone", NULL };
+	char *radio_argv[] = { "radio", "off", NULL };
+	int v;
+
+	if (alarm_state == CHUMBY_ALARM_RINGING)
+		return;
+	alarm_state = CHUMBY_ALARM_RINGING;
+	ring_started = time(NULL);
+	snooze_until = 0;
+	/* The radio holds the sound card; the tone retries until it's free. */
+	if (radio_playing())
+		chumby_spawn(RADIO, radio_argv);
+	v = chumby_volume_get();
+	if (v >= 0 && v < p->alarm_volume) {
+		volume_before = v;
+		volume_pct = p->alarm_volume;
+		chumby_volume_set(p->alarm_volume);
+	}
+	tone_pid = chumby_spawn(ALARM_TONE, tone_argv);
+	alarm_publish();
+	show_clock();
+	screen_update();
+}
+
+static void alarm_snooze(void)
+{
+	if (alarm_state != CHUMBY_ALARM_RINGING)
+		return;
+	tone_stop();
+	alarm_state = CHUMBY_ALARM_SNOOZED;
+	snooze_until = time(NULL) + chumby_policy()->snooze_minutes * 60;
+	alarm_publish();
+}
+
+static void alarm_stop(void)
+{
+	tone_stop();
+	alarm_state = CHUMBY_ALARM_IDLE;
+	snooze_until = 0;
+	alarm_publish();
+	screen_wake();	/* a moment to see it stopped, then dark again */
+}
+
+/* Once a second: due alarms, snooze expiry, ring timeout, screen hours. */
+static void alarm_tick_cb(lv_timer_t *t)
+{
+	time_t now = time(NULL);
+	struct tm tm;
+	long minute = (long)(now / 60);
+	bool due = false, changed = false;
+	int i;
+
+	(void)t;
+	alarms_reload();
+	if (alarm_state == CHUMBY_ALARM_RINGING && now - ring_started >= RING_MAX_S)
+		alarm_stop();
+	if (alarm_state == CHUMBY_ALARM_SNOOZED && now >= snooze_until)
+		alarm_ring();
+
+	/* Check each minute once, so a dismissed alarm doesn't ring again
+	 * in the same minute. */
+	if (minute != last_minute) {
+		last_minute = minute;
+		localtime_r(&now, &tm);
+		for (i = 0; i < n_alarms; i++) {
+			struct chumby_alarm *a = &alarms[i];
+
+			if (!a->enabled || a->time != tm.tm_hour * 60 + tm.tm_min ||
+			    !chumby_alarm_on_day(a, &tm))
+				continue;
+			due = true;
+			if (!a->days) {		/* "once": done */
+				a->enabled = false;
+				changed = true;
+			}
+		}
+		if (changed)
+			chumby_alarms_save(alarms, n_alarms);
+		if (due)
+			alarm_ring();
+	}
+	screen_update();
+}
+
+/* ------------------------------------------------------------------ */
+/* Snooze button                                                      */
+
+static void snooze_pressed(void)
+{
+	alarm_snooze();
+	show_clock();
+	screen_wake();
+}
+
+static void snooze_readable(int fd, void *user)
+{
+	struct input_event ev;
+
+	(void)user;
+	while (read(fd, &ev, sizeof(ev)) == sizeof(ev))
+		if (ev.type == EV_KEY && ev.value == 1)	/* press, not repeat */
+			snooze_pressed();
+}
+
+/* ------------------------------------------------------------------ */
+/* Command FIFO: $run_dir/shell.cmd                                   */
+
+static void command(const char *cmd)
+{
+	if (!strcmp(cmd, "snooze"))
+		snooze_pressed();
+	else if (!strcmp(cmd, "stop"))
+		alarm_stop();
+	else if (!strcmp(cmd, "ring"))
+		alarm_ring();
+	else if (!strcmp(cmd, "volume"))
+		popup_open(POPUP_VOLUME);
+	else if (!strcmp(cmd, "brightness"))
+		popup_open(POPUP_BRIGHTNESS);
+	else if (cmd[0])
+		fprintf(stderr, "chumby-shell: unknown command '%s'\n", cmd);
+}
+
+static void cmd_readable(int fd, void *user)
+{
+	char buf[256], *line, *save;
+	ssize_t n;
+
+	(void)user;
+	while ((n = read(fd, buf, sizeof(buf) - 1)) > 0) {
+		buf[n] = '\0';
+		for (line = strtok_r(buf, "\n", &save); line;
+		     line = strtok_r(NULL, "\n", &save))
+			command(line);
+	}
+}
+
+/* Opened read-write so it never reports EOF when a writer goes away. */
+static int cmd_fifo_open(void)
+{
+	const char *dir = chumby_run_dir();
+	char path[256];
+
+	mkdir(dir, 0755);
+	snprintf(path, sizeof(path), "%s/shell.cmd", dir);
+	if (mkfifo(path, 0622) < 0 && errno != EEXIST) {
+		fprintf(stderr, "chumby-shell: cannot create %s\n", path);
+		return -1;
+	}
+	return open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
 }
 
 /* Reap apps we launched once they exit. */
 static void reaper_cb(lv_timer_t *t)
 {
+	pid_t pid;
+
 	(void)t;
-	while (waitpid(-1, NULL, WNOHANG) > 0)
-		;
+	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0)
+		if (pid == tone_pid)
+			tone_pid = -1;
 }
 
 /* The sound card is a module and may appear after we start. */
@@ -788,11 +1080,14 @@ int main(void)
 	chumby_on_mode_change(on_mode, NULL);	/* builds home, sets brightness */
 
 	chumby_watch_fd(find_input("rotary"), knob_readable, NULL);
+	chumby_watch_fd(find_input("snooze"), snooze_readable, NULL);
+	chumby_watch_fd(find_input("mxs-lradc-ts"), touch_readable, NULL);
+	chumby_watch_fd(cmd_fifo_open(), cmd_readable, NULL);
 	lv_timer_ready(lv_timer_create(volume_sync_cb, 2000, NULL));
 	lv_timer_create(reaper_cb, 1000, NULL);
-	signal(SIGUSR1, popup_signal);
-	signal(SIGUSR2, popup_signal);
-	lv_timer_create(popup_request_cb, 100, NULL);
+	/* A stale state file from a previous run: we're idle. */
+	alarm_publish();
+	lv_timer_ready(lv_timer_create(alarm_tick_cb, 1000, NULL));
 
 	return chumby_run();
 }

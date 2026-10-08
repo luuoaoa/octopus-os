@@ -13,4 +13,5 @@ config BR2_PACKAGE_LIBCHUMBY
 	help
 	  Common framework for Chumby One apps: LVGL on Wayland, Noto
 	  Sans via FreeType, the universal dark theme with automatic night
-	  mode (/etc/chumby/policy.conf), volume/brightness helpers.
+	  mode (/etc/chumby/policy.conf), volume/brightness/screen
+	  helpers, alarms.

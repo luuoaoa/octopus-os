@@ -7,7 +7,9 @@
  *   - Noto Sans fonts (FreeType), with LVGL symbols as fallback
  *   - the universal dark theme, and night mode switched automatically by
  *     the system policy (/etc/chumby/policy.conf, default 19:00-07:00)
- *   - volume / brightness helpers and a main loop that can watch extra fds
+ *   - volume / brightness / screen power helpers and a main loop that can
+ *     watch extra fds
+ *   - alarms (/etc/chumby/alarms.conf), rung by the shell
  *
  * Minimal app:
  *
@@ -23,6 +25,8 @@
 #define CHUMBY_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <time.h>
 #include "lvgl/lvgl.h"
 
 #ifdef __cplusplus
@@ -71,6 +75,11 @@ struct chumby_policy {
 	int force;		/* -1 auto, else a chumby_mode_t */
 	int day_brightness;	/* percent */
 	int night_brightness;	/* percent */
+	int screen_off_start;	/* backlight off from here, default 21:00 */
+	int screen_off_end;	/* ... to here, default 07:00 (same = never) */
+	int wake_seconds;	/* snooze button lights it this long, default 10 */
+	int snooze_minutes;	/* default 9 */
+	int alarm_volume;	/* minimum volume while ringing, percent */
 };
 
 typedef void (*chumby_mode_cb_t)(chumby_mode_t mode, void *user);
@@ -99,15 +108,65 @@ void chumby_on_mode_change(chumby_mode_cb_t cb, void *user);
 
 /* Policy */
 const struct chumby_policy *chumby_policy(void);
+/* Is the local time now in [start, end) (minutes, may wrap midnight)? */
+bool chumby_in_window(int start, int end);
 
 /* Hardware helpers (percent, 0..100; -1 if unavailable) */
 int chumby_volume_get(void);
 void chumby_volume_set(int percent);
 int chumby_brightness_get(void);
 void chumby_brightness_set(int percent);
+/* Backlight power: off is completely dark (the brightness is kept). */
+void chumby_screen_power(bool on);
+bool chumby_screen_is_on(void);
 
 /* Run a command in the background (no shell); returns the pid or -1. */
 int chumby_spawn(const char *path, char *const argv[]);
+
+/*
+ * Alarms. /etc/chumby/alarms.conf, one per line: "06:30 MTWTF-- on"
+ * (days Monday..Sunday, '-' = not that day, "once" = next occurrence
+ * only). The clock app edits them; the shell rings them, so they go off
+ * whatever app is open.
+ */
+#define CHUMBY_MAX_ALARMS	8
+#define CHUMBY_DAYS_ALL		0x7f
+#define CHUMBY_DAYS_WEEKDAYS	0x1f
+#define CHUMBY_DAYS_WEEKEND	0x60
+
+struct chumby_alarm {
+	int time;		/* minutes after midnight */
+	unsigned char days;	/* bit 0 = Monday .. bit 6 = Sunday; 0 = once */
+	bool enabled;
+};
+
+const char *chumby_alarms_path(void);
+int chumby_alarms_load(struct chumby_alarm *alarms, int max);
+bool chumby_alarms_save(const struct chumby_alarm *alarms, int n);
+/* "Every day", "Weekdays", "Weekends", "Once" or e.g. "Mon Wed Fri". */
+const char *chumby_alarm_days_text(unsigned char days, char *buf, size_t len);
+/* Does it ring on the day of `tm`? */
+bool chumby_alarm_on_day(const struct chumby_alarm *a, const struct tm *tm);
+/* When an enabled alarm next rings after `from` (0 if disabled). */
+time_t chumby_alarm_next(const struct chumby_alarm *a, time_t from);
+
+/* What the shell's alarm is doing (it publishes this in the run dir). */
+typedef enum {
+	CHUMBY_ALARM_IDLE,
+	CHUMBY_ALARM_RINGING,
+	CHUMBY_ALARM_SNOOZED,	/* *until = when it rings again */
+} chumby_alarm_state_t;
+
+chumby_alarm_state_t chumby_alarm_state(time_t *until);
+
+/*
+ * Runtime directory shared with the shell (/run/chumby, or
+ * $CHUMBY_RUN_DIR). The shell reads commands from its "shell.cmd" FIFO:
+ * "snooze" (= the snooze button), "stop" (dismiss the alarm), "ring"
+ * (ring now, for testing), "volume" / "brightness" (open the popup).
+ */
+const char *chumby_run_dir(void);
+bool chumby_shell_command(const char *cmd);
 
 #ifdef __cplusplus
 }

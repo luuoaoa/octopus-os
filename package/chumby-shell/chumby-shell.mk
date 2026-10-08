@@ -8,7 +8,7 @@ CHUMBY_SHELL_VERSION = 1.0
 CHUMBY_SHELL_SITE = $(BR2_EXTERNAL_PIFANSRF_PATH)/package/chumby-shell/src
 CHUMBY_SHELL_SITE_METHOD = local
 CHUMBY_SHELL_LICENSE = GPL-2.0+
-CHUMBY_SHELL_DEPENDENCIES = host-pkgconf host-wayland libchumby wayland
+CHUMBY_SHELL_DEPENDENCIES = host-pkgconf host-wayland alsa-lib libchumby wayland
 
 define CHUMBY_SHELL_BUILD_CMDS
 	$(TARGET_MAKE_ENV) $(MAKE) -C $(@D) \
@@ -19,6 +19,7 @@ endef
 
 define CHUMBY_SHELL_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/chumby-shell $(TARGET_DIR)/usr/bin/chumby-shell
+	$(INSTALL) -D -m 0755 $(@D)/chumby-alarm-tone $(TARGET_DIR)/usr/bin/chumby-alarm-tone
 	$(INSTALL) -D -m 0755 $(@D)/chumby-screenshot $(TARGET_DIR)/usr/bin/chumby-screenshot
 endef
 

@@ -13,10 +13,13 @@
  *
  * Apps are exported through wlr-foreign-toplevel-management so the shell
  * can list, activate, minimize and close them. Input is touch (plus an
- * optional USB keyboard); the knob is read by the shell directly.
+ * optional USB keyboard); the knob and snooze button are read by the shell
+ * directly. While the shell has the backlight off (night), touches are
+ * dropped so nothing gets pressed blind.
  */
 
 #define _POSIX_C_SOURCE 200809L
+#include <fcntl.h>
 #include <getopt.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -464,6 +467,22 @@ static struct wlr_surface *surface_at(struct server *s, double lx, double ly,
 	return ss ? ss->surface : NULL;
 }
 
+/* The shell powers the backlight down at night (bl_power != 0). */
+#define BL_POWER "/sys/class/backlight/backlight/bl_power"
+
+static bool screen_dark(void)
+{
+	int fd = open(BL_POWER, O_RDONLY | O_CLOEXEC);
+	char c = '0';
+
+	if (fd < 0)
+		return false;
+	if (read(fd, &c, 1) != 1)
+		c = '0';
+	close(fd);
+	return c != '0';
+}
+
 static void touch_down(struct wl_listener *l, void *data)
 {
 	struct touch_dev *t = wl_container_of(l, t, down);
@@ -472,7 +491,9 @@ static void touch_down(struct wl_listener *l, void *data)
 	double lx = ev->x * s->width, ly = ev->y * s->height, sx, sy;
 	struct wlr_surface *surface = surface_at(s, lx, ly, &sx, &sy);
 
-	if (!surface || ev->touch_id < 0 || ev->touch_id >= MAX_TOUCH)
+	/* Not marked active: its motion and up are dropped too. */
+	if (!surface || ev->touch_id < 0 || ev->touch_id >= MAX_TOUCH ||
+	    screen_dark())
 		return;
 	/* Remember the surface origin so motion stays relative to it. */
 	s->touch[ev->touch_id].active = true;
@@ -591,6 +612,14 @@ static void new_keyboard(struct server *s, struct wlr_input_device *dev)
 		xkb_keymap_new_from_names(ctx, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS) : NULL;
 	struct keyboard *k;
 
+	/* The snooze button (gpio-keys "snooze") belongs to the shell. */
+	if (dev->name && !strcmp(dev->name, "snooze")) {
+		if (keymap)
+			xkb_keymap_unref(keymap);
+		if (ctx)
+			xkb_context_unref(ctx);
+		return;
+	}
 	/* No xkeyboard-config data on the image: no keyboards. */
 	if (!keymap) {
 		wlr_log(WLR_INFO, "no XKB keymap available, ignoring keyboard %s",

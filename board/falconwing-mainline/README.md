@@ -33,6 +33,7 @@ shared via `board/falconwing/rootfs-common`.
 | Backlight | `pwm-backlight`, PWM2 @ 625 Hz |
 | Touchscreen | `mxs-lradc-ts`, 4-wire |
 | Knob | `rotary-encoder` on ROTARYA/B as GPIOs (REL_WHEEL) |
+| Snooze button (top) | `gpio-keys` "snooze" on B1P30 (PWM4 pad), active low, KEY_PROG1 — pin from the vendor `chumby_bend.ko` |
 | Audio | patch 0003: new i.MX23 built-in codec driver + `simple-audio-card`; external speaker amp via `simple-audio-amplifier`; headphone detect |
 | CPU frequency | `cpufreq-dt`, `ondemand`: 454.74 / 227.37 / 151.58 / 113.68 MHz (patch 0004, see below) |
 
@@ -99,7 +100,15 @@ Sized for the resistive touchscreen: every touch target is at least 42 px
   bar you tap to set (no knob to aim at) and - / + buttons in 10 % steps;
   it closes on the same button, a tap on empty space, or after 6 s idle.
   Turning the knob changes the volume from anywhere and shows the popup.
-  `killall -USR1 chumby-shell` / `-USR2` opens the popups (debugging).
+  The **snooze button** brings up the Clock from any app, lights the
+  screen for 10 s in the screen-off hours, and snoozes a ringing alarm.
+  The shell also **rings the alarms** (so they go off whatever is open,
+  even with the Clock closed): it brings up the Clock, keeps the screen
+  on, raises the volume to `alarm_volume` if lower, stops the FM radio
+  (it holds the sound card) and plays `chumby-alarm-tone`; it gives up
+  after 10 min. Commands go to the FIFO `/run/chumby/shell.cmd`:
+  `echo snooze|stop|ring|volume|brightness > /run/chumby/shell.cmd`
+  (handy over ssh; `ring` tests the alarm).
   Started with the compositor by `/etc/init.d/S95chumby-session` (log in
   /var/log/chumby-session.log).
 - **libchumby** (package/libchumby): the framework every app links. LVGL
@@ -111,12 +120,28 @@ Sized for the resistive touchscreen: every touch target is at least 42 px
 - **Apps** (package/chumby-apps): `chumby-clock`, `chumby-fm`. An app is a
   binary plus `/usr/share/chumby/apps/<name>.app` (`Id` = the app_id it
   passes to `chumby_app_init()`, `Name`, `Exec`, `Icon`).
+- **Clock**: HH:MM (no seconds: one redraw a minute), date, and a bar
+  with the next alarm that opens the alarm list. Alarms: tap a row to
+  edit, On/Off on the right, + to add (up to 8). The editor has big
+  + / − for hour and minute (hold the minute buttons to step by 5) and a
+  Repeat button cycling Once / Every day / Weekdays / Weekends. Stored in
+  `/etc/chumby/alarms.conf` (`06:30 MTWTF-- on`, editable by hand; other
+  day sets work, the UI just can't make them). While an alarm rings the
+  Clock shows Snooze / Stop over everything.
 
 **Night mode** is policy, not per-app: `/etc/chumby/policy.conf`
 (`night_start = 19:00`, `night_end = 07:00`, `mode = auto|day|night`,
 `day_brightness`, `night_brightness`) is re-read every 30 s by every
 process. At night the palette turns black/warm-red and the shell dims the
 backlight; the brightness control overrides until the next switch.
+
+**Screen off**: from `screen_off_start` to `screen_off_end` (21:00-07:00)
+the shell powers the backlight down completely (`bl_power`), not just to
+a low brightness. The snooze button or the knob lights it for
+`wake_seconds` (10), touches keep it lit while it is, and a ringing alarm
+keeps it on. chumby-wm drops touches that start on the dark screen, so
+nothing is pressed blind. `snooze_minutes` (9) and `alarm_volume` (60 %)
+are in the same file.
 
 **Touch** goes through libinput; the vendor calibration is applied by
 `/etc/udev/rules.d/90-chumby-touch.rules` (`LIBINPUT_CALIBRATION_MATRIX`).
@@ -136,6 +161,11 @@ dir), start apps against it, and grab `chumby-screenshot` PPMs.
 - USB power vs reset roles of B0P26 / B0P29 (vendor comments disagree;
   end state is both high either way).
 - Knob steps per detent.
+- Snooze button: pin and polarity are from the vendor driver's code; the
+  internal pull-up is enabled in case the board has none.
+- Alarm tone through the `default` ALSA device, and `bl_power` blanking on
+  this panel (the alarm, snooze and screen logic ran headless, where there
+  is no sound card or backlight).
 - Audio driver: written against the vendor/Freescale init sequences, never
   run on this kernel.
 - FM tuning matches the stock tool, but the software `scan` is new.

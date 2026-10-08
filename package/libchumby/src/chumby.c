@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -21,6 +22,8 @@
 extern char **environ;
 
 #define POLICY_FILE	"/etc/chumby/policy.conf"
+#define ALARMS_FILE	"/etc/chumby/alarms.conf"
+#define RUN_DIR		"/run/chumby"
 #define FONT_DIR	"/usr/share/fonts/noto/"
 #define BACKLIGHT	"/sys/class/backlight/backlight/"
 #define MAX_WINDOWS	4
@@ -40,6 +43,11 @@ static struct chumby_policy policy = {
 	.force = -1,
 	.day_brightness = 80,
 	.night_brightness = 20,
+	.screen_off_start = 21 * 60,
+	.screen_off_end = 7 * 60,
+	.wake_seconds = 10,
+	.snooze_minutes = 9,
+	.alarm_volume = 60,
 };
 
 static int parse_hhmm(const char *s, int def)
@@ -72,6 +80,16 @@ static void policy_load(void)
 			policy.day_brightness = atoi(val);
 		else if (!strcmp(key, "night_brightness"))
 			policy.night_brightness = atoi(val);
+		else if (!strcmp(key, "screen_off_start"))
+			policy.screen_off_start = parse_hhmm(val, policy.screen_off_start);
+		else if (!strcmp(key, "screen_off_end"))
+			policy.screen_off_end = parse_hhmm(val, policy.screen_off_end);
+		else if (!strcmp(key, "wake_seconds") && atoi(val) > 0)
+			policy.wake_seconds = atoi(val);
+		else if (!strcmp(key, "snooze_minutes") && atoi(val) > 0)
+			policy.snooze_minutes = atoi(val);
+		else if (!strcmp(key, "alarm_volume"))
+			policy.alarm_volume = atoi(val);
 	}
 	fclose(f);
 }
@@ -81,21 +99,25 @@ const struct chumby_policy *chumby_policy(void)
 	return &policy;
 }
 
-static chumby_mode_t policy_mode_now(void)
+bool chumby_in_window(int start, int end)
 {
 	time_t t = time(NULL);
 	struct tm tm;
 	int now;
 
-	if (policy.force >= 0)
-		return policy.force;
 	localtime_r(&t, &tm);
 	now = tm.tm_hour * 60 + tm.tm_min;
-	/* The night window usually wraps midnight (19:00 -> 07:00). */
-	if (policy.night_start > policy.night_end)
-		return (now >= policy.night_start || now < policy.night_end) ?
-			CHUMBY_MODE_NIGHT : CHUMBY_MODE_DAY;
-	return (now >= policy.night_start && now < policy.night_end) ?
+	/* Night windows usually wrap midnight (19:00 -> 07:00). */
+	if (start > end)
+		return now >= start || now < end;
+	return now >= start && now < end;
+}
+
+static chumby_mode_t policy_mode_now(void)
+{
+	if (policy.force >= 0)
+		return policy.force;
+	return chumby_in_window(policy.night_start, policy.night_end) ?
 		CHUMBY_MODE_NIGHT : CHUMBY_MODE_DAY;
 }
 
@@ -484,4 +506,194 @@ void chumby_brightness_set(int percent)
 		fprintf(f, "%d\n", (percent * max + 50) / 100 ? (percent * max + 50) / 100 : 1);
 		fclose(f);
 	}
+}
+
+/* FB_BLANK_UNBLANK / FB_BLANK_POWERDOWN: pwm-backlight turns the PWM off. */
+void chumby_screen_power(bool on)
+{
+	FILE *f = fopen(BACKLIGHT "bl_power", "w");
+
+	if (f) {
+		fprintf(f, "%d\n", on ? 0 : 4);
+		fclose(f);
+	}
+}
+
+bool chumby_screen_is_on(void)
+{
+	return read_int(BACKLIGHT "bl_power") <= 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Alarms                                                             */
+
+static const char *const day_names[7] = {
+	"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
+};
+
+const char *chumby_alarms_path(void)
+{
+	const char *p = getenv("CHUMBY_ALARMS");
+
+	return p && *p ? p : ALARMS_FILE;
+}
+
+int chumby_alarms_load(struct chumby_alarm *alarms, int max)
+{
+	FILE *f = fopen(chumby_alarms_path(), "r");
+	char line[128], hhmm[16], days[16], state[16];
+	int n = 0, i;
+
+	if (!f)
+		return 0;
+	while (n < max && fgets(line, sizeof(line), f)) {
+		struct chumby_alarm *a = &alarms[n];
+
+		if (line[0] == '#' ||
+		    sscanf(line, "%15s %15s %15s", hhmm, days, state) != 3)
+			continue;
+		a->time = parse_hhmm(hhmm, -1);
+		if (a->time < 0)
+			continue;
+		a->days = 0;
+		if (strcmp(days, "once"))
+			for (i = 0; i < 7 && days[i]; i++)
+				if (days[i] != '-')
+					a->days |= 1 << i;
+		a->enabled = !strcmp(state, "on");
+		n++;
+	}
+	fclose(f);
+	return n;
+}
+
+/* Written to a temporary file and renamed: the shell may read it anytime. */
+bool chumby_alarms_save(const struct chumby_alarm *alarms, int n)
+{
+	const char *path = chumby_alarms_path();
+	char tmp[256];
+	FILE *f;
+	int i, d;
+
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+	f = fopen(tmp, "w");
+	if (!f)
+		return false;
+	fprintf(f, "# Chumby alarms: HH:MM, days Monday..Sunday ('-' = off) "
+		   "or once, on/off.\n# Edited in the Clock app.\n");
+	for (i = 0; i < n; i++) {
+		fprintf(f, "%02d:%02d ", alarms[i].time / 60, alarms[i].time % 60);
+		if (!alarms[i].days)
+			fputs("once", f);
+		for (d = 0; alarms[i].days && d < 7; d++)
+			fputc(alarms[i].days & (1 << d) ? "MTWTFSS"[d] : '-', f);
+		fprintf(f, " %s\n", alarms[i].enabled ? "on" : "off");
+	}
+	if (fflush(f) || fsync(fileno(f))) {
+		fclose(f);
+		unlink(tmp);
+		return false;
+	}
+	fclose(f);
+	return rename(tmp, path) == 0;
+}
+
+const char *chumby_alarm_days_text(unsigned char days, char *buf, size_t len)
+{
+	size_t used = 0;
+	int d;
+
+	if (days == CHUMBY_DAYS_ALL)
+		return "Every day";
+	if (days == CHUMBY_DAYS_WEEKDAYS)
+		return "Weekdays";
+	if (days == CHUMBY_DAYS_WEEKEND)
+		return "Weekends";
+	if (!days)
+		return "Once";
+	buf[0] = '\0';
+	for (d = 0; d < 7; d++)
+		if (days & (1 << d) && used < len)
+			used += snprintf(buf + used, len - used, "%s%s",
+					 used ? " " : "", day_names[d]);
+	return buf;
+}
+
+bool chumby_alarm_on_day(const struct chumby_alarm *a, const struct tm *tm)
+{
+	/* tm_wday: 0 = Sunday; our bits start at Monday. */
+	return !a->days || (a->days & (1 << ((tm->tm_wday + 6) % 7)));
+}
+
+time_t chumby_alarm_next(const struct chumby_alarm *a, time_t from)
+{
+	struct tm tm;
+	int d;
+
+	if (!a->enabled)
+		return 0;
+	for (d = 0; d < 8; d++) {
+		time_t t;
+
+		localtime_r(&from, &tm);
+		tm.tm_mday += d;
+		tm.tm_hour = a->time / 60;
+		tm.tm_min = a->time % 60;
+		tm.tm_sec = 0;
+		tm.tm_isdst = -1;
+		t = mktime(&tm);	/* normalizes tm, so tm_wday is right */
+		if (t > from && chumby_alarm_on_day(a, &tm))
+			return t;
+	}
+	return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shell IPC                                                          */
+
+const char *chumby_run_dir(void)
+{
+	const char *p = getenv("CHUMBY_RUN_DIR");
+
+	return p && *p ? p : RUN_DIR;
+}
+
+/* The shell writes "ringing" or "snoozed <epoch>"; no file = idle. */
+chumby_alarm_state_t chumby_alarm_state(time_t *until)
+{
+	char path[256], word[16];
+	long long t = 0;
+	chumby_alarm_state_t st = CHUMBY_ALARM_IDLE;
+	FILE *f;
+
+	snprintf(path, sizeof(path), "%s/alarm", chumby_run_dir());
+	f = fopen(path, "r");
+	if (!f)
+		return st;
+	if (fscanf(f, "%15s %lld", word, &t) >= 1) {
+		if (!strcmp(word, "ringing"))
+			st = CHUMBY_ALARM_RINGING;
+		else if (!strcmp(word, "snoozed"))
+			st = CHUMBY_ALARM_SNOOZED;
+	}
+	fclose(f);
+	if (until)
+		*until = (time_t)t;
+	return st;
+}
+
+bool chumby_shell_command(const char *cmd)
+{
+	char path[256], line[64];
+	int fd, len;
+	bool ok;
+
+	snprintf(path, sizeof(path), "%s/shell.cmd", chumby_run_dir());
+	fd = open(path, O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+	if (fd < 0)
+		return false;
+	len = snprintf(line, sizeof(line), "%s\n", cmd);
+	ok = write(fd, line, len) == len;
+	close(fd);
+	return ok;
 }
