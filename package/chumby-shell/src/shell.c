@@ -348,6 +348,10 @@ static void launch(struct app_info *a)
 #define BTN_W		(CHUMBY_PANEL_W - 8)
 #define BTN_H		CHUMBY_TOUCH_MIN
 #define POPUP_IDLE_MS	6000
+#define PANEL_DIM_OPA	LV_OPA_30	/* at rest: barely there */
+#define PANEL_IDLE_MS	4000
+#define PANEL_FADE_IN_MS	80
+#define PANEL_FADE_OUT_MS	600
 
 static lv_obj_t *panel_scr, *home_scr;
 static lv_obj_t *btn_home, *btn_vol, *btn_bri;
@@ -375,48 +379,118 @@ static void app_btn_cb(lv_event_t *e)
 	wl_display_flush(wl);
 }
 
-/* Colors come from the libchumby theme; "active" is the only local style. */
+/*
+ * The panel stays out of the way: no button plates and icons at
+ * PANEL_DIM_OPA at rest. Touching it brings it to full contrast, and it
+ * fades back PANEL_IDLE_MS after the last touch (once any popup closes).
+ */
+static lv_opa_t panel_opa = LV_OPA_COVER;
+static lv_timer_t *panel_timer;
+
+static void panel_opa_cb(void *var, int32_t v)
+{
+	uint32_t i;
+
+	(void)var;
+	panel_opa = v;
+	for (i = 0; i < lv_obj_get_child_count(panel_scr); i++)
+		lv_obj_set_style_opa(lv_obj_get_child(panel_scr, i), v, 0);
+}
+
+static void panel_fade(lv_opa_t to, uint32_t ms)
+{
+	lv_anim_t a;
+
+	lv_anim_delete(panel_scr, panel_opa_cb);
+	if (to == panel_opa)
+		return;
+	lv_anim_init(&a);
+	lv_anim_set_var(&a, panel_scr);
+	lv_anim_set_exec_cb(&a, panel_opa_cb);
+	lv_anim_set_values(&a, panel_opa, to);
+	lv_anim_set_duration(&a, ms);
+	lv_anim_start(&a);
+}
+
+static void panel_wake(void)
+{
+	panel_fade(LV_OPA_COVER, PANEL_FADE_IN_MS);
+	lv_timer_reset(panel_timer);
+	lv_timer_resume(panel_timer);
+}
+
+static void panel_timer_cb(lv_timer_t *t)
+{
+	if (popup_disp)
+		return;		/* stay lit while a popup is up */
+	panel_fade(PANEL_DIM_OPA, PANEL_FADE_OUT_MS);
+	lv_timer_pause(t);
+}
+
+/* Presses anywhere in the panel bubble up to its screen. */
+static void panel_press_cb(lv_event_t *e)
+{
+	(void)e;
+	panel_wake();
+}
+
+/* The open popup's button: its icon in the accent color. */
 static void set_active(lv_obj_t *b, bool active)
 {
 	if (active)
-		lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+		lv_obj_set_style_text_color(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 	else
-		lv_obj_remove_local_style_prop(b, LV_STYLE_BG_COLOR, 0);
+		lv_obj_remove_local_style_prop(b, LV_STYLE_TEXT_COLOR, 0);
 }
 
-static lv_obj_t *icon_button(lv_obj_t *parent, const char *sym, bool active)
+static lv_obj_t *icon_button(lv_obj_t *parent, const char *sym)
 {
 	lv_obj_t *b = lv_button_create(parent);
 	lv_obj_t *l = lv_label_create(b);
 
 	lv_obj_set_size(b, BTN_W, BTN_H);
 	lv_obj_set_style_radius(b, 10, 0);
-	set_active(b, active);
+	lv_obj_set_style_pad_all(b, 0, 0);
+	/* A plate only while pressed. */
+	lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_PRESSED);
+	lv_obj_set_event_bubble(b, true);
 	lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
 	lv_label_set_text(l, sym);
 	lv_obj_center(l);
 	return b;
 }
 
+/* The app in front gets a dot at its left, like the macOS dock. */
+static void running_dot(lv_obj_t *b)
+{
+	lv_obj_t *dot = lv_obj_create(b);
+
+	lv_obj_remove_style_all(dot);
+	lv_obj_set_size(dot, 6, 6);
+	lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(dot, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_clickable(dot, false);
+	lv_obj_align(dot, LV_ALIGN_LEFT_MID, 1, 0);
+}
+
 static void panel_rebuild(void)
 {
 	struct toplevel *t;
-	bool any_active = false;
 
 	if (!panel_apps)
 		return;
 	lv_obj_clean(panel_apps);
 	for (t = toplevels; t; t = t->next) {
 		struct app_info *a = app_by_id(t->app_id);
-		bool active = t->activated && !t->minimized;
-		lv_obj_t *b = icon_button(panel_apps, a ? a->icon : LV_SYMBOL_FILE, active);
+		lv_obj_t *b = icon_button(panel_apps, a ? a->icon : LV_SYMBOL_FILE);
 
-		any_active |= active;
+		if (t->activated && !t->minimized)
+			running_dot(b);
 		lv_obj_add_event_cb(b, app_btn_cb, LV_EVENT_SHORT_CLICKED, t);
 		lv_obj_add_event_cb(b, app_btn_cb, LV_EVENT_LONG_PRESSED, t);
 	}
-	/* Home is "active" when no app is in front. */
-	set_active(btn_home, !any_active);
 }
 
 static void home_btn_cb(lv_event_t *e)
@@ -528,6 +602,7 @@ static void popup_open(enum popup_kind kind)
 	bool vol = kind == POPUP_VOLUME;
 	lv_obj_t *scr, *icon, *title;
 
+	panel_wake();
 	if (popup_kind == kind && popup_disp) {
 		popup_keepalive();
 		return;
@@ -553,12 +628,12 @@ static void popup_open(enum popup_kind kind)
 	title = lv_label_create(scr);
 	lv_label_set_text(title, vol ? "Volume" : "Brightness");
 	lv_obj_set_style_text_font(title, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_align(title, LV_ALIGN_TOP_LEFT, 56, 18);
+	lv_obj_align(title, LV_ALIGN_TOP_LEFT, 56, 26);	/* centred on the icon */
 
 	popup_value = lv_label_create(scr);
 	lv_obj_set_style_text_font(popup_value, chumby_font(CHUMBY_FONT_LARGE), 0);
 	lv_obj_set_style_text_color(popup_value, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_align(popup_value, LV_ALIGN_TOP_RIGHT, -16, 18);
+	lv_obj_align(popup_value, LV_ALIGN_TOP_RIGHT, -16, 26);
 
 	/* A thick bar: tapping anywhere on it sets the value, no knob to aim at. */
 	popup_bar = lv_slider_create(scr);
@@ -600,7 +675,7 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_set_style_pad_row(scr, 4, 0);
 	lv_obj_set_scrollable(scr, false);
 
-	btn_home = icon_button(scr, LV_SYMBOL_HOME, true);
+	btn_home = icon_button(scr, LV_SYMBOL_HOME);
 	lv_obj_add_event_cb(btn_home, home_btn_cb, LV_EVENT_CLICKED, NULL);
 
 	/* Running apps: two fit; more scroll. */
@@ -613,16 +688,22 @@ static void build_panel(lv_obj_t *scr)
 			      LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_row(panel_apps, 4, 0);
 	lv_obj_set_scroll_dir(panel_apps, LV_DIR_VER);
+	lv_obj_set_event_bubble(panel_apps, true);
 
-	btn_vol = icon_button(scr, LV_SYMBOL_VOLUME_MAX, false);
+	btn_vol = icon_button(scr, LV_SYMBOL_VOLUME_MAX);
 	lv_obj_add_event_cb(btn_vol, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_VOLUME);
-	btn_bri = icon_button(scr, LV_SYMBOL_EYE_OPEN, false);
+	btn_bri = icon_button(scr, LV_SYMBOL_EYE_OPEN);
 	lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_BRIGHTNESS);
 
 	popup_timer = lv_timer_create(popup_timer_cb, POPUP_IDLE_MS, NULL);
 	lv_timer_pause(popup_timer);
+
+	lv_obj_add_event_cb(scr, panel_press_cb, LV_EVENT_PRESSED, NULL);
+	panel_timer = lv_timer_create(panel_timer_cb, PANEL_IDLE_MS, NULL);
+	lv_timer_pause(panel_timer);
+	panel_opa_cb(NULL, PANEL_DIM_OPA);
 }
 
 /* ------------------------------------------------------------------ */
@@ -644,7 +725,7 @@ static void build_home(lv_obj_t *scr)
 	home_title = lv_label_create(scr);
 	lv_label_set_text(home_title, "Apps");
 	lv_obj_set_style_text_font(home_title, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_align(home_title, LV_ALIGN_TOP_LEFT, 12, 6);
+	lv_obj_align(home_title, LV_ALIGN_TOP_LEFT, 12, 12);
 
 	grid = lv_obj_create(scr);
 	lv_obj_remove_style_all(grid);

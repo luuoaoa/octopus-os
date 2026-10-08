@@ -94,8 +94,12 @@ Sized for the resistive touchscreen: every touch target is at least 42 px
   controls) over the app area, any other window is an app maximized into
   the rest. Apps are exported via wlr-foreign-toplevel-management;
   screencopy is enabled for `chumby-screenshot > shot.ppm`.
-- **chumby-shell** (package/chumby-shell): panel + home windows. Tap an
-  icon to switch, long-press to close, ⌂ minimizes all (shows home). The
+- **chumby-shell** (package/chumby-shell): panel + home windows. The
+  panel stays in the background: no button plates and icons at 30 %
+  opacity until it's touched, then full contrast, fading back 4 s after
+  the last touch (or when the popup closes). The app in front is marked
+  with a dot at its left, like the macOS dock. Tap an icon to switch,
+  long-press to close, ⌂ minimizes all (shows home). The
   volume and brightness buttons open a big popup over the app area: a thick
   bar you tap to set (no knob to aim at) and - / + buttons in 10 % steps;
   it closes on the same button, a tap on empty space, or after 6 s idle.
@@ -112,8 +116,11 @@ Sized for the resistive touchscreen: every touch target is at least 42 px
   Started with the compositor by `/etc/init.d/S95chumby-session` (log in
   /var/log/chumby-session.log).
 - **libchumby** (package/libchumby): the framework every app links. LVGL
-  9.6 on Wayland (wl_shm), Noto Sans via FreeType (Montserrat bitmaps only
-  as fallback for LVGL's symbol glyphs), the universal dark theme (a child
+  9.6 on Wayland (wl_shm); Rockbox's Nimbus bitmap fonts as the only
+  text font (14 px body, 19 px headings, 35 px big values, 35 px at 2x
+  for the clock face; BDFs converted to LVGL fonts at build time by
+  `fonts/bdf2lvgl.py`), with LVGL's Montserrat only for the icon
+  glyphs; the universal dark theme (a child
   theme of LVGL's default that styles buttons/sliders from the palette),
   automatic night mode, volume/brightness helpers, and a main loop that can
   watch extra fds. See `chumby.h`; a minimal app is ~10 lines.
@@ -146,8 +153,10 @@ are in the same file.
 **Touch** goes through libinput; the vendor calibration is applied by
 `/etc/udev/rules.d/90-chumby-touch.rules` (`LIBINPUT_CALIBRATION_MATRIX`).
 
-No HarfBuzz: LVGL lays text out per codepoint (fine for Latin, Greek,
-Cyrillic; not for complex scripts). No keyboard layouts are installed
+Script coverage: Nimbus 14 has Latin (with extended), Greek and Cyrillic;
+19 has Latin-1 and Cyrillic; 35 only Latin-1 (it's for the clock and big
+numbers). Missing characters fall back to Montserrat (ASCII), and there is
+no shaping for complex scripts. No keyboard layouts are installed
 (xkeyboard-config), so USB keyboards are ignored.
 
 The whole stack can be tried without hardware: run the target's
