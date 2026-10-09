@@ -104,10 +104,15 @@ static void clock_update(void)
 	int i;
 
 	localtime_r(&now, &tm);
-	strftime(buf, sizeof(buf), "%H:%M", &tm);
-	lv_label_set_text(lbl_time, buf);
-	strftime(buf, sizeof(buf), "%A, %d %B", &tm);
-	lv_label_set_text(lbl_date, buf);
+	if (chumby_time_valid()) {
+		strftime(buf, sizeof(buf), "%H:%M", &tm);
+		lv_label_set_text(lbl_time, buf);
+		strftime(buf, sizeof(buf), "%A, %d %B", &tm);
+		lv_label_set_text(lbl_date, buf);
+	} else {
+		lv_label_set_text(lbl_time, "--:--");
+		lv_label_set_text(lbl_date, "Waiting for network time");
+	}
 
 	for (i = 0; i < n_alarms; i++) {
 		time_t t = chumby_alarm_next(&alarms[i], now);

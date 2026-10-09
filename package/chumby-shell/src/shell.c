@@ -854,11 +854,13 @@ static uint64_t mono_ms(void)
 	return ts.tv_sec * 1000ull + ts.tv_nsec / 1000000;
 }
 
-/* On outside the screen-off hours, while an alarm rings, or while woken. */
+/* On outside the screen-off hours, while an alarm rings, or while woken;
+ * and always while the clock isn't set (we can't tell if it's night). */
 static void screen_update(void)
 {
 	const struct chumby_policy *p = chumby_policy();
 	bool on = alarm_state == CHUMBY_ALARM_RINGING ||
+		  !chumby_time_valid() ||
 		  p->screen_off_start == p->screen_off_end ||
 		  !chumby_in_window(p->screen_off_start, p->screen_off_end) ||
 		  mono_ms() < wake_until;
@@ -1037,8 +1039,9 @@ static void alarm_tick_cb(lv_timer_t *t)
 		alarm_ring();
 
 	/* Check each minute once, so a dismissed alarm doesn't ring again
-	 * in the same minute. */
-	if (minute != last_minute) {
+	 * in the same minute. Not before the clock is set: 00:05 in 1970
+	 * could match an alarm. */
+	if (minute != last_minute && chumby_time_valid()) {
 		last_minute = minute;
 		localtime_r(&now, &tm);
 		for (i = 0; i < n_alarms; i++) {

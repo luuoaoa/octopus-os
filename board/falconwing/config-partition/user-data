@@ -1,5 +1,9 @@
 #cloud-config
 hostname: chumby
+# Local time for the clock and alarms: a tz database name, e.g.
+# Europe/London, America/New_York, Asia/Tokyo. The clock is set over the
+# network (NTP) once WiFi is up.
+timezone: America/Los_Angeles
 # false = key-only SSH (put keys in authorized_keys on this partition).
 ssh_pwauth: true
 # Uncomment to replace the default root password ("root").

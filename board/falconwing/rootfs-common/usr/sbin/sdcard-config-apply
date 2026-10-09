@@ -12,6 +12,7 @@
 #                                        password: "passphrase or 64-hex PSK"
 #                                        hidden: true      # optional
 #   /boot/user-data            hostname: chumby
+#                              timezone: Europe/Berlin  (a tz database name)
 #                              ssh_pwauth: true|false  (default true)
 #                              passwd: <crypt hash, e.g. from mkpasswd -m sha-512>
 #   /boot/authorized_keys      installed as /root/.ssh/authorized_keys
@@ -95,6 +96,17 @@ if [ -f "$BOOT/user-data" ]; then
         echo "$HOST" > /etc/hostname
         hostname "$HOST"
         log "hostname=$HOST"
+    fi
+
+    TZNAME=$(strip "$(printf '%s\n' "$USR" | sed -nE 's/^timezone:[[:space:]]+(.*)$/\1/p' | head -1)")
+    if [ -n "$TZNAME" ]; then
+        if [ -f "/usr/share/zoneinfo/$TZNAME" ]; then
+            ln -sf "/usr/share/zoneinfo/$TZNAME" /etc/localtime
+            echo "$TZNAME" > /etc/timezone
+            log "timezone=$TZNAME"
+        else
+            log "WARN: unknown timezone '$TZNAME' (no /usr/share/zoneinfo/$TZNAME)"
+        fi
     fi
 
     V=$(strip "$(printf '%s\n' "$USR" | sed -nE 's/^ssh_pwauth:[[:space:]]+(.*)$/\1/p' | head -1)")

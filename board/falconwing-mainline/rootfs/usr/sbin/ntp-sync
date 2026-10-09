@@ -1,0 +1,8 @@
+#!/bin/sh
+# Called by busybox ntpd (-S) with the event as $1: once the clock is set
+# (step) or locked (stratum), save it to the RTC for the next reboot.
+case "$1" in
+	step|stratum)
+		hwclock -w -u 2>/dev/null
+		;;
+esac
