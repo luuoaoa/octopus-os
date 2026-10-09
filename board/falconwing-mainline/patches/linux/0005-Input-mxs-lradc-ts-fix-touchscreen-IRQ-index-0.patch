@@ -1,0 +1,40 @@
+From: falconwing bring-up
+Subject: [PATCH] Input: mxs-lradc-ts: don't look up IRQ index 0 as an IRQ number
+
+The mxs-lradc MFD passes the touchscreen its interrupts as indices into
+the LRADC node's DT "interrupts" (mapped with irq_of_parse_and_map()
+here), and the touchscreen's own interrupt is index 0. Current kernels'
+platform_get_irq_byname() warns that 0 is an invalid IRQ number and
+fails, so the probe aborts and there is no touchscreen (seen on the
+Chumby One). Read the resource directly instead.
+
+---
+diff -urN a/drivers/input/touchscreen/mxs-lradc-ts.c b/drivers/input/touchscreen/mxs-lradc-ts.c
+--- a/drivers/input/touchscreen/mxs-lradc-ts.c	2026-10-08 21:35:37.869262739 -0700
++++ b/drivers/input/touchscreen/mxs-lradc-ts.c	2026-10-08 21:35:51.004654650 -0700
+@@ -671,11 +671,22 @@
+ 	mxs_lradc_ts_hw_init(ts);
+ 
+ 	for (i = 0; i < 3; i++) {
+-		irq = platform_get_irq_byname(pdev, mxs_lradc_ts_irq_names[i]);
+-		if (irq < 0)
+-			return irq;
++		/*
++		 * The MFD's IRQ resources are indices into the parent's DT
++		 * "interrupts", and the touchscreen's is index 0, which
++		 * platform_get_irq_byname() rejects as an invalid IRQ.
++		 */
++		struct resource *res =
++			platform_get_resource_byname(pdev, IORESOURCE_IRQ,
++						     mxs_lradc_ts_irq_names[i]);
++
++		if (!res)
++			return -ENXIO;
++		irq = res->start;
+ 
+ 		virq = irq_of_parse_and_map(node, irq);
++		if (!virq)
++			return -EINVAL;
+ 
+ 		mxs_lradc_ts_stop(ts);
+ 
