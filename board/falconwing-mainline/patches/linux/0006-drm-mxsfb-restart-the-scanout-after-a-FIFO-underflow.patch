@@ -1,0 +1,149 @@
+From: falconwing bring-up
+Subject: [PATCH] drm: mxsfb: restart the scanout after a FIFO underflow
+
+On the Chumby One (i.MX23) the picture came up split after boot: the
+top left corner in the middle of the panel, wrapped around. LCDIF
+CTRL1 showed UNDERFLOW_IRQ set, RECOVER_ON_UNDERFLOW was set too, and
+the shift stayed until the next modeset, which cleared it.
+
+Enable the underflow interrupt while scanning out and, when it fires,
+restart the controller from a work item (under the CRTC lock, only if
+the CRTC is active): stop, clear the FIFO, start again from the current
+buffer. Rate-limited to once a second.
+
+---
+diff -urN a/drivers/gpu/drm/mxsfb/mxsfb_drv.c b/drivers/gpu/drm/mxsfb/mxsfb_drv.c
+--- a/drivers/gpu/drm/mxsfb/mxsfb_drv.c	2026-10-08 21:53:46.624996376 -0700
++++ b/drivers/gpu/drm/mxsfb/mxsfb_drv.c	2026-10-08 21:54:23.269068394 -0700
+@@ -172,6 +172,15 @@
+ 
+ 	writel(CTRL1_CUR_FRAME_DONE_IRQ, mxsfb->base + LCDC_CTRL1 + REG_CLR);
+ 
++	if (reg & CTRL1_UNDERFLOW_IRQ) {
++		writel(CTRL1_UNDERFLOW_IRQ, mxsfb->base + LCDC_CTRL1 + REG_CLR);
++		/* At most once a second, should it keep underflowing. */
++		if (time_after(jiffies, mxsfb->underflow_next)) {
++			mxsfb->underflow_next = jiffies + HZ;
++			schedule_work(&mxsfb->underflow_work);
++		}
++	}
++
+ 	return IRQ_HANDLED;
+ }
+ 
+@@ -220,6 +229,8 @@
+ 	mxsfb->drm = drm;
+ 	drm->dev_private = mxsfb;
+ 	mxsfb->devdata = devdata;
++	INIT_WORK(&mxsfb->underflow_work, mxsfb_underflow_work);
++	mxsfb->underflow_next = jiffies;
+ 
+ 	mxsfb->base = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(mxsfb->base))
+@@ -315,6 +326,7 @@
+ 	pm_runtime_get_sync(drm->dev);
+ 	mxsfb_irq_uninstall(drm);
+ 	pm_runtime_put_sync(drm->dev);
++	cancel_work_sync(&((struct mxsfb_drm_private *)drm->dev_private)->underflow_work);
+ 
+ 	drm->dev_private = NULL;
+ 
+diff -urN a/drivers/gpu/drm/mxsfb/mxsfb_drv.h b/drivers/gpu/drm/mxsfb/mxsfb_drv.h
+--- a/drivers/gpu/drm/mxsfb/mxsfb_drv.h	2026-10-08 21:53:46.625018698 -0700
++++ b/drivers/gpu/drm/mxsfb/mxsfb_drv.h	2026-10-08 21:54:23.268991038 -0700
+@@ -12,6 +12,7 @@
+ #include <drm/drm_device.h>
+ #include <drm/drm_encoder.h>
+ #include <drm/drm_plane.h>
++#include <linux/workqueue.h>
+ 
+ struct clk;
+ 
+@@ -47,6 +48,10 @@
+ 	struct drm_bridge		*bridge;
+ 
+ 	bool				crc_active;
++
++	/* Restart the scanout after a FIFO underflow (see mxsfb_kms.c). */
++	struct work_struct		underflow_work;
++	unsigned long			underflow_next;	/* jiffies */
+ };
+ 
+ static inline struct mxsfb_drm_private *
+@@ -59,5 +64,6 @@
+ void mxsfb_disable_axi_clk(struct mxsfb_drm_private *mxsfb);
+ 
+ int mxsfb_kms_init(struct mxsfb_drm_private *mxsfb);
++void mxsfb_underflow_work(struct work_struct *work);
+ 
+ #endif /* __MXSFB_DRV_H__ */
+diff -urN a/drivers/gpu/drm/mxsfb/mxsfb_kms.c b/drivers/gpu/drm/mxsfb/mxsfb_kms.c
+--- a/drivers/gpu/drm/mxsfb/mxsfb_kms.c	2026-10-08 21:53:46.625033416 -0700
++++ b/drivers/gpu/drm/mxsfb/mxsfb_kms.c	2026-10-08 21:54:23.269040271 -0700
+@@ -202,6 +202,10 @@
+ 	reg |= CTRL1_RECOVER_ON_UNDERFLOW;
+ 	writel(reg, mxsfb->base + LCDC_CTRL1);
+ 
++	/* ... and restart it ourselves if that isn't enough (i.MX23). */
++	writel(CTRL1_UNDERFLOW_IRQ, mxsfb->base + LCDC_CTRL1 + REG_CLR);
++	writel(CTRL1_UNDERFLOW_IRQ_EN, mxsfb->base + LCDC_CTRL1 + REG_SET);
++
+ 	writel(CTRL_RUN, mxsfb->base + LCDC_CTRL + REG_SET);
+ }
+ 
+@@ -209,6 +213,8 @@
+ {
+ 	u32 reg;
+ 
++	writel(CTRL1_UNDERFLOW_IRQ_EN, mxsfb->base + LCDC_CTRL1 + REG_CLR);
++
+ 	/*
+ 	 * Even if we disable the controller here, it will still continue
+ 	 * until its FIFOs are running out of data
+@@ -228,6 +234,33 @@
+ }
+ 
+ /*
++ * On the i.MX23 a FIFO underflow (the system bus busy for too long, e.g.
++ * during boot) leaves the image permanently shifted and wrapped around,
++ * RECOVER_ON_UNDERFLOW notwithstanding. Unlike the case described above,
++ * UNDERFLOW_IRQ does assert there, so restart the scanout when it does:
++ * stop, clear the FIFO, start again from the current buffer.
++ */
++void mxsfb_underflow_work(struct work_struct *work)
++{
++	struct mxsfb_drm_private *mxsfb =
++		container_of(work, struct mxsfb_drm_private, underflow_work);
++	struct drm_crtc *crtc = &mxsfb->crtc;
++
++	drm_modeset_lock(&crtc->mutex, NULL);
++	if (crtc->state && crtc->state->active) {
++		mxsfb_disable_controller(mxsfb);
++		writel(CTRL1_FIFO_CLEAR, mxsfb->base + LCDC_CTRL1 + REG_SET);
++		writel(CTRL1_FIFO_CLEAR, mxsfb->base + LCDC_CTRL1 + REG_CLR);
++		writel(readl(mxsfb->base + mxsfb->devdata->next_buf),
++		       mxsfb->base + mxsfb->devdata->cur_buf);
++		mxsfb_enable_controller(mxsfb);
++		dev_info_ratelimited(mxsfb->drm->dev,
++				     "FIFO underflow: scanout restarted\n");
++	}
++	drm_modeset_unlock(&crtc->mutex);
++}
++
++/*
+  * Clear the bit and poll it cleared.  This is usually called with
+  * a reset address and mask being either SFTRST(bit 31) or CLKGATE
+  * (bit 30).
+diff -urN a/drivers/gpu/drm/mxsfb/mxsfb_regs.h b/drivers/gpu/drm/mxsfb/mxsfb_regs.h
+--- a/drivers/gpu/drm/mxsfb/mxsfb_regs.h	2026-10-08 21:53:46.625049907 -0700
++++ b/drivers/gpu/drm/mxsfb/mxsfb_regs.h	2026-10-08 21:54:23.268957124 -0700
+@@ -60,7 +60,9 @@
+ #define CTRL1_FIFO_CLEAR		BIT(21)
+ #define CTRL1_SET_BYTE_PACKAGING(x)	(((x) & 0xf) << 16)
+ #define CTRL1_GET_BYTE_PACKAGING(x)	(((x) >> 16) & 0xf)
++#define CTRL1_UNDERFLOW_IRQ_EN		BIT(14)
+ #define CTRL1_CUR_FRAME_DONE_IRQ_EN	BIT(13)
++#define CTRL1_UNDERFLOW_IRQ		BIT(10)
+ #define CTRL1_CUR_FRAME_DONE_IRQ	BIT(9)
+ 
+ #define CTRL2_SET_OUTSTANDING_REQS_1	0
