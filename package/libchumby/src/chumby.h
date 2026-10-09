@@ -39,6 +39,8 @@ extern "C" {
 #define CHUMBY_SCREEN_H	240
 #define CHUMBY_PANEL_W	64
 #define CHUMBY_APP_W	(CHUMBY_SCREEN_W - CHUMBY_PANEL_W)
+/* The shell's volume/brightness bar, along the bottom of the app area. */
+#define CHUMBY_POPUP_H	56
 
 /*
  * Minimum touch target on the resistive panel (~9 mm). Anything a finger

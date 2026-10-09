@@ -6,7 +6,8 @@
  * Window policy, keyed on the xdg app_id:
  *   "chumby-panel"  pinned to the left edge, PANEL_W wide, always on top
  *   "chumby-popup"  the shell's transient controls (volume, brightness):
- *                   over the app area, above apps, below the panel
+ *                   a POPUP_H bar along the bottom of the app area, above
+ *                   apps, below the panel
  *   "chumby-home"   the app list, behind every app (background layer)
  *   anything else   an app: maximized into the area right of the panel,
  *                   one visible at a time (the most recently activated)
@@ -49,6 +50,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #define PANEL_W		64	/* big enough for resistive-touch buttons */
+#define POPUP_H		56	/* = CHUMBY_POPUP_H in chumby.h */
 #define APP_PANEL	"chumby-panel"
 #define APP_HOME	"chumby-home"
 #define APP_POPUP	"chumby-popup"
@@ -125,8 +127,8 @@ static void view_configure(struct view *v)
 		wlr_xdg_toplevel_set_size(v->xdg, PANEL_W, s->height);
 		break;
 	case VIEW_POPUP:
-		wlr_scene_node_set_position(&v->tree->node, PANEL_W, 0);
-		wlr_xdg_toplevel_set_size(v->xdg, s->width - PANEL_W, s->height);
+		wlr_scene_node_set_position(&v->tree->node, PANEL_W, s->height - POPUP_H);
+		wlr_xdg_toplevel_set_size(v->xdg, s->width - PANEL_W, POPUP_H);
 		break;
 	case VIEW_HOME:
 	case VIEW_APP:

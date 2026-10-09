@@ -368,7 +368,7 @@ static void launch(struct app_info *a)
  */
 #define BTN_W		(CHUMBY_PANEL_W - 8)
 #define BTN_H		CHUMBY_TOUCH_MIN
-#define POPUP_IDLE_MS	6000
+#define POPUP_IDLE_MS	4000
 #define PANEL_DIM_OPA	LV_OPA_30	/* at rest: barely there */
 #define PANEL_IDLE_MS	4000
 #define PANEL_FADE_IN_MS	80
@@ -381,7 +381,7 @@ static int volume_pct = 50;	/* cached: the mixer may not exist yet */
 enum popup_kind { POPUP_NONE, POPUP_VOLUME, POPUP_BRIGHTNESS };
 static enum popup_kind popup_kind;
 static lv_display_t *popup_disp;
-static lv_obj_t *popup_bar, *popup_value;
+static lv_obj_t *popup_bar;
 static lv_timer_t *popup_timer;
 
 static void app_btn_cb(lv_event_t *e)
@@ -521,7 +521,7 @@ static void home_btn_cb(lv_event_t *e)
 }
 
 /* ------------------------------------------------------------------ */
-/* Volume / brightness popup ("chumby-popup", over the app area)      */
+/* Volume / brightness bar ("chumby-popup", bottom of the app area)  */
 
 static void quick_buttons_update(void)
 {
@@ -555,10 +555,8 @@ static void popup_set(int v)
 	} else {
 		chumby_brightness_set(v);
 	}
-	if (popup_bar) {
+	if (popup_bar)
 		lv_slider_set_value(popup_bar, v, LV_ANIM_OFF);
-		lv_label_set_text_fmt(popup_value, "%d%%", v);
-	}
 	popup_keepalive();
 }
 
@@ -568,7 +566,7 @@ static void popup_close(void)
 		return;
 	chumby_window_close(popup_disp);
 	popup_disp = NULL;
-	popup_bar = popup_value = NULL;
+	popup_bar = NULL;
 	popup_kind = POPUP_NONE;
 	lv_timer_pause(popup_timer);
 	quick_buttons_update();
@@ -588,40 +586,15 @@ static void popup_bar_cb(lv_event_t *e)
 		popup_keepalive();	/* pressing/dragging */
 }
 
-/* - / + : 10 % steps, snapping to multiples of 10. */
-static void popup_step_cb(lv_event_t *e)
-{
-	int dir = (int)(intptr_t)lv_event_get_user_data(e);
-	int v = popup_get();
-
-	popup_set(dir > 0 ? (v / 10 + 1) * 10 : ((v + 9) / 10 - 1) * 10);
-}
-
-static void popup_bg_cb(lv_event_t *e)
-{
-	(void)e;
-	popup_close();
-}
-
-static lv_obj_t *popup_button(lv_obj_t *parent, const char *sym, int dir)
-{
-	lv_obj_t *b = lv_button_create(parent);
-	lv_obj_t *l = lv_label_create(b);
-
-	lv_obj_set_size(b, 108, 60);
-	lv_obj_set_style_radius(b, 12, 0);
-	lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
-	lv_label_set_text(l, sym);
-	lv_obj_center(l);
-	lv_obj_add_event_cb(b, popup_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)dir);
-	lv_obj_add_event_cb(b, popup_step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)dir);
-	return b;
-}
-
+/*
+ * The control is just a thick bar along the bottom of the app area
+ * (chumby-wm places "chumby-popup" there, CHUMBY_POPUP_H tall): tap or drag
+ * anywhere on it. Which one it is shows in the panel, where its button is
+ * lit. It closes after POPUP_IDLE_MS or on that button.
+ */
 static void popup_open(enum popup_kind kind)
 {
-	bool vol = kind == POPUP_VOLUME;
-	lv_obj_t *scr, *icon, *title, *minus;
+	lv_obj_t *scr;
 
 	panel_wake();
 	if (popup_kind == kind && popup_disp) {
@@ -629,7 +602,7 @@ static void popup_open(enum popup_kind kind)
 		return;
 	}
 	if (!popup_disp) {
-		popup_disp = chumby_window_create("chumby-popup", CHUMBY_APP_W, CHUMBY_SCREEN_H);
+		popup_disp = chumby_window_create("chumby-popup", CHUMBY_APP_W, CHUMBY_POPUP_H);
 		if (!popup_disp)
 			return;
 	}
@@ -637,46 +610,20 @@ static void popup_open(enum popup_kind kind)
 	scr = lv_display_get_screen_active(popup_disp);
 	lv_obj_clean(scr);
 	lv_obj_set_scrollable(scr, false);
-	/* Tapping empty space closes; widgets don't bubble their clicks up. */
-	lv_obj_add_event_cb(scr, popup_bg_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_SURFACE), 0);
 
-	icon = lv_label_create(scr);
-	lv_label_set_text(icon, vol ? LV_SYMBOL_VOLUME_MAX : LV_SYMBOL_EYE_OPEN);
-	lv_obj_set_style_text_font(icon, &lv_font_montserrat_28, 0);
-	lv_obj_set_style_text_color(icon, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-	lv_obj_align(icon, LV_ALIGN_TOP_LEFT, 16, 14);
-
-	/* Header: title beside the icon, value at the right, all on the
-	 * icon's centre line. */
-	title = lv_label_create(scr);
-	lv_label_set_text(title, vol ? "Volume" : "Brightness");
-	lv_obj_set_style_text_font(title, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_align_to(title, icon, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
-
-	popup_value = lv_label_create(scr);
-	lv_obj_set_style_text_font(popup_value, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_style_text_color(popup_value, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_align(popup_value, LV_ALIGN_TOP_RIGHT, -16, 0);
-	chumby_center_y_on(popup_value, icon);
-
-	/* A thick bar: tapping anywhere on it sets the value, no knob to aim at. */
 	popup_bar = lv_slider_create(scr);
-	lv_obj_set_size(popup_bar, CHUMBY_APP_W - 32, 52);
-	lv_obj_align(popup_bar, LV_ALIGN_TOP_MID, 0, 0);
-	lv_slider_set_range(popup_bar, vol ? 0 : 5, 100);
-	lv_obj_set_style_radius(popup_bar, 12, LV_PART_MAIN);
-	lv_obj_set_style_radius(popup_bar, 12, LV_PART_INDICATOR);
+	lv_obj_set_size(popup_bar, CHUMBY_APP_W - 2 * 16, CHUMBY_POPUP_H - 2 * 12);
+	lv_obj_center(popup_bar);
+	lv_slider_set_range(popup_bar, kind == POPUP_VOLUME ? 0 : 5, 100);
+	lv_obj_set_style_radius(popup_bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+	lv_obj_set_style_radius(popup_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
 	lv_obj_set_style_bg_opa(popup_bar, LV_OPA_TRANSP, LV_PART_KNOB);
 	lv_obj_set_style_pad_all(popup_bar, 0, LV_PART_KNOB);
+	/* The whole popup height is the touch target. */
 	lv_obj_set_ext_click_area(popup_bar, 12);
 	lv_obj_add_event_cb(popup_bar, popup_bar_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(popup_bar, popup_bar_cb, LV_EVENT_PRESSING, NULL);
-
-	minus = popup_button(scr, LV_SYMBOL_MINUS, -1);
-	lv_obj_align(minus, LV_ALIGN_BOTTOM_LEFT, 16, -20);
-	lv_obj_align(popup_button(scr, LV_SYMBOL_PLUS, 1), LV_ALIGN_BOTTOM_RIGHT, -16, -20);
-	/* The bar sits midway between the header and the buttons. */
-	chumby_center_y_between(popup_bar, icon, minus);
 
 	popup_set(popup_get());
 	quick_buttons_update();
