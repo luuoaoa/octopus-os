@@ -228,6 +228,7 @@ static void scroll_label_set(lv_obj_t *l, const char *text)
 		return;
 	lv_anim_delete(l, NULL);	/* start over, from the beginning */
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+	chumby_label_scroll_speed(l, text, CHUMBY_SCROLL_SPEED);
 	lv_label_set_text(l, text);
 }
 

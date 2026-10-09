@@ -1452,7 +1452,7 @@
 /** Gap between the end and the restart of circularly scrolled text,
  *  measured in space-character widths.
  */
-#define LV_LABEL_WAIT_CHAR_COUNT 3
+#define LV_LABEL_WAIT_CHAR_COUNT 8	/* chumby: a clear gap before scrolling text comes round again */
 
 #endif /*LV_USE_LABEL*/
 

@@ -490,6 +490,19 @@ bool chumby_logo_set(lv_obj_t *img, const char *path, int32_t box)
 	return true;
 }
 
+void chumby_label_scroll_speed(lv_obj_t *label, const char *text, int px_per_s)
+{
+	const lv_font_t *f = lv_obj_get_style_text_font(label, LV_PART_MAIN);
+	int32_t w = LV_LABEL_WAIT_CHAR_COUNT * lv_font_get_glyph_width(f, ' ', ' ');
+	const unsigned char *p;
+
+	for (p = (const unsigned char *)text; *p; p++)
+		if (*p < 0x80 || *p >= 0xc0)	/* a character's first byte */
+			w += lv_font_get_glyph_width(f, *p < 0x80 ? *p : '?', p[1]);
+	lv_obj_set_style_anim_duration(label, px_per_s > 0 ? (uint32_t)w * 1000 / px_per_s : 0,
+				       LV_PART_MAIN);
+}
+
 static struct {
 	chumby_mode_cb_t cb;
 	void *user;

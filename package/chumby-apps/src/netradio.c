@@ -282,8 +282,10 @@ static void title_update(void)
 		snprintf(text, sizeof(text), "%s", "can't reach the station, retrying...");
 	else
 		snprintf(text, sizeof(text), "%s", "connecting...");
-	if (strcmp(lv_label_get_text(lbl_title), text))
+	if (strcmp(lv_label_get_text(lbl_title), text)) {
+		chumby_label_scroll_speed(lbl_title, text, CHUMBY_SCROLL_SPEED);
 		lv_label_set_text(lbl_title, text);
+	}
 }
 
 static void ui_update(void)

@@ -145,6 +145,15 @@ void chumby_center_y_at(lv_obj_t *obj, int32_t y);
  */
 bool chumby_logo_set(lv_obj_t *img, const char *path, int32_t box);
 
+/*
+ * Scroll speed for a circular-scrolling label, in px/s, for the text
+ * about to be set: a plain duration from the text's width (LVGL's own
+ * speed setting caps a pass at ~10 s, too short for long text slowly).
+ * Call before lv_label_set_text().
+ */
+#define CHUMBY_SCROLL_SPEED	20
+void chumby_label_scroll_speed(lv_obj_t *label, const char *text, int px_per_s);
+
 /* Policy */
 const struct chumby_policy *chumby_policy(void);
 /* Is the local time now in [start, end) (minutes, may wrap midnight)? */
