@@ -561,7 +561,7 @@ static void join_fillet(int x, int right, int r)
 	lv_obj_set_pos(c, right ? 0 : -r, -r);
 	lv_obj_set_style_radius(c, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(c, chumby_color(CHUMBY_COLOR_BG), 0);
+	lv_obj_set_style_bg_color(c, chumby_color(CHUMBY_COLOR_BAR), 0);
 }
 
 static void bar_join_update(void)
@@ -930,6 +930,7 @@ static void build_panel(lv_obj_t *scr)
 
 	lv_obj_clean(scr);
 	lv_obj_set_scrollable(scr, false);
+	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_BAR), 0);
 
 	/* Rows as tall as the tabs, standing on the bar's bottom edge (the
 	 * part below it is clipped). */
@@ -973,7 +974,8 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_set_style_pad_right(box, 6, 0);	/* clear of the screen's edge */
 	bar_clock = lv_label_create(box);
 	lv_label_set_text(bar_clock, "");
-	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_LARGE), 0);
+	/* The tabs' font, in the same box: on the tab titles' baseline. */
+	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_BODY), 0);
 	lv_obj_set_style_text_color(bar_clock, chumby_color(CHUMBY_COLOR_TEXT), 0);
 
 	/* Over everything else in the bar. */

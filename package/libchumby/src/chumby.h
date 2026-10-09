@@ -72,6 +72,7 @@ typedef enum {
 	CHUMBY_COLOR_TEXT,
 	CHUMBY_COLOR_TEXT_DIM,
 	CHUMBY_COLOR_ACCENT,
+	CHUMBY_COLOR_BAR,	/* the shell's tab bar, set apart from the app */
 	CHUMBY_COLOR_COUNT
 } chumby_color_t;
 

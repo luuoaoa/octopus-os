@@ -165,6 +165,7 @@ static const uint32_t palette[2][CHUMBY_COLOR_COUNT] = {
 		[CHUMBY_COLOR_TEXT]	= 0x1c1c1c,
 		[CHUMBY_COLOR_TEXT_DIM]	= 0x6e6e6e,
 		[CHUMBY_COLOR_ACCENT]	= 0x4a4a4a,
+		[CHUMBY_COLOR_BAR]	= 0xd2d2d2,	/* a shade darker */
 	},
 	[CHUMBY_MODE_NIGHT] = {
 		[CHUMBY_COLOR_BG]	= 0x000000,
@@ -172,6 +173,7 @@ static const uint32_t palette[2][CHUMBY_COLOR_COUNT] = {
 		[CHUMBY_COLOR_TEXT]	= 0xc8c8c8,
 		[CHUMBY_COLOR_TEXT_DIM]	= 0x6a6a6a,
 		[CHUMBY_COLOR_ACCENT]	= 0x7a7a7a,
+		[CHUMBY_COLOR_BAR]	= 0x141414,	/* nothing's darker than black */
 	},
 };
 
