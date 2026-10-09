@@ -88,13 +88,13 @@ case "$1" in
 		if [ -n "$bypass" ]; then
 			stop_loop
 			amixer -q sset 'HP Mux' 'Line In 1'
-			amixer -q sset 'HP Playback Volume' 80%
+			amixer -q sset 'HP' 80%
 		else
 			amixer -q sset 'HP Mux' 'DAC'
 			amixer -q sset 'Left ADC Mux' 'Line In 1'
 			amixer -q sset 'Right ADC Mux' 'Line In 1'
-			amixer -q sset 'ADC PGA Capture Switch' on
-			amixer -q sset 'DAC Playback Volume' 90% unmute
+			amixer -q sset 'ADC PGA' cap
+			amixer -q sset 'DAC' unmute	# level: the shell's volume control
 			start_loop
 		fi
 		echo "radio: on, ${freq:-100.3} MHz${bypass:+ (headphone bypass)}"
@@ -118,8 +118,8 @@ case "$1" in
 		;;
 	vol)
 		[ -n "$2" ] || die "usage: radio vol <0-100>"
-		amixer -q sset 'DAC Playback Volume' "$2%"
-		amixer -q sset 'HP Playback Volume' "$2%"
+		amixer -q sset 'DAC' "$2%"
+		amixer -q sset 'HP' "$2%"
 		;;
 	status)
 		if loop_running; then echo "audio loop: running"; else echo "audio loop: stopped"; fi
