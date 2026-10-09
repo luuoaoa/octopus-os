@@ -865,6 +865,12 @@ static void knob_readable(int fd, void *user)
 static uint64_t wake_until;	/* monotonic ms: lit until then at night */
 static int screen_applied = -1;	/* what we last wrote, -1 = nothing yet */
 
+/* The snooze button turns the screen on or off for good, overriding the
+ * schedule until it next changes (21:00 / 07:00 by default). */
+enum { OVERRIDE_NONE, OVERRIDE_ON, OVERRIDE_OFF };
+static int screen_override;
+static int policy_on_last = -1;
+
 static chumby_alarm_state_t alarm_state;
 
 static uint64_t mono_ms(void)
@@ -875,16 +881,30 @@ static uint64_t mono_ms(void)
 	return ts.tv_sec * 1000ull + ts.tv_nsec / 1000000;
 }
 
-/* On outside the screen-off hours, while an alarm rings, or while woken;
- * and always while the clock isn't set (we can't tell if it's night). */
+/*
+ * On outside the screen-off hours (and always while the clock isn't set:
+ * we can't tell if it's night), unless the snooze button turned it off;
+ * on at night when the snooze button turned it on or the knob woke it;
+ * always while an alarm rings.
+ */
 static void screen_update(void)
 {
 	const struct chumby_policy *p = chumby_policy();
-	bool on = alarm_state == CHUMBY_ALARM_RINGING ||
-		  !chumby_time_valid() ||
-		  p->screen_off_start == p->screen_off_end ||
-		  !chumby_in_window(p->screen_off_start, p->screen_off_end) ||
-		  mono_ms() < wake_until;
+	bool policy_on = !chumby_time_valid() ||
+			 p->screen_off_start == p->screen_off_end ||
+			 !chumby_in_window(p->screen_off_start, p->screen_off_end);
+	bool on;
+
+	if (policy_on != policy_on_last) {	/* the schedule moved on */
+		policy_on_last = policy_on;
+		screen_override = OVERRIDE_NONE;
+	}
+	if (alarm_state == CHUMBY_ALARM_RINGING || mono_ms() < wake_until)
+		on = true;	/* ringing, or the knob woke it briefly */
+	else if (screen_override != OVERRIDE_NONE)
+		on = screen_override == OVERRIDE_ON;
+	else
+		on = policy_on;
 
 	if (on == screen_applied)
 		return;
@@ -1040,7 +1060,9 @@ static void alarm_stop(void)
 	alarm_state = CHUMBY_ALARM_IDLE;
 	snooze_until = 0;
 	alarm_publish();
-	screen_wake();	/* a moment to see it stopped, then dark again */
+	/* You're up: keep the screen on (until the schedule next changes). */
+	screen_override = OVERRIDE_ON;
+	screen_update();
 }
 
 /* Once a second: due alarms, snooze expiry, ring timeout, screen hours. */
@@ -1088,11 +1110,24 @@ static void alarm_tick_cb(lv_timer_t *t)
 /* ------------------------------------------------------------------ */
 /* Snooze button                                                      */
 
+/* Ringing: snooze. Otherwise toggle the screen; turning it on brings up
+ * the clock. No timeout either way. */
 static void snooze_pressed(void)
 {
-	alarm_snooze();
-	show_clock();
-	screen_wake();
+	if (alarm_state == CHUMBY_ALARM_RINGING) {
+		alarm_snooze();
+		show_clock();
+		screen_update();
+		return;
+	}
+	wake_until = 0;
+	if (screen_applied == 1) {
+		screen_override = OVERRIDE_OFF;
+	} else {
+		screen_override = OVERRIDE_ON;
+		show_clock();
+	}
+	screen_update();
 }
 
 static void snooze_readable(int fd, void *user)
