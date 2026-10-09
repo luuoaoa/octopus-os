@@ -368,6 +368,7 @@ static void launch(struct app_info *a)
  */
 #define BTN_W		(CHUMBY_PANEL_W - 8)
 #define BTN_H		CHUMBY_TOUCH_MIN
+#define TRAY_BTN_H	38	/* a little under BTN_H: the tray is one plate */
 #define POPUP_IDLE_MS	4000
 #define PANEL_DIM_OPA	LV_OPA_30	/* at rest: barely there */
 #define PANEL_IDLE_MS	4000
@@ -375,7 +376,7 @@ static void launch(struct app_info *a)
 #define PANEL_FADE_OUT_MS	600
 
 static lv_obj_t *panel_scr, *home_scr;
-static lv_obj_t *btn_home, *btn_vol, *btn_bri;
+static lv_obj_t *btn_home, *btn_vol, *btn_bri, *tray;
 static int volume_pct = 50;	/* cached: the mixer may not exist yet */
 
 enum popup_kind { POPUP_NONE, POPUP_VOLUME, POPUP_BRIGHTNESS };
@@ -415,7 +416,11 @@ static void panel_opa_cb(void *var, int32_t v)
 	(void)var;
 	panel_opa = v;
 	for (i = 0; i < lv_obj_get_child_count(panel_scr); i++)
-		lv_obj_set_style_opa(lv_obj_get_child(panel_scr, i), v, 0);
+		if (lv_obj_get_child(panel_scr, i) != tray)
+			lv_obj_set_style_opa(lv_obj_get_child(panel_scr, i), v, 0);
+	/* The tray's plate stays: only its icons fade. */
+	for (i = 0; tray && i < lv_obj_get_child_count(tray); i++)
+		lv_obj_set_style_opa(lv_obj_get_child(tray, i), v, 0);
 }
 
 static void panel_fade(lv_opa_t to, uint32_t ms)
@@ -479,6 +484,17 @@ static lv_obj_t *icon_button(lv_obj_t *parent, const char *sym)
 	lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
 	lv_label_set_text(l, sym);
 	lv_obj_center(l);
+	return b;
+}
+
+/* A tray button: a smaller icon, still a full-size touch target. */
+static lv_obj_t *tray_button(lv_obj_t *parent, const char *sym)
+{
+	lv_obj_t *b = icon_button(parent, sym);
+
+	lv_obj_set_height(b, TRAY_BTN_H);
+	lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_BG), LV_STATE_PRESSED);
+	lv_obj_set_style_text_font(lv_obj_get_child(b, 0), &lv_font_montserrat_20, 0);
 	return b;
 }
 
@@ -664,10 +680,24 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_set_scroll_dir(panel_apps, LV_DIR_VER);
 	lv_obj_set_event_bubble(panel_apps, true);
 
-	btn_vol = icon_button(scr, LV_SYMBOL_VOLUME_MAX);
+	/* Volume and brightness sit apart in a tray, like the clock area of
+	 * the Windows taskbar: their own plate, smaller icons. */
+	tray = lv_obj_create(scr);
+	lv_obj_remove_style_all(tray);
+	lv_obj_set_size(tray, BTN_W, LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(tray, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(tray, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_radius(tray, 10, 0);
+	lv_obj_set_style_bg_opa(tray, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(tray, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_scrollable(tray, false);
+	lv_obj_set_event_bubble(tray, true);
+
+	btn_vol = tray_button(tray, LV_SYMBOL_VOLUME_MAX);
 	lv_obj_add_event_cb(btn_vol, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_VOLUME);
-	btn_bri = icon_button(scr, LV_SYMBOL_EYE_OPEN);
+	btn_bri = tray_button(tray, LV_SYMBOL_EYE_OPEN);
 	lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_BRIGHTNESS);
 
