@@ -31,8 +31,6 @@ define CHUMBY_APPS_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/share/chumby/apps/fm.app
 	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/netradio.app \
 		$(TARGET_DIR)/usr/share/chumby/apps/netradio.app
-	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/calibrate.app \
-		$(TARGET_DIR)/usr/share/chumby/apps/calibrate.app
 	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/streams.conf \
 		$(TARGET_DIR)/usr/share/chumby/streams.conf
 endef

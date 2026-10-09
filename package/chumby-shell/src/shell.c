@@ -23,7 +23,9 @@
  * lights the screen for a few seconds at night, and snoozes a ringing
  * alarm. Alarms are rung here rather than in the clock app, so they go
  * off whatever is open; the clock app edits them and shows the ringing
- * state, talking to us through the run dir (see chumby.h).
+ * state, talking to us through the run dir (see chumby.h). Held for
+ * 4 s it starts the touchscreen calibration (run at start, too, while
+ * there is none).
  */
 
 #define _GNU_SOURCE
@@ -1378,14 +1380,64 @@ static void snooze_pressed(void)
 	screen_update();
 }
 
+/*
+ * Holding the snooze button CALIBRATE_HOLD_MS starts the touchscreen
+ * calibration: there's no menu entry for it, and this works when touch is
+ * too far off to hit one. So a plain press acts on release, unless an
+ * alarm is ringing: that snoozes at once.
+ */
+#define CALIBRATE_HOLD_MS	4000
+
+static int calibrate_pid = -1;
+static bool snooze_down, snooze_held;
+static lv_timer_t *snooze_hold_timer;
+
+static void calibrate_start(void)
+{
+	char *argv[] = { "chumby-calibrate", NULL };
+
+	if (calibrate_pid > 0 && kill(calibrate_pid, 0) == 0)
+		return;		/* already up */
+	popup_close();
+	menu_close();
+	screen_override = OVERRIDE_ON;	/* lit, even at night */
+	screen_update();
+	calibrate_pid = chumby_spawn(CALIBRATE, argv);
+}
+
+static void snooze_hold_cb(lv_timer_t *t)
+{
+	lv_timer_pause(t);
+	if (snooze_down) {
+		snooze_held = true;
+		calibrate_start();
+	}
+}
+
 static void snooze_readable(int fd, void *user)
 {
 	struct input_event ev;
 
 	(void)user;
-	while (read(fd, &ev, sizeof(ev)) == sizeof(ev))
-		if (ev.type == EV_KEY && ev.value == 1)	/* press, not repeat */
-			snooze_pressed();
+	while (read(fd, &ev, sizeof(ev)) == sizeof(ev)) {
+		if (ev.type != EV_KEY || ev.value == 2)		/* repeats */
+			continue;
+		if (ev.value == 1) {
+			if (alarm_state == CHUMBY_ALARM_RINGING) {
+				snooze_pressed();	/* at once */
+				continue;
+			}
+			snooze_down = true;
+			snooze_held = false;
+			lv_timer_reset(snooze_hold_timer);
+			lv_timer_resume(snooze_hold_timer);
+		} else if (snooze_down) {
+			snooze_down = false;
+			lv_timer_pause(snooze_hold_timer);
+			if (!snooze_held)
+				snooze_pressed();
+		}
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -1405,6 +1457,8 @@ static void command(const char *cmd)
 		popup_open(POPUP_BRIGHTNESS);
 	else if (!strcmp(cmd, "menu"))
 		menu_open();
+	else if (!strcmp(cmd, "calibrate"))
+		calibrate_start();
 	else if (cmd[0])
 		fprintf(stderr, "chumby-shell: unknown command '%s'\n", cmd);
 }
@@ -1501,12 +1555,11 @@ int main(void)
 	alarm_publish();
 	lv_timer_ready(lv_timer_create(alarm_tick_cb, 1000, NULL));
 
+	snooze_hold_timer = lv_timer_create(snooze_hold_cb, CALIBRATE_HOLD_MS, NULL);
+	lv_timer_pause(snooze_hold_timer);
 	/* Never calibrated: that first (chumby-wm shows it over everything). */
-	if (access(CAL_FILE, F_OK) != 0) {
-		char *argv[] = { "chumby-calibrate", NULL };
-
-		chumby_spawn(CALIBRATE, argv);
-	}
+	if (access(CAL_FILE, F_OK) != 0)
+		calibrate_start();
 
 	return chumby_run();
 }

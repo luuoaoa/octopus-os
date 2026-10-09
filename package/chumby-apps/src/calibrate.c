@@ -15,8 +15,9 @@
  * through the compositor's calibration, so a wildly wrong old one can't
  * lock you out.
  *
- * The shell runs this first while there is no calibration; it's also in
- * the app menu. chumby-wm shows it over the whole screen.
+ * The shell runs this first while there is no calibration, and when the
+ * snooze button is held 4 s (no menu entry: that works however far off
+ * touch is). chumby-wm shows it over the whole screen.
  */
 
 #include <fcntl.h>
@@ -201,7 +202,8 @@ static bool in_button(lv_obj_t *b, int px, int py)
 	lv_area_t a;
 
 	lv_obj_get_coords(b, &a);
-	return px >= a.x1 - 6 && px <= a.x2 + 6 && py >= a.y1 - 6 && py <= a.y2 + 6;
+	/* Generous: a resistive tap lands a few pixels off. */
+	return px >= a.x1 - 12 && px <= a.x2 + 12 && py >= a.y1 - 12 && py <= a.y2 + 12;
 }
 
 /* A finished press, normalised. */
@@ -272,7 +274,7 @@ static void touch_readable(int f, void *user)
 			n_samples = 0;
 		} else if (ev.type == EV_KEY && ev.code == BTN_TOUCH && !ev.value && touching) {
 			touching = false;
-			if (n_samples < 3)
+			if (!n_samples)		/* a tap too short to sample */
 				continue;
 			/* Drop the settling samples at both ends, keep the median. */
 			from = n_samples > 6 ? 2 : 0;

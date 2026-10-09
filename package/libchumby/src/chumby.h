@@ -214,7 +214,8 @@ chumby_alarm_state_t chumby_alarm_state(time_t *until);
  * Runtime directory shared with the shell (/run/chumby, or
  * $CHUMBY_RUN_DIR). The shell reads commands from its "shell.cmd" FIFO:
  * "snooze" (= the snooze button), "stop" (dismiss the alarm), "ring"
- * (ring now, for testing), "volume" / "brightness" (open the popup).
+ * (ring now, for testing), "volume" / "brightness" (open the popup),
+ * "menu" (the app menu), "calibrate" (the touchscreen calibration).
  */
 const char *chumby_run_dir(void);
 bool chumby_shell_command(const char *cmd);
