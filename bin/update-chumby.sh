@@ -5,9 +5,12 @@
 # the card is in use (see board/falconwing-mainline/README.md), so it can be
 # replaced live:
 #
-#   rootfs.squashfs   -> /media/sd (carrier, p2): streamed to a temp name,
-#                        SHA-256 checked, then renamed into place (the
-#                        mounted old file stays valid until the reboot)
+#   rootfs.squashfs   -> /media/sd (carrier, p2): with rsync on the board, a
+#                        delta against the copy already there (the image is
+#                        64 KiB zstd blocks, so mostly unchanged ones);
+#                        else streamed whole. Written to a temp name,
+#                        SHA-256 checked, renamed into place (the mounted
+#                        old file stays valid until the reboot)
 #   early boot        -> /media/sd/{bin,lib,sbin,newroot} (init-ram, busybox,
 #                        libs, mountpoint)
 #   kernel + DTB      -> the krnA slot of p1, only if it differs; read
@@ -70,12 +73,25 @@ fi
 on 'mountpoint -q /media/sd && [ -w /media/sd ]' ||
     { echo "${HOST}: /media/sd (the carrier) is not mounted rw: not a RAM-root image?" >&2; exit 1; }
 
+# rsync on both ends (images from before it was added don't have it).
+RSYNC=
+command -v rsync >/dev/null 2>&1 && on 'command -v rsync' >/dev/null 2>&1 && RSYNC=1
+rsync_to() { rsync -e "ssh ${SSH_OPTS}" "$@"; }
+
 # --- system image ---
 SUM=$(sha256sum "${IMG_DIR}/rootfs.squashfs" | cut -d' ' -f1)
 if [ "$(on 'sha256sum /media/sd/rootfs.squashfs' | cut -d' ' -f1)" = "${SUM}" ]; then
     echo "==> rootfs.squashfs unchanged"
+elif [ -n "${RSYNC}" ]; then
+    # Delta against the current copy, into a temp file renamed at the
+    # end (never --inplace: the old file is the mounted root).
+    echo "==> rootfs.squashfs (rsync delta)"
+    rsync_to --stats --no-whole-file "${IMG_DIR}/rootfs.squashfs" \
+        "${HOST}:/media/sd/rootfs.squashfs" | sed -n 's/^\(Literal data\|Matched data\|Total bytes sent\):/    &/p'
+    [ "$(on 'sync; sha256sum /media/sd/rootfs.squashfs' | cut -d' ' -f1)" = "${SUM}" ] ||
+        { echo "checksum mismatch after rsync" >&2; exit 1; }
 else
-    echo "==> rootfs.squashfs ($(stat -c %s "${IMG_DIR}/rootfs.squashfs") bytes)"
+    echo "==> rootfs.squashfs ($(stat -c %s "${IMG_DIR}/rootfs.squashfs") bytes, no rsync on the board)"
     on 'cat > /media/sd/rootfs.squashfs.new' < "${IMG_DIR}/rootfs.squashfs"
     [ "$(on 'sha256sum /media/sd/rootfs.squashfs.new' | cut -d' ' -f1)" = "${SUM}" ] ||
         { on 'rm -f /media/sd/rootfs.squashfs.new'; echo "checksum mismatch after transfer" >&2; exit 1; }
@@ -84,7 +100,15 @@ fi
 
 # --- early boot (the carrier's busybox, libraries, init-ram) ---
 echo "==> early boot files"
-tar -C "${CARRIER}" -cf - bin lib sbin newroot | on 'tar -C /media/sd -xf - && sync'
+if [ -n "${RSYNC}" ]; then
+    rsync_to -rlc "${CARRIER}/bin" "${CARRIER}/lib" "${CARRIER}/sbin" \
+        "${CARRIER}/newroot" "${HOST}:/media/sd/"
+    on sync
+else
+    tar -C "${CARRIER}" -cf - bin lib sbin newroot > "${TMPDIR:-/tmp}/update-chumby-$$.tar"
+    on 'tar -C /media/sd -xf - && sync' < "${TMPDIR:-/tmp}/update-chumby-$$.tar"
+    rm -f "${TMPDIR:-/tmp}/update-chumby-$$.tar"
+fi
 
 # --- kernel: the krnA slot of p1 ---
 # Slot offset/size from the config block, as post-image.sh does.

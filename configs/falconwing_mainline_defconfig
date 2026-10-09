@@ -53,6 +53,8 @@ BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing
 # Packages
 BR2_PACKAGE_DROPBEAR=y
 # BR2_PACKAGE_DROPBEAR_CLIENT is not set
+# bin/update-chumby.sh: delta transfers of the system image.
+BR2_PACKAGE_RSYNC=y
 BR2_PACKAGE_IW=y
 BR2_PACKAGE_WIRELESS_REGDB=y
 BR2_PACKAGE_WPA_SUPPLICANT=y
@@ -73,6 +75,7 @@ BR2_PACKAGE_CHUMBY_SHELL=y
 BR2_PACKAGE_CHUMBY_APPS=y
 # FM station art: chumby-station-art looks the station up (FCC) and fetches
 # its logo (Wikipedia) over HTTPS.
+BR2_PACKAGE_MBEDTLS=y
 BR2_PACKAGE_LIBCURL=y
 BR2_PACKAGE_LIBCURL_CURL=y
 BR2_PACKAGE_LIBCURL_MBEDTLS=y
