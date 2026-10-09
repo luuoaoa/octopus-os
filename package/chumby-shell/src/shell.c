@@ -57,7 +57,13 @@ struct app_info {
 	char name[32];
 	char exec[128];
 	const char *icon;	/* LV_SYMBOL_* */
+	int starting_pid;	/* launched, no window yet (0 = none) */
+	time_t starting_since;
 };
+
+/* An app takes seconds to map its window on this CPU: don't start it again
+ * meanwhile (every tap or snooze press would, filling the 64 MB). */
+#define LAUNCH_TIMEOUT_S	20
 
 static struct app_info apps[MAX_APPS];
 static int n_apps;
@@ -192,7 +198,12 @@ static void tl_state(void *d, struct zwlr_foreign_toplevel_handle_v1 *h, struct 
 
 static void tl_done(void *d, struct zwlr_foreign_toplevel_handle_v1 *h)
 {
-	(void)d; (void)h;
+	struct toplevel *t = d;
+	struct app_info *a = app_by_id(t->app_id);
+
+	(void)h;
+	if (a)
+		a->starting_pid = 0;	/* its window is up */
 	panel_rebuild();
 }
 
@@ -329,11 +340,21 @@ static void launch(struct app_info *a)
 {
 	struct toplevel *t = running(a->id);
 	char *argv[] = { a->exec, NULL };
+	int pid;
 
-	if (t)
+	if (t) {
 		activate(t);
-	else if (chumby_spawn(a->exec, argv) < 0)
+		return;
+	}
+	if (a->starting_pid && time(NULL) - a->starting_since < LAUNCH_TIMEOUT_S)
+		return;		/* already on its way */
+	pid = chumby_spawn(a->exec, argv);
+	if (pid < 0) {
 		fprintf(stderr, "chumby-shell: cannot start %s\n", a->exec);
+		return;
+	}
+	a->starting_pid = pid;
+	a->starting_since = time(NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1138,9 +1159,15 @@ static void reaper_cb(lv_timer_t *t)
 	pid_t pid;
 
 	(void)t;
-	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0)
+	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
+		int i;
+
 		if (pid == tone_pid)
 			tone_pid = -1;
+		for (i = 0; i < n_apps; i++)
+			if (apps[i].starting_pid == pid)
+				apps[i].starting_pid = 0;	/* died starting */
+	}
 }
 
 /* The sound card is a module and may appear after we start. */
