@@ -1,7 +1,7 @@
 # chumby-wm. The package passes PKG_CONFIG (target), WAYLAND_SCANNER (host)
 # and WAYLAND_PROTOCOLS (staging pkgdatadir).
 PKG_CONFIG ?= pkg-config
-PKGS := wlroots-0.19 wayland-server xkbcommon pixman-1
+PKGS := wlroots-0.19 wayland-server xkbcommon pixman-1 libinput
 
 override CFLAGS += -Wall -DWLR_USE_UNSTABLE -I. $(shell $(PKG_CONFIG) --cflags $(PKGS))
 LDLIBS += $(shell $(PKG_CONFIG) --libs $(PKGS))

@@ -12,6 +12,8 @@
  *   "chumby-menu"   the shell's app menu (its Home button): dropping down
  *                   from the bar's left end, sized by the shell
  *   "chumby-home"   the app list, behind every app (background layer)
+ *   "chumby-calibrate"  the touchscreen calibration tool: the whole
+ *                   screen, above everything
  *   anything else   an app: maximized into the area under the bar, one
  *                   visible at a time (the most recently activated)
  *
@@ -20,6 +22,11 @@
  * optional USB keyboard); the knob and snooze button are read by the shell
  * directly. While the shell has the backlight off (night), touches are
  * dropped so nothing gets pressed blind.
+ *
+ * Touch calibration: the matrix chumby-calibrate saves in
+ * /var/lib/chumby/touch.cal, applied through libinput at start and again
+ * whenever the file changes (inotify); without it, libinput's default
+ * (the udev rule's LIBINPUT_CALIBRATION_MATRIX).
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -29,10 +36,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/inotify.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <libinput.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
+#include <wlr/backend/libinput.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_compositor.h>
@@ -60,9 +71,14 @@
 #define APP_HOME	"chumby-home"
 #define APP_POPUP	"chumby-popup"
 #define APP_MENU	"chumby-menu"
+#define APP_CAL		"chumby-calibrate"
+#define CAL_DIR		"/var/lib/chumby"
+#define CAL_NAME	"touch.cal"
+#define CAL_FILE	CAL_DIR "/" CAL_NAME
 #define MAX_TOUCH	10
 
-enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_MENU, VIEW_APP };
+enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_MENU, VIEW_CAL,
+		 VIEW_APP };
 
 struct server {
 	struct wl_display *display;
@@ -74,7 +90,7 @@ struct server {
 	struct wlr_output_layout *output_layout;
 
 	/* Stacking: home < apps < popup < panel. */
-	struct wlr_scene_tree *home_tree, *apps_tree, *popup_tree, *panel_tree;
+	struct wlr_scene_tree *home_tree, *apps_tree, *popup_tree, *panel_tree, *cal_tree;
 
 	struct wlr_xdg_shell *xdg_shell;
 	struct wl_listener new_xdg_toplevel;
@@ -87,6 +103,7 @@ struct server {
 	struct wl_listener new_input;
 	struct wl_list keyboards;
 	bool have_touch;
+	struct wl_list touch_devs;	/* touch_dev.link */
 	struct { bool active; double ox, oy; } touch[MAX_TOUCH];
 
 	struct wl_listener new_output;
@@ -117,7 +134,9 @@ struct keyboard {
 };
 
 struct touch_dev {
+	struct wl_list link;
 	struct server *server;
+	struct wlr_input_device *dev;
 	struct wl_listener down, up, motion, frame, destroy;
 };
 
@@ -136,6 +155,10 @@ static void view_configure(struct view *v)
 	case VIEW_POPUP:
 		wlr_scene_node_set_position(&v->tree->node, s->width - POPUP_W, BAR_H);
 		wlr_xdg_toplevel_set_size(v->xdg, POPUP_W, POPUP_H);
+		break;
+	case VIEW_CAL:
+		wlr_scene_node_set_position(&v->tree->node, 0, 0);
+		wlr_xdg_toplevel_set_size(v->xdg, s->width, s->height);
 		break;
 	case VIEW_MENU:
 		/* Its size is the shell's: as tall as its list of apps. */
@@ -335,6 +358,9 @@ static void view_commit(struct wl_listener *l, void *data)
 	} else if (!strcmp(id, APP_POPUP)) {
 		v->kind = VIEW_POPUP;
 		wlr_scene_node_reparent(&v->tree->node, s->popup_tree);
+	} else if (!strcmp(id, APP_CAL)) {
+		v->kind = VIEW_CAL;
+		wlr_scene_node_reparent(&v->tree->node, s->cal_tree);
 	} else if (!strcmp(id, APP_MENU)) {
 		v->kind = VIEW_MENU;
 		wlr_scene_node_reparent(&v->tree->node, s->popup_tree);
@@ -569,7 +595,54 @@ static void touch_destroy(struct wl_listener *l, void *data)
 	wl_list_remove(&t->motion.link);
 	wl_list_remove(&t->frame.link);
 	wl_list_remove(&t->destroy.link);
+	wl_list_remove(&t->link);
 	free(t);
+}
+
+/* The saved calibration, else libinput's default (from udev). */
+static void cal_apply(struct wlr_input_device *dev)
+{
+	struct libinput_device *ld;
+	float m[6];
+	FILE *f;
+
+	if (!wlr_input_device_is_libinput(dev))
+		return;
+	ld = wlr_libinput_get_device_handle(dev);
+	if (!ld || !libinput_device_config_calibration_has_matrix(ld))
+		return;
+	f = fopen(CAL_FILE, "r");
+	if (!f || fscanf(f, "%f %f %f %f %f %f", &m[0], &m[1], &m[2],
+			 &m[3], &m[4], &m[5]) != 6)
+		libinput_device_config_calibration_get_default_matrix(ld, m);
+	if (f)
+		fclose(f);
+	if (libinput_device_config_calibration_set_matrix(ld, m) == LIBINPUT_CONFIG_STATUS_SUCCESS)
+		wlr_log(WLR_INFO, "touch calibration %.4f %.4f %.4f %.4f %.4f %.4f",
+			m[0], m[1], m[2], m[3], m[4], m[5]);
+}
+
+static int cal_changed(int fd, uint32_t mask, void *data)
+{
+	struct server *s = data;
+	char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+	const struct inotify_event *ev;
+	struct touch_dev *t;
+	bool ours = false;
+	ssize_t n;
+	char *p;
+
+	(void)mask;
+	while ((n = read(fd, buf, sizeof(buf))) > 0)
+		for (p = buf; p < buf + n; p += sizeof(*ev) + ev->len) {
+			ev = (const struct inotify_event *)p;
+			if (ev->len && !strcmp(ev->name, CAL_NAME))
+				ours = true;
+		}
+	if (ours)
+		wl_list_for_each(t, &s->touch_devs, link)
+			cal_apply(t->dev);
+	return 0;
 }
 
 static void new_touch(struct server *s, struct wlr_input_device *dev)
@@ -580,6 +653,9 @@ static void new_touch(struct server *s, struct wlr_input_device *dev)
 	if (!t)
 		return;
 	t->server = s;
+	t->dev = dev;
+	wl_list_insert(&s->touch_devs, &t->link);
+	cal_apply(dev);
 	t->down.notify = touch_down;
 	wl_signal_add(&touch->events.down, &t->down);
 	t->up.notify = touch_up;
@@ -869,6 +945,7 @@ int main(int argc, char **argv)
 	s.apps_tree = wlr_scene_tree_create(&s.scene->tree);
 	s.popup_tree = wlr_scene_tree_create(&s.scene->tree);
 	s.panel_tree = wlr_scene_tree_create(&s.scene->tree);
+	s.cal_tree = wlr_scene_tree_create(&s.scene->tree);
 
 	wl_list_init(&s.views);
 	s.xdg_shell = wlr_xdg_shell_create(s.display, 3);
@@ -878,6 +955,18 @@ int main(int argc, char **argv)
 	wl_signal_add(&s.xdg_shell->events.new_popup, &s.new_xdg_popup);
 
 	wl_list_init(&s.keyboards);
+	wl_list_init(&s.touch_devs);
+	/* Watch for chumby-calibrate's results (written to a temp name and
+	 * renamed into place). */
+	{
+		int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+
+		mkdir(CAL_DIR, 0755);
+		if (fd >= 0 && inotify_add_watch(fd, CAL_DIR, IN_CLOSE_WRITE | IN_MOVED_TO |
+						 IN_DELETE) >= 0)
+			wl_event_loop_add_fd(wl_display_get_event_loop(s.display), fd,
+					     WL_EVENT_READABLE, cal_changed, &s);
+	}
 	s.new_input.notify = new_input;
 	wl_signal_add(&s.backend->events.new_input, &s.new_input);
 	s.seat = wlr_seat_create(s.display, "seat0");

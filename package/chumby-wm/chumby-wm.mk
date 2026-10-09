@@ -9,7 +9,7 @@ CHUMBY_WM_SITE = $(BR2_EXTERNAL_PIFANSRF_PATH)/package/chumby-wm/src
 CHUMBY_WM_SITE_METHOD = local
 CHUMBY_WM_LICENSE = MIT
 CHUMBY_WM_DEPENDENCIES = host-pkgconf host-wayland wayland-protocols \
-	wlroots-pixman libxkbcommon pixman
+	wlroots-pixman libxkbcommon pixman libinput
 
 define CHUMBY_WM_BUILD_CMDS
 	$(TARGET_MAKE_ENV) $(MAKE) -C $(@D) \

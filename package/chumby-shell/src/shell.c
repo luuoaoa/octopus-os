@@ -52,6 +52,8 @@
 #define RADIO		"/usr/bin/radio"
 #define RADIO_PIDFILE	"/var/run/radio-loop.pid"
 #define STREAM		"/usr/bin/chumby-stream"	/* internet radio */
+#define CALIBRATE	"/usr/bin/chumby-calibrate"
+#define CAL_FILE	"/var/lib/chumby/touch.cal"	/* its result */
 #define RING_MAX_S	(10 * 60)	/* give up ringing after this */
 
 /* ------------------------------------------------------------------ */
@@ -481,9 +483,13 @@ static lv_obj_t *tab_create(lv_obj_t *parent, const char *sym, const char *name,
 		l = lv_label_create(b);
 		lv_label_set_text(l, name);
 		lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_BODY), 0);
-		/* Room for the tabs and the tray, whatever the name. */
-		lv_obj_set_style_max_width(l, TAB_TITLE_MAX, 0);
-		lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
+		/* Room for the tabs and the tray, whatever the name: one line,
+		 * cut with dots (a fixed width; max-width alone wraps). */
+		lv_obj_update_layout(l);
+		if (lv_obj_get_width(l) > TAB_TITLE_MAX) {
+			lv_obj_set_width(l, TAB_TITLE_MAX);
+			lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
+		}
 	}
 	return b;
 }
@@ -1494,6 +1500,13 @@ int main(void)
 	/* A stale state file from a previous run: we're idle. */
 	alarm_publish();
 	lv_timer_ready(lv_timer_create(alarm_tick_cb, 1000, NULL));
+
+	/* Never calibrated: that first (chumby-wm shows it over everything). */
+	if (access(CAL_FILE, F_OK) != 0) {
+		char *argv[] = { "chumby-calibrate", NULL };
+
+		chumby_spawn(CALIBRATE, argv);
+	}
 
 	return chumby_run();
 }
