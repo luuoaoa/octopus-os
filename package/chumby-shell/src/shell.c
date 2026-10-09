@@ -974,8 +974,10 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_set_style_pad_right(box, 6, 0);	/* clear of the screen's edge */
 	bar_clock = lv_label_create(box);
 	lv_label_set_text(bar_clock, "");
-	/* The tabs' font, in the same box: on the tab titles' baseline. */
-	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_BODY), 0);
+	/* Bigger than the tab titles, but on their baseline (centred, the
+	 * 19 px font's sits a pixel lower). */
+	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_style_translate_y(bar_clock, -1, 0);
 	lv_obj_set_style_text_color(bar_clock, chumby_color(CHUMBY_COLOR_TEXT), 0);
 
 	/* Over everything else in the bar. */
