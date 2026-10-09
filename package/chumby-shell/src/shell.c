@@ -603,6 +603,8 @@ static void home_style(void)
 	tab_style(btn_home, open);
 	if (open)	/* like volume and brightness: not the app tab's accent */
 		lv_obj_set_style_bg_color(btn_home, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	else		/* a plain icon at rest, not a tab: no border */
+		lv_obj_set_style_border_opa(btn_home, LV_OPA_TRANSP, 0);
 	bar_join_update();
 }
 
@@ -746,6 +748,7 @@ static void tabs_rebuild(void)
 
 	/* Home: a button for the menu, filled only while that is open. */
 	btn_home = tab_create(bar_tabs, LV_SYMBOL_HOME, NULL, menu_disp != NULL);
+	lv_obj_set_style_pad_hor(btn_home, 13, 0);	/* a little roomier */
 	lv_obj_add_event_cb(btn_home, home_tab_cb, LV_EVENT_CLICKED, NULL);
 	home_style();
 	if (cur) {
@@ -970,7 +973,7 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_set_style_pad_right(box, 6, 0);	/* clear of the screen's edge */
 	bar_clock = lv_label_create(box);
 	lv_label_set_text(bar_clock, "");
-	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_LARGE), 0);
 	lv_obj_set_style_text_color(bar_clock, chumby_color(CHUMBY_COLOR_TEXT), 0);
 
 	/* Over everything else in the bar. */

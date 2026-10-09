@@ -29,6 +29,9 @@
  * directly. While the shell has the backlight off (night), touches are
  * dropped so nothing gets pressed blind.
  *
+ * The screen's corners are rounded: black quarter circles over
+ * everything, CORNER_R px, anti-aliased.
+ *
  * Touch calibration: the matrix chumby-calibrate saves in
  * /var/lib/chumby/touch.cal, applied through libinput at start and again
  * whenever the file changes (inotify); without it, libinput's default
@@ -47,10 +50,13 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <drm_fourcc.h>
 #include <libinput.h>
+#include <math.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
 #include <wlr/backend/libinput.h>
+#include <wlr/interfaces/wlr_buffer.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_compositor.h>
@@ -83,6 +89,7 @@
 #define CAL_NAME	"touch.cal"
 #define CAL_FILE	CAL_DIR "/" CAL_NAME
 #define MAX_TOUCH	10
+#define CORNER_R	8	/* the screen's rounded corners */
 
 enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_MENU, VIEW_CAL,
 		 VIEW_APP };
@@ -97,7 +104,9 @@ struct server {
 	struct wlr_output_layout *output_layout;
 
 	/* Stacking: home < apps < popup < panel. */
-	struct wlr_scene_tree *home_tree, *apps_tree, *popup_tree, *panel_tree, *cal_tree;
+	struct wlr_scene_tree *home_tree, *apps_tree, *popup_tree, *panel_tree, *cal_tree,
+		*corner_tree;
+	bool corners;			/* made (once the output's size is known) */
 
 	struct wlr_xdg_shell *xdg_shell;
 	struct wl_listener new_xdg_toplevel;
@@ -882,6 +891,84 @@ static void output_destroy(struct wl_listener *l, void *data)
 	free(o);
 }
 
+/* A read-only pixel buffer: the top-left corner's mask, black outside a
+ * quarter circle (premultiplied ARGB, so just alpha). */
+struct corner_buf {
+	struct wlr_buffer base;
+	uint32_t px[CORNER_R * CORNER_R];
+};
+
+static void corner_destroy(struct wlr_buffer *b)
+{
+	free(wl_container_of(b, (struct corner_buf *)NULL, base));
+}
+
+static bool corner_begin(struct wlr_buffer *b, uint32_t flags, void **data,
+			 uint32_t *format, size_t *stride)
+{
+	struct corner_buf *c = wl_container_of(b, c, base);
+
+	if (flags & WLR_BUFFER_DATA_PTR_ACCESS_WRITE)
+		return false;
+	*data = c->px;
+	*format = DRM_FORMAT_ARGB8888;
+	*stride = CORNER_R * 4;
+	return true;
+}
+
+static void corner_end(struct wlr_buffer *b)
+{
+	(void)b;
+}
+
+static const struct wlr_buffer_impl corner_impl = {
+	.destroy = corner_destroy,
+	.begin_data_ptr_access = corner_begin,
+	.end_data_ptr_access = corner_end,
+};
+
+/* Four of them over everything, the one mask mirrored into each corner. */
+static void corners_create(struct server *s)
+{
+	static const struct {
+		enum wl_output_transform t;
+		int right, bottom;
+	} where[4] = {
+		{ WL_OUTPUT_TRANSFORM_NORMAL, 0, 0 },
+		{ WL_OUTPUT_TRANSFORM_FLIPPED, 1, 0 },
+		{ WL_OUTPUT_TRANSFORM_FLIPPED_180, 0, 1 },
+		{ WL_OUTPUT_TRANSFORM_180, 1, 1 },
+	};
+	struct corner_buf *c;
+	int x, y, i;
+
+	if (s->corners || !s->width)
+		return;
+	c = calloc(1, sizeof(*c));
+	if (!c)
+		return;
+	wlr_buffer_init(&c->base, &corner_impl, CORNER_R, CORNER_R);
+	for (y = 0; y < CORNER_R; y++)
+		for (x = 0; x < CORNER_R; x++) {
+			double d = hypot(CORNER_R - (x + 0.5), CORNER_R - (y + 0.5));
+			double a = d - CORNER_R + 0.5;	/* coverage outside the arc */
+
+			a = a < 0 ? 0 : a > 1 ? 1 : a;
+			c->px[y * CORNER_R + x] = (uint32_t)(a * 255 + 0.5) << 24;
+		}
+	for (i = 0; i < 4; i++) {
+		struct wlr_scene_buffer *b = wlr_scene_buffer_create(s->corner_tree, &c->base);
+
+		if (!b)
+			continue;
+		wlr_scene_buffer_set_transform(b, where[i].t);
+		wlr_scene_node_set_position(&b->node, where[i].right ? s->width - CORNER_R : 0,
+					    where[i].bottom ? s->height - CORNER_R : 0);
+	}
+	wlr_buffer_drop(&c->base);	/* the scene buffers hold it now */
+	s->corners = true;
+}
+
 static void new_output(struct wl_listener *l, void *data)
 {
 	struct server *s = wl_container_of(l, s, new_output);
@@ -906,6 +993,7 @@ static void new_output(struct wl_listener *l, void *data)
 
 	s->width = wo->width;
 	s->height = wo->height;
+	corners_create(s);
 	wlr_log(WLR_INFO, "output %s: %dx%d", wo->name, s->width, s->height);
 
 	o = calloc(1, sizeof(*o));
@@ -991,6 +1079,7 @@ int main(int argc, char **argv)
 	s.popup_tree = wlr_scene_tree_create(&s.scene->tree);
 	s.panel_tree = wlr_scene_tree_create(&s.scene->tree);
 	s.cal_tree = wlr_scene_tree_create(&s.scene->tree);
+	s.corner_tree = wlr_scene_tree_create(&s.scene->tree);
 
 	wl_list_init(&s.views);
 	s.xdg_shell = wlr_xdg_shell_create(s.display, 3);
