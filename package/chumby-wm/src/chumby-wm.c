@@ -84,6 +84,7 @@ struct server {
 	struct { bool active; double ox, oy; } touch[MAX_TOUCH];
 
 	struct wl_listener new_output;
+	struct wlr_output *output;	/* the LCD */
 	int width, height;
 };
 
@@ -306,6 +307,10 @@ static void view_commit(struct wl_listener *l, void *data)
 	const char *id;
 
 	(void)data;
+	/* A hidden window's commit damages nothing, so no frame would come
+	 * for its callback (see frame_done_hidden). */
+	if (s->output)
+		wlr_output_schedule_frame(s->output);
 	if (!v->xdg->base->initial_commit)
 		return;
 
@@ -682,6 +687,31 @@ struct output {
 	struct wl_listener frame, request_state, destroy;
 };
 
+static void frame_done_iter(struct wlr_surface *surface, int sx, int sy, void *data)
+{
+	(void)sx; (void)sy;
+	wlr_surface_send_frame_done(surface, data);
+}
+
+/*
+ * The scene sends frame callbacks only to surfaces it shows. LVGL's
+ * Wayland backend blocks after each flush until its frame callback comes
+ * (dispatching events, but running no timers or input), so a window
+ * drawing while hidden (the shell's home under an app, an app behind
+ * another) would hang its whole client: the shell's dock went dead. Pace
+ * hidden windows by the output too. (Callbacks already sent are gone,
+ * so visible surfaces get no second one.)
+ */
+static void frame_done_hidden(struct server *s, const struct timespec *now)
+{
+	struct view *v;
+
+	wl_list_for_each(v, &s->views, link)
+		if (v->mapped)
+			wlr_xdg_surface_for_each_surface(v->xdg->base, frame_done_iter,
+							 (void *)now);
+}
+
 static void output_frame(struct wl_listener *l, void *data)
 {
 	struct output *o = wl_container_of(l, o, frame);
@@ -693,6 +723,7 @@ static void output_frame(struct wl_listener *l, void *data)
 	wlr_scene_output_commit(so, NULL);
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	wlr_scene_output_send_frame_done(so, &now);
+	frame_done_hidden(o->server, &now);
 }
 
 static void output_request_state(struct wl_listener *l, void *data)
@@ -711,6 +742,8 @@ static void output_destroy(struct wl_listener *l, void *data)
 	wl_list_remove(&o->frame.link);
 	wl_list_remove(&o->request_state.link);
 	wl_list_remove(&o->destroy.link);
+	if (o->server->output == o->wlr_output)
+		o->server->output = NULL;
 	free(o);
 }
 
@@ -745,6 +778,7 @@ static void new_output(struct wl_listener *l, void *data)
 		return;
 	o->server = s;
 	o->wlr_output = wo;
+	s->output = wo;
 	o->frame.notify = output_frame;
 	wl_signal_add(&wo->events.frame, &o->frame);
 	o->request_state.notify = output_request_state;
