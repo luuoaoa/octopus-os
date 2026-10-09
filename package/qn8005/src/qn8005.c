@@ -335,7 +335,8 @@ static int scan(const char *region)
  * reg 0x00 bit 1 enables it; bit 7 of reg 0x1b flips each time a group
  * is ready in regs 0x10..0x17 (blocks A..D, high byte first). Groups come
  * every ~88 ms; poll at 20 ms. Decoded state goes to `out` as key=value
- * lines (ps, rt, title, artist, pty, pi, and the signal strength rssi,
+ * lines (ps, rt, title, artist, pty, pi, psdyn = 1 while the PS scrolls
+ * text, pstext = those words joined, and the signal strength rssi,
  * sampled about once a second), rewritten atomically on change.
  */
 static volatile sig_atomic_t rds_quit;
@@ -356,8 +357,9 @@ static void rds_write(const char *out, const struct rds *r)
 	f = fopen(tmp, "w");
 	if (!f)
 		return;
-	fprintf(f, "pi=%04x\npty=%d\nps=%s\nrt=%s\ntitle=%s\nartist=%s\nrssi=%d\n",
-		r->pi, r->pty, r->ps, r->rt, r->title, r->artist, rds_rssi);
+	fprintf(f, "pi=%04x\npty=%d\nps=%s\nrt=%s\ntitle=%s\nartist=%s\npsdyn=%d\n"
+		"pstext=%s\nrssi=%d\n", r->pi, r->pty, r->ps, r->rt, r->title, r->artist,
+		r->ps_dynamic, r->pstext, rds_rssi);
 	fclose(f);
 	rename(tmp, out);
 }
@@ -420,12 +422,42 @@ static int rds_run(const char *out)
 	return 0;
 }
 
+/* Reception check: each group's status (reg 0x1b) and blocks for a few
+ * seconds, and how many came with all four blocks clean (low nibble 0:
+ * the per-block error flags). */
+static int rds_debug(int secs)
+{
+	int prev, v, i, groups = 0, clean = 0, ms;
+
+	if (setbits(0x00, 0x02, 0x02) < 0 || (prev = rd(0x1b)) < 0)
+		return -1;
+	prev &= 0x80;
+	for (ms = 0; ms < secs * 1000; ms += 10) {
+		uint8_t raw[8];
+
+		msleep(10);
+		v = rd(0x1b);
+		if (v < 0 || (v & 0x80) == prev)
+			continue;
+		prev = v & 0x80;
+		for (i = 0; i < 8; i++)
+			raw[i] = rd(0x10 + i);
+		groups++;
+		if (!(v & 0x0f))
+			clean++;
+		printf("%02x  %02x%02x %02x%02x %02x%02x %02x%02x\n", v, raw[0], raw[1],
+		       raw[2], raw[3], raw[4], raw[5], raw[6], raw[7]);
+	}
+	printf("%d groups in %d s, %d clean, rssi %d\n", groups, secs, clean, rd(0x1c));
+	return 0;
+}
+
 static void usage(void)
 {
 	fprintf(stderr,
 		"usage: qn8005 [-d /dev/i2c-N] [-a addr] <command>\n"
 		"  init [--xclk] | tune <MHz> | mute | unmute | mono | stereo\n"
-		"  rssi | freq | scan [us|eu|jp] | rds <file>\n"
+		"  rssi | freq | scan [us|eu|jp] | rds <file> | rdsdebug [secs]\n"
 		"  r <reg> | w <reg> <val> | dump\n");
 	exit(2);
 }
@@ -495,6 +527,8 @@ int main(int argc, char **argv)
 		if (optind >= argc)
 			usage();
 		ret = rds_run(argv[optind]);
+	} else if (!strcmp(cmd, "rdsdebug")) {
+		ret = rds_debug(optind < argc ? atoi(argv[optind]) : 10);
 	} else if (!strcmp(cmd, "scan")) {
 		ret = scan(optind < argc ? argv[optind] : NULL);
 	} else if (!strcmp(cmd, "r")) {

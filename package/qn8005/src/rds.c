@@ -10,6 +10,10 @@
 #define RTPLUS_AID	0x4bd7
 #define RTP_TITLE	1	/* ITEM.TITLE */
 #define RTP_ARTIST	4	/* ITEM.ARTIST */
+#define PI_CONFIRM	4	/* groups in a row before a new PI counts */
+#define PS_DYN_GROUPS	342	/* ~30 s: 3 PS changes within it = scrolling */
+#define PS_STILL_GROUPS	1368	/* ~2 min without a change: a name again */
+#define PS_CYCLE_WORDS	24	/* a cycle longer than this: publish anyway */
 
 void rds_init(struct rds *r)
 {
@@ -29,7 +33,7 @@ static char rds_char(uint8_t c)
 
 static void set_str(struct rds *r, char *dst, const char *src, size_t n)
 {
-	char buf[RDS_RT_MAX + 1];
+	char buf[RDS_PSTEXT_MAX + 1];	/* the longest field */
 
 	/* Trim spaces at both ends. */
 	while (n && *src == ' ') {
@@ -38,6 +42,8 @@ static void set_str(struct rds *r, char *dst, const char *src, size_t n)
 	}
 	while (n && src[n - 1] == ' ')
 		n--;
+	if (n > RDS_PSTEXT_MAX)
+		n = RDS_PSTEXT_MAX;
 	memcpy(buf, src, n);
 	buf[n] = '\0';
 	if (strcmp(dst, buf)) {
@@ -56,20 +62,75 @@ static bool confirmed(uint8_t *last, uint8_t *seen, const uint8_t *now, int n)
 	return false;
 }
 
+/* The trimmed 8 characters of a PS. */
+static void ps_trim(const char *ps8, char out[9])
+{
+	int s = 0, e = 8;
+
+	while (s < e && ps8[s] == ' ')
+		s++;
+	while (e > s && ps8[e - 1] == ' ')
+		e--;
+	memcpy(out, ps8 + s, e - s);
+	out[e - s] = '\0';
+}
+
+/* A new (whole) PS: note how often it changes; while it scrolls, collect
+ * its words, publishing a cycle when it starts over (its first word
+ * again) or runs long. */
+static void ps_scroll(struct rds *r, const char *word)
+{
+	int i, recent = 0;
+
+	memmove(r->ps_change + 1, r->ps_change, sizeof(r->ps_change) - sizeof(r->ps_change[0]));
+	r->ps_change[0] = r->groups;
+	for (i = 0; i < 3; i++)
+		if (r->ps_change[i] && r->groups - r->ps_change[i] <= PS_DYN_GROUPS)
+			recent++;
+	/* Sticky: missed words make it change less often for a while. */
+	if (recent == 3 && !r->ps_dynamic) {
+		r->ps_dynamic = true;
+		r->changed = true;
+	}
+	if (!*word)
+		return;
+	if ((r->ps_words >= 2 && !strcmp(word, r->ps_first)) || r->ps_words >= PS_CYCLE_WORDS) {
+		set_str(r, r->pstext, r->ps_cycle, strlen(r->ps_cycle));
+		r->ps_cycle[0] = '\0';
+		r->ps_words = 0;
+	}
+	if (!r->ps_words)
+		strcpy(r->ps_first, word);
+	if (strlen(r->ps_cycle) + strlen(word) + 2 < sizeof(r->ps_cycle)) {
+		if (r->ps_cycle[0])
+			strcat(r->ps_cycle, " ");
+		strcat(r->ps_cycle, word);
+	}
+	r->ps_words++;
+}
+
 static void do_ps(struct rds *r, uint16_t b, uint16_t d)
 {
 	int seg = b & 3;
 	uint8_t now[2] = { d >> 8, d & 0xff };
+	char c0 = rds_char(now[0]), c1 = rds_char(now[1]), word[9];
 
 	if (!confirmed(r->ps_last[seg], &r->ps_seen[seg], now, 2))
 		return;
-	r->ps_work[seg * 2] = rds_char(now[0]);
-	r->ps_work[seg * 2 + 1] = rds_char(now[1]);
-	r->ps_ok |= 1 << seg;
-	/* Publish whole names: also follows stations that scroll their PS. */
-	if (r->ps_ok == 0xf) {
-		set_str(r, r->ps, r->ps_work, 8);
+	/* A segment that changed starts a new name: never publish one put
+	 * together from two (the station moved on mid-way: "Maexis"). */
+	if (r->ps_work[seg * 2] != c0 || r->ps_work[seg * 2 + 1] != c1)
 		r->ps_ok = 0;
+	r->ps_work[seg * 2] = c0;
+	r->ps_work[seg * 2 + 1] = c1;
+	r->ps_ok |= 1 << seg;
+	if (r->ps_ok != 0xf)
+		return;
+	r->ps_ok = 0;
+	ps_trim(r->ps_work, word);
+	if (strcmp(word, r->ps)) {
+		set_str(r, r->ps, word, strlen(word));
+		ps_scroll(r, word);
 	}
 }
 
@@ -148,23 +209,36 @@ void rds_group(struct rds *r, const uint16_t blk[4])
 	bool version_b = b & 0x800;
 	int pty = (b >> 5) & 0x1f;
 
-	/* A new station (PI) counts once seen twice in a row: a corrupted
-	 * block A must not wipe what we have. Until then, drop the group. */
+	r->groups++;
+	/* A new station (PI) counts once seen PI_CONFIRM times in a row: a
+	 * corrupted block A must not wipe what we have. Until then, drop the
+	 * group. */
 	if (a != r->pi) {
+		if (!a)
+			return;
 		if (a != r->pi_cand) {
 			r->pi_cand = a;
+			r->pi_cand_n = 1;
 			return;
 		}
+		if (++r->pi_cand_n < PI_CONFIRM)
+			return;
 		if (r->pi) {
 			bool had = r->ps[0] || r->rt[0];
+			unsigned long groups = r->groups;
 
 			rds_init(r);
+			r->groups = groups;
 			r->changed = had;
 		}
 		r->pi = a;
 	}
 	if (pty != r->pty) {
 		r->pty = pty;
+		r->changed = true;
+	}
+	if (r->ps_dynamic && r->groups - r->ps_change[0] > PS_STILL_GROUPS) {
+		r->ps_dynamic = false;	/* the PS stopped scrolling */
 		r->changed = true;
 	}
 	if (code == r->rtp_group && r->rtp_group >= 0)

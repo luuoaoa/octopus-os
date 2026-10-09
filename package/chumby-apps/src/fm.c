@@ -445,10 +445,10 @@ static void power_cb(lv_event_t *e)
 /* RDS name, what's playing and the live signal, from the reader's file. */
 static void rds_show(void)
 {
-	char path[256], line[160], ps[16] = "", rt[80] = "", title[80] = "",
-	     artist[80] = "", now[170];
+	char path[256], line[200], ps[16] = "", rt[80] = "", title[80] = "",
+	     artist[80] = "", pstext[164] = "", now[170];
 	FILE *f = NULL;
-	int rssi = -1;
+	int rssi = -1, psdyn = 0;
 
 	if (radio_on) {
 		snprintf(path, sizeof(path), "%s/rds", chumby_run_dir());
@@ -464,15 +464,26 @@ static void rds_show(void)
 			snprintf(title, sizeof(title), "%.79s", line + 6);
 		else if (!strncmp(line, "artist=", 7))
 			snprintf(artist, sizeof(artist), "%.79s", line + 7);
+		else if (!strncmp(line, "psdyn=", 6))
+			psdyn = atoi(line + 6);
+		else if (!strncmp(line, "pstext=", 7))
+			snprintf(pstext, sizeof(pstext), "%.163s", line + 7);
 		else if (!strncmp(line, "rssi=", 5))
 			rssi = atoi(line + 5);
 	}
 	if (f)
 		fclose(f);
+	/* What's playing: RadioText+ tags, else the RadioText, else the
+	 * words a station scrolls through its PS. A scrolling PS isn't the
+	 * station's name: the call sign (from the lookup) is used then. */
 	if (title[0])
 		snprintf(now, sizeof(now), "%s%s%s", title, artist[0] ? " - " : "", artist);
-	else
+	else if (rt[0])
 		snprintf(now, sizeof(now), "%s", rt);
+	else
+		snprintf(now, sizeof(now), "%s", psdyn ? pstext : "");
+	if (psdyn)
+		ps[0] = '\0';
 	if (strcmp(ps, rds_name) || strcmp(now, rds_now)) {
 		snprintf(rds_name, sizeof(rds_name), "%s", ps);
 		snprintf(rds_now, sizeof(rds_now), "%s", now);

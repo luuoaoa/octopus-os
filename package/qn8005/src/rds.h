@@ -6,6 +6,11 @@
  *
  * The QN8005 gives no per-block error flags, so every 2- or 4-character
  * segment is only taken after the same value arrived twice in a row.
+ *
+ * Many stations scroll text through the 8-character PS (one word at a
+ * time) instead of, or besides, RadioText. A PS that keeps changing is
+ * flagged (ps_dynamic: not a name then) and its words are put back
+ * together into pstext, a cycle at a time.
  */
 #ifndef RDS_H
 #define RDS_H
@@ -14,6 +19,7 @@
 #include <stdint.h>
 
 #define RDS_RT_MAX	64
+#define RDS_PSTEXT_MAX	160
 
 struct rds {
 	uint16_t pi;
@@ -22,10 +28,18 @@ struct rds {
 	char rt[RDS_RT_MAX + 1];	/* published: complete texts only */
 	char title[RDS_RT_MAX + 1];	/* from RadioText+ */
 	char artist[RDS_RT_MAX + 1];
+	bool ps_dynamic;		/* PS scrolls text, isn't a name */
+	char pstext[RDS_PSTEXT_MAX + 1];	/* the scrolled words, joined */
 	bool changed;			/* set when anything published changed */
 
 	/* working state */
-	uint16_t pi_cand;		/* a new PI, until seen twice */
+	uint16_t pi_cand;		/* a new PI, until seen PI_CONFIRM times */
+	int pi_cand_n;
+	unsigned long groups;		/* groups decoded: the clock (~11.4/s) */
+	unsigned long ps_change[4];	/* when the last PS changes happened */
+	char ps_cycle[RDS_PSTEXT_MAX + 1];	/* words since the cycle began */
+	char ps_first[9];		/* the cycle's first word */
+	int ps_words;
 	char ps_work[8];
 	uint8_t ps_last[4][2], ps_seen[4], ps_ok;
 	char rt_work[RDS_RT_MAX];
