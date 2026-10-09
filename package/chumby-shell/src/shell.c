@@ -511,9 +511,74 @@ static void popup_close(void);
 static lv_display_t *menu_disp;
 static lv_timer_t *menu_timer;
 
-/* Filled while its menu is open. */
-static lv_obj_t *home_join;	/* the open Home button, through the line */
+/*
+ * An open button (Home, volume, brightness) and the plate it drops down
+ * are one shape: its fill runs through the line, and concave rounded
+ * corners on either side of its foot curve out into the plate's top edge.
+ */
+#define JOIN_R		6
+static lv_obj_t *bar_join;	/* that band and its two fillets */
 
+static lv_obj_t *join_part(int x, int y, int w, int h)
+{
+	lv_obj_t *o = lv_obj_create(bar_join);
+
+	lv_obj_remove_style_all(o);
+	lv_obj_set_clickable(o, false);
+	lv_obj_set_pos(o, x, y);
+	lv_obj_set_size(o, w, h);
+	lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(o, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	return o;
+}
+
+/* A fillet: a square of the fill with a circle of the bar's background
+ * over it, centred on its outer top corner (and clipped to the square). */
+static void join_fillet(int x, int right, int r)
+{
+	int y = CHUMBY_BAR_H - LINE_H - r;
+	lv_obj_t *sq = join_part(right ? x : x - r, y, r, r);
+	lv_obj_t *c = lv_obj_create(sq);
+
+	lv_obj_remove_style_all(c);
+	lv_obj_set_clickable(c, false);
+	lv_obj_set_size(c, 2 * r, 2 * r);
+	lv_obj_set_pos(c, right ? 0 : -r, -r);
+	lv_obj_set_style_radius(c, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(c, chumby_color(CHUMBY_COLOR_BG), 0);
+}
+
+static void bar_join_update(void)
+{
+	lv_obj_t *b = menu_disp ? btn_home :
+		      popup_kind == POPUP_VOLUME ? btn_vol :
+		      popup_kind == POPUP_BRIGHTNESS ? btn_bri : NULL;
+	lv_obj_t *next;
+	lv_area_t a;
+	int r_left = JOIN_R, r_right = JOIN_R;
+
+	if (!bar_join)
+		return;
+	lv_obj_clean(bar_join);
+	if (!b)
+		return;
+	lv_obj_update_layout(b);
+	lv_obj_get_coords(b, &a);
+	if (a.x1 <= 0)		/* at the screen's edge (Home): none there */
+		r_left = 0;
+	/* Not into a filled tab beside it: only as wide as the gap. */
+	next = lv_obj_get_sibling(b, 1);
+	if (b == btn_home && next)
+		r_right = TAB_GAP;
+	join_part(a.x1 - r_left, CHUMBY_BAR_H - LINE_H,
+		  lv_area_get_width(&a) + r_left + r_right, LINE_H);
+	if (r_left)
+		join_fillet(a.x1, 0, r_left);
+	join_fillet(a.x2 + 1, 1, r_right);
+}
+
+/* Filled while its menu is open. */
 static void home_style(void)
 {
 	bool open = menu_disp != NULL;
@@ -523,15 +588,7 @@ static void home_style(void)
 	tab_style(btn_home, open);
 	if (open)	/* like volume and brightness: not the app tab's accent */
 		lv_obj_set_style_bg_color(btn_home, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	if (!home_join)
-		return;
-	lv_obj_set_hidden(home_join, !open);
-	if (open) {
-		lv_obj_update_layout(btn_home);
-		lv_obj_set_pos(home_join, lv_obj_get_x(bar_tabs) + lv_obj_get_x(btn_home),
-			       CHUMBY_BAR_H - LINE_H);
-		lv_obj_set_width(home_join, lv_obj_get_width(btn_home));
-	}
+	bar_join_update();
 }
 
 static void menu_close(void)
@@ -721,6 +778,7 @@ static void quick_buttons_update(void)
 		tray_style(btn_vol, popup_kind == POPUP_VOLUME);
 	if (btn_bri)
 		tray_style(btn_bri, popup_kind == POPUP_BRIGHTNESS);
+	bar_join_update();
 }
 
 static int popup_get(void)
@@ -788,7 +846,7 @@ static void popup_bar_cb(lv_event_t *e)
  */
 static void popup_open(enum popup_kind kind)
 {
-	lv_obj_t *scr;
+	lv_obj_t *scr, *plate;
 
 	menu_close();
 	if (popup_kind == kind && popup_disp) {
@@ -796,6 +854,8 @@ static void popup_open(enum popup_kind kind)
 		return;
 	}
 	if (!popup_disp) {
+		/* With alpha: the plate's rounded corners show what's under them. */
+		lv_wayland_window_set_next_color_format(LV_COLOR_FORMAT_ARGB8888);
 		popup_disp = chumby_window_create("chumby-popup", CHUMBY_POPUP_W, CHUMBY_POPUP_H);
 		if (!popup_disp)
 			return;
@@ -804,9 +864,16 @@ static void popup_open(enum popup_kind kind)
 	scr = lv_display_get_screen_active(popup_disp);
 	lv_obj_clean(scr);
 	lv_obj_set_scrollable(scr, false);
-	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_style_bg_opa(scr, LV_OPA_TRANSP, 0);
+	plate = lv_obj_create(scr);
+	lv_obj_remove_style_all(plate);
+	lv_obj_set_size(plate, CHUMBY_POPUP_W, CHUMBY_POPUP_H);
+	lv_obj_set_scrollable(plate, false);
+	lv_obj_set_style_radius(plate, MENU_RADIUS, 0);
+	lv_obj_set_style_bg_opa(plate, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(plate, chumby_color(CHUMBY_COLOR_TEXT), 0);
 
-	popup_bar = lv_slider_create(scr);
+	popup_bar = lv_slider_create(plate);
 	lv_obj_set_size(popup_bar, CHUMBY_POPUP_W - 2 * 16, CHUMBY_POPUP_H - 2 * 14);
 	lv_obj_center(popup_bar);
 	lv_slider_set_range(popup_bar, kind == POPUP_VOLUME ? 0 : 5, 100);
@@ -866,12 +933,6 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_set_pos(line, 0, CHUMBY_BAR_H - LINE_H);
 	lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(line, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-	home_join = lv_obj_create(scr);
-	lv_obj_remove_style_all(home_join);
-	lv_obj_set_height(home_join, LINE_H);
-	lv_obj_set_style_bg_opa(home_join, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(home_join, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_hidden(home_join, true);
 
 	tray = lv_obj_create(scr);
 	lv_obj_remove_style_all(tray);
@@ -895,6 +956,12 @@ static void build_panel(lv_obj_t *scr)
 	lv_label_set_text(bar_clock, "");
 	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_BODY), 0);
 	lv_obj_set_style_text_color(bar_clock, chumby_color(CHUMBY_COLOR_TEXT), 0);
+
+	/* Over everything else in the bar. */
+	bar_join = lv_obj_create(scr);
+	lv_obj_remove_style_all(bar_join);
+	lv_obj_set_clickable(bar_join, false);
+	lv_obj_set_size(bar_join, CHUMBY_SCREEN_W, CHUMBY_BAR_H);
 
 	tabs_rebuild();
 	quick_buttons_update();
