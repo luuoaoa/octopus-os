@@ -765,7 +765,9 @@ static void clock_tab_style(void)
 		chumby_glossy(bar_clock_tab, chumby_accent(a ? a->color : CHUMBY_ACCENT_DEFAULT), 0);
 		lv_obj_set_style_text_color(bar_clock_tab, chumby_on_accent(), 0);
 		lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_BODY), 0);
-		lv_obj_set_style_translate_y(bar_clock, 0, 0);
+		/* On the app tabs' title baseline (their row is centred with
+		 * the icon font's taller line in it). */
+		lv_obj_set_style_translate_y(bar_clock, -1, 0);
 		lv_obj_set_style_text_color(bar_clock, chumby_on_accent(), 0);
 		lv_label_set_text(bar_clock, "Clock");
 	} else {
