@@ -3,9 +3,10 @@ config BR2_PACKAGE_CHUMBY_APPS
 	select BR2_PACKAGE_LIBCHUMBY
 	select BR2_PACKAGE_LIBCURL
 	select BR2_PACKAGE_MPG123
+	select BR2_PACKAGE_FAAD2
 	select BR2_PACKAGE_ALSA_LIB
 	help
 	  Chumby One apps on libchumby: Clock (with alarms, rung by
 	  chumby-shell), FM Radio (uses /usr/bin/radio from the
-	  falconwing-mainline board) and Internet Radio (MP3 streams,
-	  played by chumby-stream).
+	  falconwing-mainline board) and Internet Radio (MP3 and AAC
+	  streams, HLS too, played by chumby-stream).

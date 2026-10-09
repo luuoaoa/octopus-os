@@ -1,0 +1,18 @@
+From: chumby <chumby@localhost>
+Subject: [PATCH] install the fixed-point library too
+
+libfaad_fixed is built but not installed. The i.MX233 (ARM926EJ-S) has
+no FPU, where the floating-point decoder would run on soft-float;
+chumby-stream links the fixed-point one.
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -271,7 +271,7 @@
+   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/faad2.pc"
+     DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+
+-  set(INSTALL_TARGETS faad faad_drm)
++  set(INSTALL_TARGETS faad faad_drm faad_fixed)
+   if (FAAD_BUILD_CLI)
+     list(APPEND INSTALL_TARGETS faad_cli)
+   endif()

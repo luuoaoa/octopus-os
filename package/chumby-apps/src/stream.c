@@ -6,10 +6,15 @@
  *                                stopping the FM radio), in the background
  *   chumby-stream stop
  *
- * MP3 over http or https (libcurl), decoded by libmpg123 to the codec
- * (ALSA, as the FM loop uses it). .pls and .m3u playlists are followed to
- * their first entry. Shoutcast/Icecast "ICY" metadata gives what's
- * playing. A dropped stream is reconnected, backing off up to 30 s.
+ * Over http or https (libcurl), to the codec (ALSA, as the FM loop uses
+ * it):
+ *   - Shoutcast/Icecast streams, MP3 (libmpg123) or AAC (faad2, fixed
+ *     point: no FPU here); their "ICY" metadata gives what's playing
+ *   - HLS (.m3u8): MPEG-TS or packed-audio segments of either, fetched
+ *     by a thread on one kept-alive connection (a TLS handshake per 2 s
+ *     segment would be too slow on this CPU) and queued for playing
+ *   - .pls and .m3u playlists, followed to their first entry
+ * A dropped stream is reconnected, backing off up to 30 s.
  *
  * State goes to $run_dir/stream for the app ("state=", "url=", "name=",
  * "title=" lines), gone once stopped; our pid to $run_dir/stream.pid.
@@ -22,6 +27,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <mpg123.h>
+#include <neaacdec.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,7 +51,16 @@ static volatile sig_atomic_t stop;
 static char status_path[256], pid_path[256];
 static char url[1024], name[128], title[256], state[16];
 
+enum codec { CODEC_UNKNOWN, CODEC_MP3, CODEC_AAC };
+static enum codec codec;	/* of the stream: by Content-Type, else sniffed */
+
+static void sleep_s(int s);
+
 static mpg123_handle *mh;
+static NeAACDecHandle aac;
+static bool aac_ready;
+static unsigned char abuf[16384];	/* ADTS bytes not decoded yet */
+static size_t alen;
 static snd_pcm_t *pcm;
 static long pcm_rate;
 static int pcm_channels;
@@ -232,6 +248,176 @@ static void decode(const char *data, size_t len)
 	}
 }
 
+static void aac_reset(void)
+{
+	NeAACDecConfigurationPtr cfg;
+
+	if (aac)
+		NeAACDecClose(aac);
+	aac = NeAACDecOpen();
+	aac_ready = false;
+	alen = 0;
+	if (!aac)
+		return;
+	cfg = NeAACDecGetCurrentConfiguration(aac);
+	cfg->outputFormat = FAAD_FMT_16BIT;
+	cfg->downMatrix = 1;		/* 5.1 to stereo */
+	NeAACDecSetConfiguration(aac, cfg);
+}
+
+/* ADTS frames: a 7 (or 9) byte header with the frame's length, then data. */
+static void aac_feed(const unsigned char *d, size_t n)
+{
+	NeAACDecFrameInfo fi;
+	unsigned long rate;
+	unsigned char ch;
+	size_t take, pos, fl;
+	void *out;
+
+	while (n > 0 && !stop && aac) {
+		take = n < sizeof(abuf) - alen ? n : sizeof(abuf) - alen;
+		memcpy(abuf + alen, d, take);
+		alen += take;
+		d += take;
+		n -= take;
+		pos = 0;
+		for (;;) {
+			while (pos + 1 < alen && !(abuf[pos] == 0xff && (abuf[pos + 1] & 0xf6) == 0xf0))
+				pos++;
+			if (alen - pos < 7)
+				break;
+			fl = ((abuf[pos + 3] & 3) << 11) | (abuf[pos + 4] << 3) | (abuf[pos + 5] >> 5);
+			if (fl < 7) {
+				pos++;
+				continue;
+			}
+			if (alen - pos < fl)
+				break;
+			if (!aac_ready) {
+				if (NeAACDecInit(aac, abuf + pos, fl, &rate, &ch) < 0) {
+					pos++;
+					continue;
+				}
+				aac_ready = true;
+			}
+			out = NeAACDecDecode(aac, &fi, abuf + pos, fl);
+			if (!fi.error && fi.samples && out) {
+				if (!pcm_setup(fi.samplerate, fi.channels)) {
+					stop = 1;	/* no sound card */
+					return;
+				}
+				pcm_write(out, fi.samples * 2);
+				set_state("playing");
+			}
+			pos += fl;
+		}
+		memmove(abuf, abuf + pos, alen - pos);
+		alen -= pos;
+	}
+}
+
+/* Audio frames: to the decoder for the codec, sniffed from the first
+ * frame header if the server didn't say (ADTS has layer bits 00). */
+static void es_out(const unsigned char *d, size_t n)
+{
+	size_t i;
+
+	if (codec == CODEC_UNKNOWN) {
+		for (i = 0; i + 1 < n; i++)
+			if (d[i] == 0xff && (d[i + 1] & 0xe0) == 0xe0) {
+				codec = (d[i + 1] & 0x06) == 0 ? CODEC_AAC : CODEC_MP3;
+				break;
+			}
+		if (codec == CODEC_UNKNOWN)
+			return;
+	}
+	if (codec == CODEC_AAC)
+		aac_feed(d, n);
+	else
+		decode((const char *)d, n);
+}
+
+/* MPEG-TS: 188-byte packets; the first PID carrying an audio PES
+ * (stream_id 0xc0-0xdf) is the one, its PES headers stripped. */
+static int ts_pid = -1;
+static unsigned char ts_pkt[188];
+static size_t ts_len;
+
+static void ts_packet(const unsigned char *p)
+{
+	int pid = ((p[1] & 0x1f) << 8) | p[2], afc = (p[3] >> 4) & 3;
+	size_t off = 4, plen;
+	const unsigned char *pl;
+
+	if (afc == 0 || afc == 2)	/* no payload */
+		return;
+	if (afc == 3)
+		off += 1 + p[4];
+	if (off >= 188)
+		return;
+	pl = p + off;
+	plen = 188 - off;
+	if ((p[1] & 0x40) && plen >= 9 && !pl[0] && !pl[1] && pl[2] == 1) {	/* PES start */
+		if (ts_pid < 0 && pl[3] >= 0xc0 && pl[3] <= 0xdf)
+			ts_pid = pid;
+		if (pid == ts_pid && 9u + pl[8] < plen)
+			es_out(pl + 9 + pl[8], plen - 9 - pl[8]);
+		return;
+	}
+	if (pid == ts_pid)
+		es_out(pl, plen);
+}
+
+static void ts_feed(const unsigned char *d, size_t n)
+{
+	size_t take;
+
+	while (n > 0 && !stop) {
+		if (!ts_len && *d != 0x47) {	/* lost sync */
+			d++;
+			n--;
+			continue;
+		}
+		take = n < 188 - ts_len ? n : 188 - ts_len;
+		memcpy(ts_pkt + ts_len, d, take);
+		ts_len += take;
+		d += take;
+		n -= take;
+		if (ts_len == 188) {
+			ts_packet(ts_pkt);
+			ts_len = 0;
+		}
+	}
+}
+
+/* A whole HLS segment: MPEG-TS, or packed audio behind an ID3 tag. */
+static void segment_play(const unsigned char *d, size_t n)
+{
+	size_t tag;
+
+	if (n > 188 && d[0] == 0x47 && d[188] == 0x47) {
+		ts_feed(d, n);
+		return;
+	}
+	if (n > 10 && !memcmp(d, "ID3", 3)) {
+		tag = 10 + ((d[6] & 0x7f) << 21 | (d[7] & 0x7f) << 14 | (d[8] & 0x7f) << 7 | (d[9] & 0x7f));
+		if (tag >= n)
+			return;
+		d += tag;
+		n -= tag;
+	}
+	es_out(d, n);
+}
+
+static void decoders_reset(void)
+{
+	decoder_reset();
+	aac_reset();
+	codec = CODEC_UNKNOWN;
+	ts_pid = -1;
+	ts_len = 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* ICY metadata                                                       */
 
@@ -268,7 +454,12 @@ static size_t on_header(char *buf, size_t size, size_t n, void *user)
 	*v++ = '\0';
 	while (*v == ' ')
 		v++;
-	if (!strcasecmp(line, "icy-metaint")) {
+	if (!strcasecmp(line, "content-type")) {
+		if (!strncasecmp(v, "audio/aac", 9) || !strncasecmp(v, "audio/x-aac", 11))
+			codec = CODEC_AAC;
+		else if (!strncasecmp(v, "audio/mpeg", 10))
+			codec = CODEC_MP3;
+	} else if (!strcasecmp(line, "icy-metaint")) {
 		metaint = atol(v);
 		audio_left = metaint;
 	} else if (!strcasecmp(line, "icy-name") && !got_name && *v) {
@@ -285,12 +476,12 @@ static size_t on_data(char *p, size_t size, size_t n, void *user)
 	(void)user;
 	while (i < len && !stop) {
 		if (!metaint) {
-			decode(p + i, len - i);
+			es_out((const unsigned char *)p + i, len - i);
 			break;
 		}
 		if (meta_len < 0 && audio_left > 0) {		/* audio */
 			take = len - i < (size_t)audio_left ? len - i : (size_t)audio_left;
-			decode(p + i, take);
+			es_out((const unsigned char *)p + i, take);
 			audio_left -= take;
 			i += take;
 		} else if (meta_len < 0) {			/* length byte */
@@ -358,13 +549,17 @@ static size_t on_buf(char *p, size_t size, size_t n, void *user)
 	return len;
 }
 
-static bool is_playlist(const char *u)
+static bool ends_with(const char *u, const char *ext)
 {
 	const char *q = strpbrk(u, "?#"), *end = q ? q : u + strlen(u);
+	size_t n = strlen(ext);
 
-	return (end - u > 4 && !strncasecmp(end - 4, ".pls", 4)) ||
-	       (end - u > 4 && !strncasecmp(end - 4, ".m3u", 4)) ||
-	       (end - u > 5 && !strncasecmp(end - 5, ".m3u8", 5));
+	return (size_t)(end - u) > n && !strncasecmp(end - n, ext, n);
+}
+
+static bool is_playlist(const char *u)
+{
+	return ends_with(u, ".pls") || ends_with(u, ".m3u");
 }
 
 /* The first http(s) entry ("File1=..." in .pls, a bare line in .m3u). */
@@ -397,6 +592,266 @@ static bool playlist_resolve(const char *u, char *out, size_t size)
 }
 
 /* ------------------------------------------------------------------ */
+/* HLS                                                                */
+
+struct dyn {
+	unsigned char *p;
+	size_t len, cap;
+};
+
+static size_t on_dyn(char *p, size_t size, size_t n, void *user)
+{
+	struct dyn *b = user;
+	size_t len = size * n;
+
+	if (b->len + len + 1 > b->cap) {
+		size_t cap = (b->len + len + 1) * 2;
+		unsigned char *q = realloc(b->p, cap);
+
+		if (!q)
+			return 0;
+		b->p = q;
+		b->cap = cap;
+	}
+	memcpy(b->p + b->len, p, len);
+	b->len += len;
+	b->p[b->len] = '\0';
+	return len;
+}
+
+/* GET into b on the kept-alive handle. */
+static bool fetch(CURL *c, const char *u, struct dyn *b, long timeout)
+{
+	long code = 0;
+
+	b->len = 0;
+	curl_easy_setopt(c, CURLOPT_URL, u);
+	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, on_dyn);
+	curl_easy_setopt(c, CURLOPT_WRITEDATA, b);
+	curl_easy_setopt(c, CURLOPT_TIMEOUT, timeout);
+	if (curl_easy_perform(c) != CURLE_OK)
+		return false;
+	curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+	return code == 200 && b->len;
+}
+
+/* A playlist entry against the playlist's own URL. */
+static void resolve(const char *base, const char *ref, char *out, size_t size)
+{
+	const char *q, *host;
+	size_t n;
+
+	if (!strncmp(ref, "http://", 7) || !strncmp(ref, "https://", 8)) {
+		snprintf(out, size, "%s", ref);
+		return;
+	}
+	host = strstr(base, "://");
+	host = host ? host + 3 : base;
+	if (ref[0] == '/') {			/* from the host's root */
+		n = strcspn(host, "/?#");
+		snprintf(out, size, "%.*s%s", (int)(host + n - base), base, ref);
+		return;
+	}
+	q = base + strcspn(base, "?#");		/* beside the playlist */
+	while (q > host && q[-1] != '/')
+		q--;
+	snprintf(out, size, "%.*s%s", (int)(q - base), base, ref);
+}
+
+struct seg {
+	struct seg *next;
+	size_t len;
+	unsigned char data[];
+};
+
+#define QUEUE_MAX	8	/* segments fetched ahead (~16 s at 2 s each) */
+
+static pthread_mutex_t q_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t q_cond = PTHREAD_COND_INITIALIZER;
+static struct seg *q_head, *q_tail;
+static int q_count;
+static bool hls_done;			/* the fetcher gave up or the stream ended */
+static char hls_url[1024];
+
+static void q_push(struct seg *g)
+{
+	pthread_mutex_lock(&q_lock);
+	while (q_count >= QUEUE_MAX && !stop)
+		pthread_cond_wait(&q_cond, &q_lock);
+	g->next = NULL;
+	if (q_tail)
+		q_tail->next = g;
+	else
+		q_head = g;
+	q_tail = g;
+	q_count++;
+	pthread_cond_broadcast(&q_cond);
+	pthread_mutex_unlock(&q_lock);
+}
+
+/* The next segment, waiting up to half a second. */
+static struct seg *q_pop(void)
+{
+	struct timespec ts;
+	struct seg *g;
+
+	pthread_mutex_lock(&q_lock);
+	if (!q_head && !hls_done && !stop) {
+		clock_gettime(CLOCK_REALTIME, &ts);
+		ts.tv_nsec += 500 * 1000000L;
+		if (ts.tv_nsec >= 1000000000L) {
+			ts.tv_sec++;
+			ts.tv_nsec -= 1000000000L;
+		}
+		pthread_cond_timedwait(&q_cond, &q_lock, &ts);
+	}
+	g = q_head;
+	if (g) {
+		q_head = g->next;
+		if (!q_head)
+			q_tail = NULL;
+		q_count--;
+		pthread_cond_broadcast(&q_cond);
+	}
+	pthread_mutex_unlock(&q_lock);
+	return g;
+}
+
+static void q_clear(void)
+{
+	struct seg *g;
+
+	pthread_mutex_lock(&q_lock);
+	while ((g = q_head)) {
+		q_head = g->next;
+		free(g);
+	}
+	q_tail = NULL;
+	q_count = 0;
+	pthread_mutex_unlock(&q_lock);
+}
+
+#define MAX_SEGS	128
+
+/* Follow the (live) playlist: fetch each new segment once, in order.
+ * Starts three segments back from the live edge, for some slack. */
+static void *hls_fetcher(void *arg)
+{
+	char pl_url[1024], seg_url[1024], *line, *save, *uris[MAX_SEGS];
+	struct dyn pl = { 0 }, sb = { 0 };
+	long long seq0, last = -1;
+	int n, i, start, fails = 0, target;
+	bool endlist, fresh;
+	CURL *c = easy(hls_url);
+	struct seg *g;
+
+	(void)arg;
+	snprintf(pl_url, sizeof(pl_url), "%s", hls_url);
+	while (c && !stop && fails < 5) {
+		if (!fetch(c, pl_url, &pl, 20)) {
+			fails++;
+			sleep_s(1);
+			continue;
+		}
+		if (!strstr((char *)pl.p, "#EXTM3U"))
+			break;
+		if (strstr((char *)pl.p, "#EXT-X-MAP")) {
+			fprintf(stderr, "chumby-stream: fMP4 HLS isn't supported\n");
+			break;
+		}
+		seq0 = 0;
+		target = 2;
+		endlist = strstr((char *)pl.p, "#EXT-X-ENDLIST") != NULL;
+		n = 0;
+		/* A master playlist: take its first variant. */
+		if (strstr((char *)pl.p, "#EXT-X-STREAM-INF")) {
+			bool next = false;
+
+			for (line = strtok_r((char *)pl.p, "\r\n", &save); line;
+			     line = strtok_r(NULL, "\r\n", &save)) {
+				if (!strncmp(line, "#EXT-X-STREAM-INF", 17))
+					next = true;
+				else if (next && line[0] && line[0] != '#') {
+					resolve(pl_url, line, seg_url, sizeof(seg_url));
+					snprintf(pl_url, sizeof(pl_url), "%s", seg_url);
+					break;
+				}
+			}
+			continue;
+		}
+		for (line = strtok_r((char *)pl.p, "\r\n", &save); line && n < MAX_SEGS;
+		     line = strtok_r(NULL, "\r\n", &save)) {
+			if (!strncmp(line, "#EXT-X-MEDIA-SEQUENCE:", 22))
+				seq0 = atoll(line + 22);
+			else if (!strncmp(line, "#EXT-X-TARGETDURATION:", 22))
+				target = atoi(line + 22);
+			else if (line[0] && line[0] != '#')
+				uris[n++] = line;
+		}
+		if (last < 0 || last + 1 < seq0 || last + 1 > seq0 + n)
+			start = n > 3 ? n - 3 : 0;	/* first time, or fell behind */
+		else
+			start = last + 1 - seq0;
+		fresh = false;
+		for (i = start; i < n && !stop; i++) {
+			resolve(pl_url, uris[i], seg_url, sizeof(seg_url));
+			if (!fetch(c, seg_url, &sb, 30)) {
+				fails++;
+				break;
+			}
+			g = malloc(sizeof(*g) + sb.len);
+			if (!g)
+				break;
+			g->len = sb.len;
+			memcpy(g->data, sb.p, sb.len);
+			q_push(g);
+			last = seq0 + i;
+			fresh = true;
+			fails = 0;
+		}
+		if (endlist && !fresh)
+			break;
+		if (!fresh)	/* nothing new yet: half a segment */
+			sleep_s(target > 2 ? target / 2 : 1);
+	}
+	if (c)
+		curl_easy_cleanup(c);
+	free(pl.p);
+	free(sb.p);
+	pthread_mutex_lock(&q_lock);
+	hls_done = true;
+	pthread_cond_broadcast(&q_cond);
+	pthread_mutex_unlock(&q_lock);
+	return NULL;
+}
+
+/* Play an HLS stream until it ends, fails or we're stopped. */
+static void hls_play(const char *u)
+{
+	pthread_t t;
+	struct seg *g;
+
+	snprintf(hls_url, sizeof(hls_url), "%s", u);
+	hls_done = false;
+	if (pthread_create(&t, NULL, hls_fetcher, NULL))
+		return;
+	while (!stop) {
+		g = q_pop();
+		if (g) {
+			segment_play(g->data, g->len);
+			free(g);
+		} else if (hls_done) {
+			break;
+		}
+	}
+	pthread_mutex_lock(&q_lock);
+	pthread_cond_broadcast(&q_cond);	/* a fetcher waiting for room */
+	pthread_mutex_unlock(&q_lock);
+	pthread_join(t, NULL);
+	q_clear();
+}
+
+/* ------------------------------------------------------------------ */
 
 static void sleep_s(int s)
 {
@@ -422,7 +877,14 @@ static void play(void)
 			backoff = backoff * 2 > BACKOFF_MAX_S ? BACKOFF_MAX_S : backoff * 2;
 			continue;
 		}
-		decoder_reset();
+		decoders_reset();
+		if (ends_with(target, ".m3u8")) {
+			hls_play(target);
+			if (stop)
+				break;
+			res = CURLE_RECV_ERROR;
+			goto failed;
+		}
 		metaint = 0;
 		meta_len = -1;
 		c = easy(target);
@@ -443,6 +905,7 @@ static void play(void)
 		curl_easy_cleanup(c);
 		if (stop)
 			break;
+failed:
 		if (!strcmp(state, "playing"))
 			backoff = 2;	/* it was working: retry soon */
 		fprintf(stderr, "chumby-stream: %s: %s\n", target, curl_easy_strerror(res));
@@ -514,6 +977,8 @@ int main(int argc, char **argv)
 	pcm_close();
 	if (mh)
 		mpg123_delete(mh);
+	if (aac)
+		NeAACDecClose(aac);
 	unlink(status_path);
 	unlink(pid_path);
 	return 0;

@@ -81,8 +81,10 @@ BR2_PACKAGE_LIBCURL_CURL=y
 BR2_PACKAGE_LIBCURL_MBEDTLS=y
 BR2_PACKAGE_CA_CERTIFICATES=y
 BR2_PACKAGE_JQ=y
-# Internet radio: chumby-stream decodes MP3 streams with libmpg123.
+# Internet radio: chumby-stream decodes MP3 with libmpg123, AAC with
+# faad2 (its fixed-point build, see board/.../patches/faad2).
 BR2_PACKAGE_MPG123=y
+BR2_PACKAGE_FAAD2=y
 BR2_PACKAGE_ALSA_UTILS=y
 BR2_PACKAGE_ALSA_UTILS_AMIXER=y
 BR2_PACKAGE_ALSA_UTILS_APLAY=y

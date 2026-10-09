@@ -8,7 +8,7 @@ CHUMBY_APPS_VERSION = 1.0
 CHUMBY_APPS_SITE = $(BR2_EXTERNAL_PIFANSRF_PATH)/package/chumby-apps/src
 CHUMBY_APPS_SITE_METHOD = local
 CHUMBY_APPS_LICENSE = GPL-2.0+
-CHUMBY_APPS_DEPENDENCIES = host-pkgconf libchumby libcurl mpg123 alsa-lib
+CHUMBY_APPS_DEPENDENCIES = host-pkgconf libchumby libcurl mpg123 faad2 alsa-lib
 
 define CHUMBY_APPS_BUILD_CMDS
 	$(TARGET_MAKE_ENV) $(MAKE) -C $(@D) \

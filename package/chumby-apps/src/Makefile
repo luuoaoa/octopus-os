@@ -19,7 +19,8 @@ chumby-netradio: netradio.o
 # The internet radio player: no UI, libchumby only for its paths.
 stream.o: override CFLAGS += $(shell $(PKG_CONFIG) --cflags libcurl libmpg123 alsa)
 chumby-stream: stream.o
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) $(shell $(PKG_CONFIG) --libs libcurl libmpg123 alsa)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) $(shell $(PKG_CONFIG) --libs libcurl libmpg123 alsa) \
+		-lfaad_fixed -lpthread -lm
 
 clean:
 	rm -f $(APPS) *.o
