@@ -139,104 +139,55 @@ shows the station name and "title - artist" (or the RadioText).
 ## GUI (Wayland)
 
 ```
- ┌────┬──────────────────────────┐   chumby-wm (wlroots, pixman, no GPU)
- │ ⌂  │                          │     owns DRM + input, places windows
- │ ♪  │   active app             │   chumby-shell
- │ 🔔 │   (maximized, one at a   │     panel: home, running apps,
- │ 🔊 │    time) or the home     │            volume, brightness
- │ 👁 │    app list behind       │     home:  installed apps
- └────┴──────────────────────────┘   apps: chumby-clock, chumby-fm, ...
+ ┌──────────────────────────────────┐   chumby-wm (wlroots, pixman, no GPU)
+ │ ⌂ ▌♪ FM Radio▐ 🔔     🔊 👁 10:30 │     owns DRM + input, places windows
+ ├──────────────────────────────────┤   chumby-shell: the tab bar, Home menu,
+ │                                  │     volume/brightness sliders, alarms
+ │   the app in front (320x208)     │   apps: chumby-clock, chumby-fm,
+ │                                  │     chumby-netradio, ...
+ └──────────────────────────────────┘
 ```
 
-**Alignment**: nothing is placed at a hand-tuned y. The generated fonts'
-line boxes are balanced on the capitals, and layouts use libchumby's
-`chumby_group()` (content-sized flex row/column, children centred on each
-other) and `chumby_center_y_on/between/at()`, which centre by what is
-visible: text from cap height to baseline, icons and lone punctuation by
-their glyphs, groups by their children. E.g. the alarm editor's HH and MM
-sit exactly midway between their + and − buttons.
+**Writing an app? Read [docs/writing-chumby-apps.md](../../docs/writing-chumby-apps.md)**:
+the libchumby API, sound coordination (`chumby-audio`), the ready-made
+players, and the LVGL traps we hit.
 
-Sized for the resistive touchscreen: every touch target is at least 42 px
-(~9 mm) in both directions (`CHUMBY_TOUCH_MIN` in chumby.h); the panel is
-64 px wide so its buttons are 56x42.
-
-- **chumby-wm** (package/chumby-wm): ~800-line compositor on wlroots,
-  built without EGL/GBM (package/wlroots-pixman: pixman renderer, DRM dumb
-  buffers). Window policy by xdg app_id: `chumby-panel` pinned left (64 px),
-  `chumby-home` behind everything, `chumby-popup` (the shell's transient
-  controls) over the app area, any other window is an app maximized into
-  the rest. Apps are exported via wlr-foreign-toplevel-management;
+- **chumby-wm** (package/chumby-wm): a small compositor on wlroots, built
+  without EGL/GBM (package/wlroots-pixman). Window policy by xdg app_id
+  (see the top of `chumby-wm.c`): the shell's tab bar across the top, its
+  menu and slider dropping down from it, apps maximized under it, one in
+  front. Apps out of sight are frozen (SIGSTOP) until brought back, unless
+  they asked to stay awake. It applies the touch calibration
+  (`/var/lib/chumby/touch.cal`, live) and gives the calibration tool the
+  whole screen. Apps are exported via wlr-foreign-toplevel-management;
   screencopy is enabled for `chumby-screenshot > shot.ppm`.
-- **chumby-shell** (package/chumby-shell): panel + home windows. The
-  panel stays in the background: no button plates and icons at 30 %
-  opacity until it's touched, then full contrast, fading back 4 s after
-  the last touch (or when the popup closes). The app in front is marked
-  with a dot at its left, like the macOS dock. Tap an icon to switch,
-  long-press to close, ⌂ minimizes all (shows home). The
-  volume and brightness buttons open a big popup over the app area: a thick
-  bar you tap to set (no knob to aim at) and - / + buttons in 10 % steps;
-  it closes on the same button, a tap on empty space, or after 6 s idle.
-  Turning the knob changes the volume from anywhere and shows the popup.
-  The **snooze button** brings up the Clock from any app, lights the
-  screen for 10 s in the screen-off hours, and snoozes a ringing alarm.
-  The shell also **rings the alarms** (so they go off whatever is open,
-  even with the Clock closed): it brings up the Clock, keeps the screen
-  on, raises the volume to `alarm_volume` if lower, stops the FM radio
-  (it holds the sound card) and plays `chumby-alarm-tone`; it gives up
-  after 10 min. Commands go to the FIFO `/run/chumby/shell.cmd`:
-  `echo snooze|stop|ring|volume|brightness > /run/chumby/shell.cmd`
-  (handy over ssh; `ring` tests the alarm).
-  Started with the compositor by `chumby-session.service` (logs:
-  `journalctl -u chumby-session`).
-- **libchumby** (package/libchumby): the framework every app links. LVGL
-  9.6 on Wayland (wl_shm); Rockbox's Nimbus bitmap fonts as the only
-  text font (14 px body, 19 px headings, 35 px big values, 35 px at 2x
-  for the clock face; BDFs converted to LVGL fonts at build time by
-  `fonts/bdf2lvgl.py`), with LVGL's Montserrat only for the icon
-  glyphs; the universal dark theme (a child
-  theme of LVGL's default that styles buttons/sliders from the palette),
-  automatic night mode, volume/brightness helpers, and a main loop that can
-  watch extra fds. See `chumby.h`; a minimal app is ~10 lines.
-- **Apps** (package/chumby-apps): `chumby-clock`, `chumby-fm`. An app is a
-  binary plus `/usr/share/chumby/apps/<name>.app` (`Id` = the app_id it
-  passes to `chumby_app_init()`, `Name`, `Exec`, `Icon`).
-- **Clock**: HH:MM (no seconds: one redraw a minute), date, and a bar
-  with the next alarm that opens the alarm list. Alarms: tap a row to
-  edit, On/Off on the right, + to add (up to 8). The editor has big
-  + / − for hour and minute (hold the minute buttons to step by 5) and a
-  Repeat button cycling Once / Every day / Weekdays / Weekends. Stored in
-  `/var/lib/chumby/alarms.conf` (`06:30 MTWTF-- on`, editable by hand; other
-  day sets work, the UI just can't make them). While an alarm rings the
-  Clock shows Snooze / Stop over everything.
+- **chumby-shell** (package/chumby-shell): the tab bar (Home, the app in
+  front, the one before it; volume, brightness, the time), the Home menu
+  of installed apps, the volume/brightness sliders, screen power, the
+  snooze button (toggles the screen and brings up the Clock; held 4 s:
+  touch calibration) and the **alarms** (it rings them whatever is open,
+  pausing whatever plays through `chumby-audio`, and resumes it when
+  dismissed). Commands go to the FIFO `/run/chumby/shell.cmd`:
+  `snooze|stop|ring|volume|brightness|menu|calibrate` (handy over ssh;
+  `ring` tests the alarm). Started with the compositor by
+  `chumby-session.service` (logs: `journalctl -u chumby-session`).
+- **libchumby** (package/libchumby): the framework every app links: LVGL
+  9.6 on Wayland, Rockbox's Nimbus bitmap fonts, the day/night theme,
+  layout and label helpers, and a main loop that can watch extra fds.
+- **Apps** (package/chumby-apps): Clock (with alarms), FM Radio (RDS,
+  station art), Internet Radio (MP3/AAC/HLS via `chumby-stream`). An app
+  is a binary plus `/usr/share/chumby/apps/<name>.app`.
 
-**Night mode** is policy, not per-app: `/etc/chumby/policy.conf`
-(`night_start = 19:00`, `night_end = 07:00`, `mode = auto|day|night`,
-`day_brightness`, `night_brightness`) is re-read every 30 s by every
-process. At night the palette turns black/warm-red and the shell dims the
-backlight; the brightness control overrides until the next switch.
+**Night mode and screen off** are policy, not per-app:
+`/etc/chumby/policy.conf` (night window, `mode = auto|day|night`,
+brightness per mode, `screen_off_start/end`, `wake_seconds`,
+`snooze_minutes`, `alarm_volume`), re-read every 30 s by every process.
+At night the palette turns black/warm-red and the backlight dims; in the
+screen-off hours it's powered down, and chumby-wm drops touches that start
+on the dark screen.
 
-**Screen off**: from `screen_off_start` to `screen_off_end` (21:00-07:00)
-the shell powers the backlight down completely (`bl_power`), not just to
-a low brightness. The snooze button or the knob lights it for
-`wake_seconds` (10), touches keep it lit while it is, and a ringing alarm
-keeps it on. chumby-wm drops touches that start on the dark screen, so
-nothing is pressed blind. `snooze_minutes` (9) and `alarm_volume` (60 %)
-are in the same file.
-
-**Touch** goes through libinput; the calibration (measured on hardware
-from the four corners, see the rule) is applied by
-`/etc/udev/rules.d/90-chumby-touch.rules` (`LIBINPUT_CALIBRATION_MATRIX`).
-
-Script coverage: Nimbus 14 has Latin (with extended), Greek and Cyrillic;
-19 has Latin-1 and Cyrillic; 35 only Latin-1 (it's for the clock and big
-numbers). Missing characters fall back to Montserrat (ASCII), and there is
-no shaping for complex scripts. No keyboard layouts are installed
-(xkeyboard-config), so USB keyboards are ignored.
-
-The whole stack can be tried without hardware: run the target's
-`chumby-wm` under qemu-user with `WLR_BACKENDS=headless
-WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1` (`QEMU_LD_PREFIX` = the target
-dir), start apps against it, and grab `chumby-screenshot` PPMs.
+**Clock**: HH:MM (one redraw a minute), date, the next alarm; alarms in
+`/var/lib/chumby/alarms.conf` (`06:30 MTWTF-- on`, editable by hand).
 
 ## Unverified until it runs on hardware
 
