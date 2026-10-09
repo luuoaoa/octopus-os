@@ -18,6 +18,9 @@
 #include <unistd.h>
 
 #include "chumby.h"
+/* chumby_logo_set() decodes JPEGs by hand. */
+#include "lvgl/src/image/lv_image_decoder_private.h"
+#include "lvgl/src/misc/cache/instance/lv_image_cache.h"
 
 extern char **environ;
 
@@ -367,6 +370,123 @@ void chumby_center_y_at(lv_obj_t *obj, int32_t y)
 	lv_obj_update_layout(obj);
 	lv_obj_get_coords(lv_obj_get_parent(obj), &p);
 	center_y_abs(obj, p.y1 + y);
+}
+
+/* ------------------------------------------------------------------ */
+/* Logos                                                              */
+
+/* LVGL decodes JPEGs (TJPGD) one MCU at a time and can't scale images
+ * decoded that way, so decode the whole image into a buffer once. */
+static lv_draw_buf_t *decode_tiles(const char *src)
+{
+	lv_image_decoder_dsc_t dsc;
+	lv_area_t full, part;
+	lv_draw_buf_t *buf = NULL;
+	int32_t w, h, y;
+
+	if (lv_image_decoder_open(&dsc, src, NULL) != LV_RESULT_OK)
+		return NULL;
+	w = dsc.header.w;
+	h = dsc.header.h;
+	if (dsc.decoded || dsc.header.cf != LV_COLOR_FORMAT_RGB888 ||
+	    !(buf = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO)))
+		goto out;
+	lv_area_set(&full, 0, 0, w - 1, h - 1);
+	part.x1 = part.y1 = part.x2 = part.y2 = LV_COORD_MIN;
+	do {
+		if (lv_image_decoder_get_area(&dsc, &full, &part) != LV_RESULT_OK) {
+			lv_draw_buf_destroy(buf);
+			buf = NULL;
+			goto out;
+		}
+		for (y = part.y1; y <= part.y2; y++)
+			memcpy(buf->data + y * buf->header.stride + part.x1 * 3,
+			       dsc.decoded->data + (y - part.y1) * dsc.decoded->header.stride,
+			       lv_area_get_width(&part) * 3);
+	} while (part.x2 < w - 1 || part.y2 < h - 1);
+out:
+	lv_image_decoder_close(&dsc);
+	return buf;
+}
+
+#define MAX_LOGOS	4
+
+/* Per image object: its source, and a decoded JPEG it shows. */
+static struct logo {
+	lv_obj_t *img;
+	char src[256];
+	time_t mtime;
+	lv_draw_buf_t *jpeg;
+} logos[MAX_LOGOS];
+
+static void logo_drop(struct logo *l)
+{
+	if (l->jpeg) {
+		if (lv_image_get_src(l->img) == l->jpeg)
+			lv_image_set_src(l->img, NULL);
+		lv_image_cache_drop(l->jpeg);
+		lv_draw_buf_destroy(l->jpeg);
+	}
+	l->jpeg = NULL;
+}
+
+static void logo_deleted(lv_event_t *e)
+{
+	struct logo *l = lv_event_get_user_data(e);
+
+	if (l->jpeg) {
+		lv_image_cache_drop(l->jpeg);
+		lv_draw_buf_destroy(l->jpeg);
+	}
+	memset(l, 0, sizeof(*l));
+}
+
+bool chumby_logo_set(lv_obj_t *img, const char *path, int32_t box)
+{
+	struct logo *l = NULL;
+	const char *ext = strrchr(path, '.');
+	char src[256];
+	lv_image_header_t h;
+	struct stat st;
+	int32_t sw, sh;
+	int i;
+
+	for (i = 0; i < MAX_LOGOS && !l; i++)
+		if (logos[i].img == img)
+			l = &logos[i];
+	for (i = 0; i < MAX_LOGOS && !l; i++)
+		if (!logos[i].img) {
+			l = &logos[i];
+			l->img = img;
+			lv_obj_add_event_cb(img, logo_deleted, LV_EVENT_DELETE, l);
+		}
+	if (!l || stat(path, &st))
+		return false;
+	snprintf(src, sizeof(src), "A:%s", path);
+	if (ext && (!strcmp(ext, ".jpg") || !strcmp(ext, ".jpeg"))) {
+		/* Decode again only when it's another file, or got replaced. */
+		if (!l->jpeg || strcmp(l->src, src) || st.st_mtime != l->mtime) {
+			logo_drop(l);
+			l->jpeg = decode_tiles(src);
+			snprintf(l->src, sizeof(l->src), "%s", src);
+			l->mtime = st.st_mtime;
+		}
+		if (!l->jpeg)
+			return false;
+		h = l->jpeg->header;
+		lv_image_set_src(img, l->jpeg);
+	} else {
+		if (lv_image_decoder_get_info(src, &h) != LV_RESULT_OK || !h.w || !h.h)
+			return false;
+		logo_drop(l);
+		snprintf(l->src, sizeof(l->src), "%s", src);	/* must outlive the call */
+		lv_image_set_src(img, l->src);
+	}
+	/* Fit the box, keep the aspect ratio. */
+	sw = box * 256 / h.w;
+	sh = box * 256 / h.h;
+	lv_image_set_scale(img, sw < sh ? sw : sh);
+	return true;
 }
 
 static struct {

@@ -136,6 +136,14 @@ void chumby_center_y_on(lv_obj_t *obj, lv_obj_t *ref);
 void chumby_center_y_between(lv_obj_t *obj, lv_obj_t *above, lv_obj_t *below);
 void chumby_center_y_at(lv_obj_t *obj, int32_t y);
 
+/*
+ * Show a PNG or JPEG file (by extension) in an lv_image, scaled to fit a
+ * box x box square. JPEGs are decoded whole once and kept (LVGL can't
+ * scale them otherwise), again only when the file changes. False when
+ * the file can't be shown (missing, unreadable, not an image).
+ */
+bool chumby_logo_set(lv_obj_t *img, const char *path, int32_t box);
+
 /* Policy */
 const struct chumby_policy *chumby_policy(void);
 /* Is the local time now in [start, end) (minutes, may wrap midnight)? */

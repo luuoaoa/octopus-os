@@ -8,7 +8,7 @@ CHUMBY_APPS_VERSION = 1.0
 CHUMBY_APPS_SITE = $(BR2_EXTERNAL_PIFANSRF_PATH)/package/chumby-apps/src
 CHUMBY_APPS_SITE_METHOD = local
 CHUMBY_APPS_LICENSE = GPL-2.0+
-CHUMBY_APPS_DEPENDENCIES = host-pkgconf libchumby
+CHUMBY_APPS_DEPENDENCIES = host-pkgconf libchumby libcurl mpg123 alsa-lib
 
 define CHUMBY_APPS_BUILD_CMDS
 	$(TARGET_MAKE_ENV) $(MAKE) -C $(@D) \
@@ -20,12 +20,18 @@ endef
 define CHUMBY_APPS_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/chumby-clock $(TARGET_DIR)/usr/bin/chumby-clock
 	$(INSTALL) -D -m 0755 $(@D)/chumby-fm $(TARGET_DIR)/usr/bin/chumby-fm
+	$(INSTALL) -D -m 0755 $(@D)/chumby-netradio $(TARGET_DIR)/usr/bin/chumby-netradio
+	$(INSTALL) -D -m 0755 $(@D)/chumby-stream $(TARGET_DIR)/usr/bin/chumby-stream
 	$(INSTALL) -D -m 0755 $(CHUMBY_APPS_PKGDIR)/chumby-station-art \
 		$(TARGET_DIR)/usr/bin/chumby-station-art
 	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/clock.app \
 		$(TARGET_DIR)/usr/share/chumby/apps/clock.app
 	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/fm.app \
 		$(TARGET_DIR)/usr/share/chumby/apps/fm.app
+	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/netradio.app \
+		$(TARGET_DIR)/usr/share/chumby/apps/netradio.app
+	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/streams.conf \
+		$(TARGET_DIR)/usr/share/chumby/streams.conf
 endef
 
 $(eval $(generic-package))

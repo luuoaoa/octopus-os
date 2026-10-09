@@ -1,6 +1,6 @@
 # chumby-apps: one binary per app, all on libchumby.
 PKG_CONFIG ?= pkg-config
-APPS := chumby-clock chumby-fm
+APPS := chumby-clock chumby-fm chumby-netradio chumby-stream
 
 override CFLAGS += -Wall $(shell $(PKG_CONFIG) --cflags libchumby)
 LDLIBS += $(shell $(PKG_CONFIG) --libs libchumby)
@@ -12,6 +12,14 @@ chumby-clock: clock.o
 
 chumby-fm: fm.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+chumby-netradio: netradio.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+# The internet radio player: no UI, libchumby only for its paths.
+stream.o: override CFLAGS += $(shell $(PKG_CONFIG) --cflags libcurl libmpg123 alsa)
+chumby-stream: stream.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) $(shell $(PKG_CONFIG) --libs libcurl libmpg123 alsa)
 
 clean:
 	rm -f $(APPS) *.o

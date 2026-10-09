@@ -82,6 +82,8 @@ case "$1" in
 				*) freq=$a ;;
 			esac
 		done
+		# An internet radio stream holds the sound card.
+		[ -x /usr/bin/chumby-stream ] && chumby-stream stop
 		modprobe i2c-dev 2>/dev/null
 		xclk=; [ -e /boot/fmradio_xclk ] && xclk=--xclk
 		qn8005 init $xclk || die "tuner init failed (is /dev/i2c-0 there?)"

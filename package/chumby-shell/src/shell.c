@@ -51,6 +51,7 @@
 #define ALARM_TONE	"/usr/bin/chumby-alarm-tone"
 #define RADIO		"/usr/bin/radio"
 #define RADIO_PIDFILE	"/var/run/radio-loop.pid"
+#define STREAM		"/usr/bin/chumby-stream"	/* internet radio */
 #define RING_MAX_S	(10 * 60)	/* give up ringing after this */
 
 /* ------------------------------------------------------------------ */
@@ -59,6 +60,7 @@
 struct app_info {
 	char id[32];		/* xdg app_id the app uses (= its window title) */
 	char name[32];
+	char short_name[16];	/* for its tab, if the name is long */
 	char exec[128];
 	const char *icon;	/* LV_SYMBOL_* */
 	int starting_pid;	/* launched, no window yet (0 = none) */
@@ -93,7 +95,8 @@ static const char *icon_symbol(const char *name)
 	return LV_SYMBOL_FILE;
 }
 
-/* .app files: "key = value" lines with Id, Name, Exec, Icon. */
+/* .app files: "key = value" lines with Id, Name, Exec, Icon, and Short
+ * (a name for its tab, when Name is too long for one). */
 static void load_apps(void)
 {
 	DIR *d = opendir(APPS_DIR);
@@ -122,6 +125,8 @@ static void load_apps(void)
 				snprintf(a->id, sizeof(a->id), "%.31s", val);
 			else if (!strcmp(key, "Name"))
 				snprintf(a->name, sizeof(a->name), "%.31s", val);
+			else if (!strcmp(key, "Short"))
+				snprintf(a->short_name, sizeof(a->short_name), "%.15s", val);
 			else if (!strcmp(key, "Exec"))
 				snprintf(a->exec, sizeof(a->exec), "%.127s", val);
 			else if (!strcmp(key, "Icon"))
@@ -381,6 +386,7 @@ static void launch(struct app_info *a)
 #define TAB_FOOT	10	/* drawn below the bar, clipped */
 #define LINE_H		2
 #define TAB_GAP		3
+#define TAB_TITLE_MAX	80
 #define POPUP_IDLE_MS	4000
 
 static lv_obj_t *panel_scr, *home_scr;
@@ -475,6 +481,9 @@ static lv_obj_t *tab_create(lv_obj_t *parent, const char *sym, const char *name,
 		l = lv_label_create(b);
 		lv_label_set_text(l, name);
 		lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_BODY), 0);
+		/* Room for the tabs and the tray, whatever the name. */
+		lv_obj_set_style_max_width(l, TAB_TITLE_MAX, 0);
+		lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
 	}
 	return b;
 }
@@ -736,7 +745,7 @@ static void tabs_rebuild(void)
 	if (cur) {
 		a = app_by_id(cur->app_id);
 		b = tab_create(bar_tabs, a ? a->icon : LV_SYMBOL_FILE,
-			       a ? a->name : cur->app_id, true);
+			       !a ? cur->app_id : a->short_name[0] ? a->short_name : a->name, true);
 		lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_LONG_PRESSED, cur);
 	}
 	if (prev) {
@@ -1252,6 +1261,7 @@ static void alarm_ring(void)
 	const struct chumby_policy *p = chumby_policy();
 	char *tone_argv[] = { "chumby-alarm-tone", NULL };
 	char *radio_argv[] = { "radio", "off", NULL };
+	char *stream_argv[] = { "chumby-stream", "stop", NULL };
 	int v;
 
 	if (alarm_state == CHUMBY_ALARM_RINGING)
@@ -1259,9 +1269,11 @@ static void alarm_ring(void)
 	alarm_state = CHUMBY_ALARM_RINGING;
 	ring_started = time(NULL);
 	snooze_until = 0;
-	/* The radio holds the sound card; the tone retries until it's free. */
+	/* The radio (FM or a stream) holds the sound card; the tone retries
+	 * until it's free. */
 	if (radio_playing())
 		chumby_spawn(RADIO, radio_argv);
+	chumby_spawn(STREAM, stream_argv);
 	v = chumby_volume_get();
 	if (v >= 0 && v < p->alarm_volume) {
 		volume_before = v;
