@@ -34,8 +34,10 @@ start() {
 			echo "OK"
 			ip link set wlan0 up
 			printf "Starting wpa_supplicant: "
+			# No -s: buildroot's wpa_supplicant has no syslog
+			# support, and the unknown option makes it exit.
 			wpa_supplicant -B -i wlan0 -c "$WPA_CONF" -D nl80211,wext \
-				-P /var/run/wpa_supplicant.wlan0.pid -s \
+				-P /var/run/wpa_supplicant.wlan0.pid \
 				&& echo "OK" || echo "FAIL"
 			dhcp wlan0
 		else
