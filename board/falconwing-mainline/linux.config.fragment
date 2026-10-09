@@ -137,8 +137,11 @@ CONFIG_SND_SOC_SIMPLE_AMPLIFIER=m
 # --- CPU frequency scaling (cpufreq-dt, divider-only, see DT + patch 0004) ---
 CONFIG_CPU_FREQ=y
 CONFIG_CPU_FREQ_STAT=y
-# schedutil needs SMP; ondemand on this single-core part.
-CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND=y
+# Boot at full speed: AHB (which the LCDIF fetches the framebuffer over)
+# is divided down with the CPU, and every frequency change glitches the
+# panel (seen on hardware with ondemand: a jerk about once a second).
+# chumby-shell switches to powersave while the screen is off.
+CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y
 CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
 CONFIG_CPU_FREQ_GOV_POWERSAVE=y
 CONFIG_CPU_FREQ_GOV_USERSPACE=y

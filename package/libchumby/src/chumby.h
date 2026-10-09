@@ -135,13 +135,24 @@ void chumby_center_y_at(lv_obj_t *obj, int32_t y);
 const struct chumby_policy *chumby_policy(void);
 /* Is the local time now in [start, end) (minutes, may wrap midnight)? */
 bool chumby_in_window(int start, int end);
+/*
+ * Is the clock set? There's no RTC battery: after a power cut the time
+ * starts in 1970 until NTP syncs. Time-of-day policy (night mode, screen
+ * off, alarms) must not act on that.
+ */
+bool chumby_time_valid(void);
 
 /* Hardware helpers (percent, 0..100; -1 if unavailable) */
 int chumby_volume_get(void);
 void chumby_volume_set(int percent);
 int chumby_brightness_get(void);
 void chumby_brightness_set(int percent);
-/* Backlight power: off is completely dark (the brightness is kept). */
+/*
+ * Backlight power: off is completely dark (the brightness is kept). Also
+ * sets the CPU governor: performance while lit, powersave while dark - the
+ * panel glitches whenever the CPU (and with it the AHB the LCD controller
+ * reads from) changes frequency, which nobody sees with the screen off.
+ */
 void chumby_screen_power(bool on);
 bool chumby_screen_is_on(void);
 

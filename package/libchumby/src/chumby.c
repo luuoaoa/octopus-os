@@ -25,6 +25,7 @@ extern char **environ;
 #define ALARMS_FILE	"/etc/chumby/alarms.conf"
 #define RUN_DIR		"/run/chumby"
 #define BACKLIGHT	"/sys/class/backlight/backlight/"
+#define CPU_GOVERNOR	"/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
 #define MAX_WINDOWS	4
 #define MAX_FDS		8
 #define MAX_MODE_CBS	8
@@ -112,10 +113,17 @@ bool chumby_in_window(int start, int end)
 	return now >= start && now < end;
 }
 
+bool chumby_time_valid(void)
+{
+	return time(NULL) >= 1704067200;	/* 2024-01-01 */
+}
+
 static chumby_mode_t policy_mode_now(void)
 {
 	if (policy.force >= 0)
 		return policy.force;
+	if (!chumby_time_valid())
+		return CHUMBY_MODE_DAY;
 	return chumby_in_window(policy.night_start, policy.night_end) ?
 		CHUMBY_MODE_NIGHT : CHUMBY_MODE_DAY;
 }
@@ -662,15 +670,27 @@ void chumby_brightness_set(int percent)
 	}
 }
 
-/* FB_BLANK_UNBLANK / FB_BLANK_POWERDOWN: pwm-backlight turns the PWM off. */
-void chumby_screen_power(bool on)
+static void write_str(const char *path, const char *s)
 {
-	FILE *f = fopen(BACKLIGHT "bl_power", "w");
+	FILE *f = fopen(path, "w");
 
 	if (f) {
-		fprintf(f, "%d\n", on ? 0 : 4);
+		fputs(s, f);
 		fclose(f);
 	}
+}
+
+/*
+ * FB_BLANK_UNBLANK / FB_BLANK_POWERDOWN: pwm-backlight turns the PWM off.
+ * Full speed before the light comes on, slow only once it's dark.
+ */
+void chumby_screen_power(bool on)
+{
+	if (on)
+		write_str(CPU_GOVERNOR, "performance\n");
+	write_str(BACKLIGHT "bl_power", on ? "0\n" : "4\n");
+	if (!on)
+		write_str(CPU_GOVERNOR, "powersave\n");
 }
 
 bool chumby_screen_is_on(void)
