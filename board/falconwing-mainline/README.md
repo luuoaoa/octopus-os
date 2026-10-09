@@ -167,7 +167,8 @@ keeps it on. chumby-wm drops touches that start on the dark screen, so
 nothing is pressed blind. `snooze_minutes` (9) and `alarm_volume` (60 %)
 are in the same file.
 
-**Touch** goes through libinput; the vendor calibration is applied by
+**Touch** goes through libinput; the calibration (measured on hardware
+from the four corners, see the rule) is applied by
 `/etc/udev/rules.d/90-chumby-touch.rules` (`LIBINPUT_CALIBRATION_MATRIX`).
 
 Script coverage: Nimbus 14 has Latin (with extended), Greek and Cyrillic;
@@ -197,7 +198,6 @@ dir), start apps against it, and grab `chumby-screenshot` PPMs.
 - FM tuning matches the stock tool, but the software `scan` is new.
 - RDS: enable bit and registers are from the stock tool, the decoder was
   only tested against synthetic groups.
-- Touch axis orientation/calibration on the mainline LRADC driver.
 - The GUI was exercised end to end on wlroots' headless backend under
   qemu (compositor, shell, apps, switching state, night mode), but not on
   the DRM/libinput path: mxsfb page flips, libinput touch, CPU/RAM load of
