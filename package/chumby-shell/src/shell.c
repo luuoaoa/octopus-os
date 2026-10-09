@@ -364,8 +364,9 @@ static void launch(struct app_info *a)
  * switch, hold one to close its app.
  *
  * Before them, the Home button: like Windows' Start button it isn't a
- * place but a menu. It drops the list of apps down from the bar; picking
- * one starts it or brings it up. The app in front stays until then.
+ * place but a menu. It drops the list of apps down from the bar, button
+ * and menu filled in the accent like one tab; picking one starts it or
+ * brings it up. The app in front stays until then.
  *
  * At the right end: volume, brightness and the time. Volume and
  * brightness drop their slider down from the bar, under them; their
@@ -384,7 +385,7 @@ static void launch(struct app_info *a)
 #define POPUP_IDLE_MS	4000
 
 static lv_obj_t *panel_scr, *home_scr;
-static lv_obj_t *btn_vol, *btn_bri, *bar_clock;
+static lv_obj_t *btn_home, *btn_vol, *btn_bri, *bar_clock;
 static int volume_pct = 50;	/* cached: the mixer may not exist yet */
 
 enum popup_kind { POPUP_NONE, POPUP_VOLUME, POPUP_BRIGHTNESS };
@@ -501,6 +502,13 @@ static void popup_close(void);
 static lv_display_t *menu_disp;
 static lv_timer_t *menu_timer;
 
+/* Filled while its menu is open. */
+static void home_style(void)
+{
+	if (btn_home)
+		tab_style(btn_home, menu_disp != NULL);
+}
+
 static void menu_close(void)
 {
 	if (!menu_disp)
@@ -508,6 +516,7 @@ static void menu_close(void)
 	chumby_window_close(menu_disp);
 	menu_disp = NULL;
 	lv_timer_pause(menu_timer);
+	home_style();
 }
 
 static void menu_close_async(void *user)
@@ -546,12 +555,9 @@ static void menu_open(void)
 	lv_timer_resume(menu_timer);
 	scr = lv_display_get_screen_active(menu_disp);
 	lv_obj_set_scrollable(scr, false);
-	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_SURFACE), 0);
-	lv_obj_set_style_border_width(scr, 1, 0);
-	lv_obj_set_style_border_side(scr, LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_RIGHT |
-				     LV_BORDER_SIDE_BOTTOM, 0);
-	lv_obj_set_style_border_color(scr, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_border_opa(scr, LV_OPA_40, 0);
+	/* The Home button's color: one tab, through the line. */
+	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(scr, chumby_color(CHUMBY_COLOR_BG), 0);
 	lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_all(scr, MENU_PAD, 0);
 	lv_obj_set_style_pad_row(scr, 4, 0);
@@ -562,8 +568,9 @@ static void menu_open(void)
 		lv_obj_set_style_radius(row, 8, 0);
 		lv_obj_set_style_shadow_width(row, 0, 0);
 		lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-		lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
 		lv_obj_set_style_bg_color(row, chumby_color(CHUMBY_COLOR_BG), LV_STATE_PRESSED);
+		lv_obj_set_style_bg_opa(row, LV_OPA_20, LV_STATE_PRESSED);
+		lv_obj_set_style_text_color(row, chumby_color(CHUMBY_COLOR_BG), 0);
 		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 				      LV_FLEX_ALIGN_CENTER);
@@ -574,18 +581,17 @@ static void menu_open(void)
 		l = lv_label_create(row);
 		lv_label_set_text(l, apps[i].icon);
 		lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
-		lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 		lv_obj_set_width(l, 24);
 		lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
 		l = lv_label_create(row);
 		lv_label_set_text(l, apps[i].name);
 		lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
-		lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	}
 	if (!n_apps) {
 		l = lv_label_create(scr);
 		lv_label_set_text(l, "No apps installed");
 	}
+	home_style();
 }
 
 static void home_tab_cb(lv_event_t *e)
@@ -622,10 +628,12 @@ static void tabs_rebuild(void)
 	lv_obj_clean(bar_tabs);
 	cur = tl_current();
 	prev = tl_previous(cur);
+	if (bar_clock)		/* the clock app shows it already */
+		lv_obj_set_hidden(bar_clock, cur && !strcmp(cur->app_id, CLOCK_ID));
 
-	/* Home: a button for the menu, never the filled tab. */
-	b = tab_create(bar_tabs, LV_SYMBOL_HOME, NULL, false);
-	lv_obj_add_event_cb(b, home_tab_cb, LV_EVENT_CLICKED, NULL);
+	/* Home: a button for the menu, filled only while that is open. */
+	btn_home = tab_create(bar_tabs, LV_SYMBOL_HOME, NULL, menu_disp != NULL);
+	lv_obj_add_event_cb(btn_home, home_tab_cb, LV_EVENT_CLICKED, NULL);
 	if (cur) {
 		a = app_by_id(cur->app_id);
 		b = tab_create(bar_tabs, a ? a->icon : LV_SYMBOL_FILE,
