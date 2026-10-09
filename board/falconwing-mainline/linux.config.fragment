@@ -26,6 +26,9 @@ CONFIG_EXT4_FS=y
 # it happens before any module could be loaded.
 CONFIG_SQUASHFS=y
 CONFIG_SQUASHFS_ZSTD=y
+# (mxs_defconfig has the whole "Block devices" menu off: without BLK_DEV
+# the loop option is silently dropped.)
+CONFIG_BLK_DEV=y
 CONFIG_BLK_DEV_LOOP=y
 CONFIG_OVERLAY_FS=y
 # Keep the RTC in step once timesyncd has synchronised the clock.
