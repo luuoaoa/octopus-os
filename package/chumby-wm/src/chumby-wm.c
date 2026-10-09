@@ -15,7 +15,11 @@
  *   "chumby-calibrate"  the touchscreen calibration tool: the whole
  *                   screen, above everything
  *   anything else   an app: maximized into the area under the bar, one
- *                   visible at a time (the most recently activated)
+ *                   visible at a time (the most recently activated). The
+ *                   others are frozen (SIGSTOP): nothing of theirs shows,
+ *                   so they get no CPU until they're brought back
+ *                   (SIGCONT), their last frame already on screen. Their
+ *                   sound, if any, is another process (radio, chumby-stream).
  *
  * Apps are exported through wlr-foreign-toplevel-management so the shell
  * can list, activate, minimize and close them. Input is touch (plus an
@@ -36,6 +40,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/inotify.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -119,6 +124,7 @@ struct view {
 	struct wlr_scene_tree *tree;
 	struct wlr_foreign_toplevel_handle_v1 *ftl;
 	bool mapped, minimized;
+	bool frozen;		/* its process is stopped (an app out of sight) */
 
 	struct wl_listener map, unmap, commit, destroy;
 	struct wl_listener request_maximize, request_fullscreen, request_minimize;
@@ -200,17 +206,43 @@ static void set_keyboard_focus(struct server *s, struct view *v)
 					       &kb->modifiers);
 }
 
+/* Stop or continue an app's process. Only apps: the shell's windows
+ * (bar, menu, home) stay live. */
+static void view_freeze(struct view *v, bool freeze)
+{
+	struct wl_client *client;
+	pid_t pid;
+	uid_t uid;
+	gid_t gid;
+
+	if (v->kind != VIEW_APP || v->frozen == freeze)
+		return;
+	client = wl_resource_get_client(v->xdg->base->resource);
+	wl_client_get_credentials(client, &pid, &uid, &gid);
+	if (pid <= 0 || pid == getpid())
+		return;
+	/* Its pending events (the deactivating configure) wait in its
+	 * socket; frozen views get no frame callbacks meanwhile. */
+	wl_client_flush(client);
+	if (kill(pid, freeze ? SIGSTOP : SIGCONT) == 0)
+		v->frozen = freeze;
+}
+
 /* Make `v` the visible, active app (or show home when v is NULL). */
 static void activate(struct server *s, struct view *v)
 {
 	struct view *o;
 
+	if (v)
+		view_freeze(v, false);
 	wl_list_for_each(o, &s->views, link) {
 		if (o->kind != VIEW_APP || o == v)
 			continue;
 		wlr_xdg_toplevel_set_activated(o->xdg, false);
 		if (o->ftl)
 			wlr_foreign_toplevel_handle_v1_set_activated(o->ftl, false);
+		if (o->mapped && v)	/* out of sight now */
+			view_freeze(o, true);
 	}
 	if (!v) {
 		set_keyboard_focus(s, NULL);
@@ -268,6 +300,7 @@ static void ftl_close(struct wl_listener *l, void *data)
 	struct view *v = wl_container_of(l, v, ftl_close);
 
 	(void)data;
+	view_freeze(v, false);		/* so it can answer */
 	wlr_xdg_toplevel_send_close(v->xdg);
 }
 
@@ -323,6 +356,7 @@ static void view_unmap(struct wl_listener *l, void *data)
 
 	(void)data;
 	v->mapped = false;
+	view_freeze(v, false);
 	if (v->ftl) {
 		wl_list_remove(&v->ftl_activate.link);
 		wl_list_remove(&v->ftl_minimize.link);
@@ -797,7 +831,7 @@ static void frame_done_hidden(struct server *s, const struct timespec *now)
 	struct view *v;
 
 	wl_list_for_each(v, &s->views, link)
-		if (v->mapped)
+		if (v->mapped && !v->frozen)
 			wlr_xdg_surface_for_each_surface(v->xdg->base, frame_done_iter,
 							 (void *)now);
 }
