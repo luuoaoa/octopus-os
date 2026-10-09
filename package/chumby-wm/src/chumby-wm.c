@@ -6,9 +6,13 @@
  * Window policy, keyed on the xdg app_id:
  *   "chumby-panel"  the shell's tab bar: across the top, BAR_H tall,
  *                   always on top
- *   "chumby-popup"  the shell's transient controls (volume, brightness):
- *                   POPUP_W x POPUP_H, dropping down from the bar's right
- *                   end, above apps, below the bar
+ *   "chumby-popup@<x>"  the shell's transient controls (volume,
+ *                   brightness): POPUP_W x POPUP_H, dropping down from the
+ *                   bar with its right edge at x (its button's), above
+ *                   apps, below the bar. A tap anywhere but on it, the
+ *                   menu or the bar tells the shell ("dismiss" into
+ *                   $run_dir/shell.cmd), and goes no further: popups and
+ *                   the menu close, nothing under them is pressed
  *   "chumby-menu"   the shell's app menu (its Home button): a card under
  *                   the bar's left end, sized by the shell
  *   "chumby-home"   the app list, behind every app (background layer)
@@ -39,6 +43,7 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
+#include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <stdbool.h>
@@ -137,6 +142,7 @@ struct view {
 	struct wlr_foreign_toplevel_handle_v1 *ftl;
 	bool mapped, minimized;
 	bool frozen;		/* its process is stopped (an app out of sight) */
+	int right;		/* a popup: its right edge (from its app_id) */
 
 	struct wl_listener map, unmap, commit, destroy;
 	struct wl_listener request_maximize, request_fullscreen, request_minimize;
@@ -171,7 +177,8 @@ static void view_configure(struct view *v)
 		wlr_xdg_toplevel_set_size(v->xdg, s->width, BAR_H);
 		break;
 	case VIEW_POPUP:
-		wlr_scene_node_set_position(&v->tree->node, s->width - POPUP_W, BAR_H);
+		wlr_scene_node_set_position(&v->tree->node,
+					    (v->right > 0 ? v->right : s->width) - POPUP_W, BAR_H);
 		wlr_xdg_toplevel_set_size(v->xdg, POPUP_W, POPUP_H);
 		break;
 	case VIEW_CAL:
@@ -411,8 +418,9 @@ static void view_commit(struct wl_listener *l, void *data)
 	} else if (!strcmp(id, APP_HOME)) {
 		v->kind = VIEW_HOME;
 		wlr_scene_node_reparent(&v->tree->node, s->home_tree);
-	} else if (!strcmp(id, APP_POPUP)) {
+	} else if (!strncmp(id, APP_POPUP, strlen(APP_POPUP))) {
 		v->kind = VIEW_POPUP;
+		v->right = id[strlen(APP_POPUP)] == '@' ? atoi(id + strlen(APP_POPUP) + 1) : 0;
 		wlr_scene_node_reparent(&v->tree->node, s->popup_tree);
 	} else if (!strcmp(id, APP_CAL)) {
 		v->kind = VIEW_CAL;
@@ -586,6 +594,41 @@ static bool screen_dark(void)
 	return c != '0';
 }
 
+/* The shell's popup or menu is up: a tap outside it and the bar closes
+ * them (and presses nothing else). */
+static bool shell_popup_up(struct server *s)
+{
+	struct view *v;
+
+	wl_list_for_each(v, &s->views, link)
+		if (v->mapped && (v->kind == VIEW_POPUP || v->kind == VIEW_MENU))
+			return true;
+	return false;
+}
+
+static bool in_tree(struct wlr_scene_node *node, struct wlr_scene_tree *tree)
+{
+	for (; node; node = node->parent ? &node->parent->node : NULL)
+		if (node == &tree->node)
+			return true;
+	return false;
+}
+
+static void shell_dismiss(void)
+{
+	const char *dir = getenv("CHUMBY_RUN_DIR");
+	char path[256];
+	int fd;
+
+	snprintf(path, sizeof(path), "%s/shell.cmd", dir && *dir ? dir : "/run/chumby");
+	fd = open(path, O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+	if (fd < 0)
+		return;
+	if (write(fd, "dismiss\n", 8) < 0)
+		wlr_log(WLR_ERROR, "%s: %s", path, strerror(errno));
+	close(fd);
+}
+
 static void touch_down(struct wl_listener *l, void *data)
 {
 	struct touch_dev *t = wl_container_of(l, t, down);
@@ -595,8 +638,19 @@ static void touch_down(struct wl_listener *l, void *data)
 	struct wlr_surface *surface = surface_at(s, lx, ly, &sx, &sy);
 
 	/* Not marked active: its motion and up are dropped too. */
-	if (!surface || ev->touch_id < 0 || ev->touch_id >= MAX_TOUCH ||
-	    screen_dark())
+	if (ev->touch_id < 0 || ev->touch_id >= MAX_TOUCH || screen_dark())
+		return;
+	if (shell_popup_up(s)) {
+		struct wlr_scene_node *node =
+			wlr_scene_node_at(&s->scene->tree.node, lx, ly, NULL, NULL);
+
+		if (!in_tree(node, s->popup_tree) && !in_tree(node, s->panel_tree) &&
+		    !in_tree(node, s->cal_tree)) {
+			shell_dismiss();
+			return;
+		}
+	}
+	if (!surface)
 		return;
 	/* Remember the surface origin so motion stays relative to it. */
 	s->touch[ev->touch_id].active = true;

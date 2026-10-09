@@ -179,6 +179,7 @@ chumby-audio duck <source>      I need the sound for a while (an alarm):
 chumby-audio release <source>   ...and resume once I'm done
 chumby-audio stop               everything stops (the volume control's stop
                                 button; snooze while that control is open)
+chumby-audio playing            exit status 0 if anything plays
 chumby-audio list               who's registered, who plays, who's paused
 ```
 

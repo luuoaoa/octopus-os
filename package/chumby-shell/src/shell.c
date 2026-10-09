@@ -415,6 +415,8 @@ enum popup_kind { POPUP_NONE, POPUP_VOLUME, POPUP_BRIGHTNESS };
 static enum popup_kind popup_kind;
 static lv_display_t *popup_disp;
 static lv_obj_t *popup_bar;
+static lv_obj_t *popup_stop;	/* volume: stop what plays (if anything does) */
+static pid_t playing_pid = -1;	/* "chumby-audio playing", running */
 static lv_timer_t *popup_timer;
 
 /* The app in front: activated and not minimized (none: Home is). */
@@ -531,8 +533,8 @@ static lv_obj_t *tray_button(lv_obj_t *parent, const char *sym)
 	lv_obj_t *b = tab_create(parent, sym, NULL, false);
 
 	/* Narrower than a tab: the two sit close together. */
-	lv_obj_set_style_min_width(b, 30, 0);
-	lv_obj_set_style_pad_hor(b, 7, 0);
+	lv_obj_set_style_min_width(b, 26, 0);
+	lv_obj_set_style_pad_hor(b, 4, 0);
 	return b;
 }
 
@@ -609,11 +611,14 @@ static void bar_join_update(void)
 	next = lv_obj_get_sibling(b, 1);
 	if ((b == btn_home && next) || (next == bar_clock_tab && clock_front))
 		r_right = TAB_GAP;
+	if (b == btn_vol || b == btn_bri)	/* the plate's right edge is its */
+		r_right = 0;
 	join_part(a.x1 - r_left, CHUMBY_BAR_H - LINE_H,
 		  lv_area_get_width(&a) + r_left + r_right, LINE_H);
 	if (r_left)
 		join_fillet(a.x1, 0, r_left);
-	join_fillet(a.x2 + 1, 1, r_right);
+	if (r_right)
+		join_fillet(a.x2 + 1, 1, r_right);
 }
 
 /* A plain icon, menu open or not: not a tab, no border, no fill (its
@@ -741,6 +746,7 @@ static void app_tab_cb(lv_event_t *e)
 	struct toplevel *t = lv_event_get_user_data(e);
 
 	menu_close();
+	popup_close();
 	if (!tl_alive(t))	/* closed since the tab was built */
 		return;
 	if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED)
@@ -918,6 +924,7 @@ static void popup_close(void)
 	chumby_window_close(popup_disp);
 	popup_disp = NULL;
 	popup_bar = NULL;
+	popup_stop = NULL;
 	popup_kind = POPUP_NONE;
 	lv_timer_pause(popup_timer);
 	quick_buttons_update();
@@ -943,22 +950,53 @@ static void popup_bar_cb(lv_event_t *e)
  * the bar dark on it. Tap or drag anywhere on it. It closes
  * after POPUP_IDLE_MS or on its button.
  */
+/* The bar: beside the stop button while that shows, else the plate's width. */
+static void popup_layout(void)
+{
+	if (!popup_bar)
+		return;
+	if (popup_stop && !lv_obj_is_hidden(popup_stop)) {
+		lv_obj_set_size(popup_bar, CHUMBY_POPUP_W - 8 - STOP_SIZE - 10 - 16,
+				CHUMBY_POPUP_H - 2 * 14);
+		lv_obj_align(popup_bar, LV_ALIGN_LEFT_MID, 8 + STOP_SIZE + 10, 0);
+	} else {
+		lv_obj_set_size(popup_bar, CHUMBY_POPUP_W - 2 * 16, CHUMBY_POPUP_H - 2 * 14);
+		lv_obj_center(popup_bar);
+	}
+}
+
+static void popup_stop_show(bool show)
+{
+	if (!popup_stop)
+		return;
+	lv_obj_set_hidden(popup_stop, !show);
+	popup_layout();
+}
+
 static void popup_open(enum popup_kind kind)
 {
-	lv_obj_t *scr, *plate;
+	lv_obj_t *scr, *plate, *sq;
+
+	lv_obj_t *btn = kind == POPUP_VOLUME ? btn_vol : btn_bri;
+	char app_id[32];
+	lv_area_t a;
 
 	menu_close();
 	if (popup_kind == kind && popup_disp) {
 		popup_keepalive();
 		return;
 	}
-	if (!popup_disp) {
-		/* With alpha: the plate's rounded corners show what's under them. */
-		lv_wayland_window_set_next_color_format(LV_COLOR_FORMAT_ARGB8888);
-		popup_disp = chumby_window_create("chumby-popup", CHUMBY_POPUP_W, CHUMBY_POPUP_H);
-		if (!popup_disp)
-			return;
-	}
+	popup_close();	/* the other one: it's under its own button */
+	/* Its right edge under its button's (chumby-wm reads it from the
+	 * app_id): the screen's edge is a stretch to reach. */
+	lv_obj_update_layout(btn);
+	lv_obj_get_coords(btn, &a);
+	snprintf(app_id, sizeof(app_id), "chumby-popup@%d", (int)a.x2 + 1);
+	/* With alpha: the plate's rounded corners show what's under them. */
+	lv_wayland_window_set_next_color_format(LV_COLOR_FORMAT_ARGB8888);
+	popup_disp = chumby_window_create(app_id, CHUMBY_POPUP_W, CHUMBY_POPUP_H);
+	if (!popup_disp)
+		return;
 	popup_kind = kind;
 	scr = lv_display_get_screen_active(popup_disp);
 	lv_obj_clean(scr);
@@ -971,12 +1009,25 @@ static void popup_open(enum popup_kind kind)
 	lv_obj_set_style_radius(plate, MENU_RADIUS, 0);
 	lv_obj_set_style_bg_opa(plate, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(plate, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	/* Square where it joins its button (top right). */
+	sq = lv_obj_create(plate);
+	lv_obj_remove_style_all(sq);
+	lv_obj_set_size(sq, MENU_RADIUS, MENU_RADIUS);
+	lv_obj_align(sq, LV_ALIGN_TOP_RIGHT, 0, 0);
+	lv_obj_set_style_bg_opa(sq, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(sq, chumby_color(CHUMBY_COLOR_TEXT), 0);
 
 	popup_bar = lv_slider_create(plate);
+	popup_stop = NULL;
 	if (kind == POPUP_VOLUME) {
-		/* Volume: a stop button for whatever plays, then the bar. */
+		/* Volume: a stop button for whatever plays (shown once
+		 * "chumby-audio playing" says something does), then the bar. */
 		lv_obj_t *stop = lv_button_create(plate), *l;
+		char *argv[] = { "chumby-audio", "playing", NULL };
 
+		popup_stop = stop;
+		lv_obj_set_hidden(stop, true);
+		playing_pid = chumby_spawn(AUDIO, argv);
 		lv_obj_set_size(stop, STOP_SIZE, STOP_SIZE);
 		lv_obj_align(stop, LV_ALIGN_LEFT_MID, 8, 0);
 		lv_obj_set_style_radius(stop, LV_RADIUS_CIRCLE, 0);
@@ -989,13 +1040,8 @@ static void popup_open(enum popup_kind kind)
 		l = lv_label_create(stop);
 		lv_label_set_text(l, LV_SYMBOL_STOP);
 		lv_obj_center(l);
-		lv_obj_set_size(popup_bar, CHUMBY_POPUP_W - 8 - STOP_SIZE - 10 - 16,
-				CHUMBY_POPUP_H - 2 * 14);
-		lv_obj_align(popup_bar, LV_ALIGN_LEFT_MID, 8 + STOP_SIZE + 10, 0);
-	} else {
-		lv_obj_set_size(popup_bar, CHUMBY_POPUP_W - 2 * 16, CHUMBY_POPUP_H - 2 * 14);
-		lv_obj_center(popup_bar);
 	}
+	popup_layout();
 	lv_slider_set_range(popup_bar, kind == POPUP_VOLUME ? 0 : 5, 100);
 	lv_obj_set_style_radius(popup_bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
 	lv_obj_set_style_radius(popup_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
@@ -1019,8 +1065,10 @@ static void media_stop(void)
 	char *argv[] = { "chumby-audio", "stop", NULL };
 
 	chumby_spawn(AUDIO, argv);
-	if (popup_disp)
+	if (popup_disp) {
+		popup_stop_show(false);	/* nothing plays now */
 		popup_keepalive();
+	}
 }
 
 static void stop_btn_cb(lv_event_t *e)
@@ -1589,6 +1637,10 @@ static void command(const char *cmd)
 		menu_open();
 	else if (!strcmp(cmd, "calibrate"))
 		calibrate_start();
+	else if (!strcmp(cmd, "dismiss")) {	/* chumby-wm: a tap outside them */
+		popup_close();
+		menu_close();
+	}
 	else if (cmd[0])
 		fprintf(stderr, "chumby-shell: unknown command '%s'\n", cmd);
 }
@@ -1626,13 +1678,18 @@ static int cmd_fifo_open(void)
 static void reaper_cb(lv_timer_t *t)
 {
 	pid_t pid;
+	int status;
 
 	(void)t;
-	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
+	while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
 		int i;
 
 		if (pid == tone_pid)
 			tone_pid = -1;
+		if (pid == playing_pid) {	/* the stop button: if anything plays */
+			playing_pid = -1;
+			popup_stop_show(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+		}
 		for (i = 0; i < n_apps; i++)
 			if (apps[i].starting_pid == pid)
 				apps[i].starting_pid = 0;	/* died starting */
