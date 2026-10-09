@@ -2,6 +2,6 @@
 Id = Internet Radio
 Name = Internet Radio
 Exec = /usr/bin/chumby-netradio
-Icon = wifi
+Icon = globe
 Short = Net Radio
 Color = #2f80d8

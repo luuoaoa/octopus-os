@@ -148,7 +148,7 @@ static void build_clock(void)
 
 	face = chumby_group(view_clock, LV_FLEX_FLOW_COLUMN, 4);
 	lbl_time = label(face, CHUMBY_FONT_HUGE, CHUMBY_COLOR_TEXT);
-	lbl_date = label(face, CHUMBY_FONT_BODY, CHUMBY_COLOR_TEXT_DIM);
+	lbl_date = label(face, CHUMBY_FONT_LARGE, CHUMBY_COLOR_TEXT_DIM);
 	lv_obj_align(face, LV_ALIGN_TOP_MID, 0, 0);
 
 	/* The whole bottom bar opens the alarms. */

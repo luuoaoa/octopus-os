@@ -74,7 +74,8 @@ Color = #3a9a5c
 
 - `Icon` is a name from the shell's table (`icons[]` in `shell.c`):
   audio, bell, home, settings, image, list, wifi, gps, video, envelope,
-  eye, file, charge, play, call, keyboard. Add to it for new ones.
+  eye, file, charge, play, call, keyboard, and radio, clock, globe, sun
+  (Material Icons, see `chumby_icon_font`). Add to it for new ones.
 - `Short` (optional) is the name on the tab when `Name` is too long for
   one (tab titles are capped at 80 px and cut with dots).
 - `Color` (optional) is the app's hue: its tab, the tab line, its icon in
@@ -111,6 +112,7 @@ Everything below is declared in `chumby.h`, with comments.
 | | |
 |---|---|
 | `chumby_font(f)` | Nimbus bitmap fonts: `SMALL`/`BODY` 14 px, `LARGE` 19, `MEDIUM` 28 (14 at 2x), `XL` 35, `HUGE` 70 (35 at 2x). LVGL's `LV_SYMBOL_*` icons come through as fallback. |
+| `chumby_icon_font(px)` | 14, 20 or 28 px: `CHUMBY_ICON_RADIO`/`CLOCK`/`GLOBE`/`SUN`, icons LVGL lacks (Material Icons, made by `fonts/icons2lvgl.py`; the output is committed). `LV_SYMBOL_*` work in it too. Add an icon: put it in `ICONS`, rerun the script, add a `CHUMBY_ICON_*`. |
 | `chumby_color(c)` | `BG`, `SURFACE`, `TEXT`, `TEXT_DIM`, `BAR` (greys) and `ACCENT`, for the current mode |
 | `chumby_glossy(obj, c, sel)`, `chumby_on_accent()` | fill with a colour, a touch lighter at the top; the text colour on it |
 | `chumby_accent(rgb)` | another app's hue for the current mode (the shell) |
@@ -175,6 +177,8 @@ chumby-audio play <source>      I'm playing now: every other source stops,
 chumby-audio duck <source>      I need the sound for a while (an alarm):
                                 the playing sources pause...
 chumby-audio release <source>   ...and resume once I'm done
+chumby-audio stop               everything stops (the volume control's stop
+                                button; snooze while that control is open)
 chumby-audio list               who's registered, who plays, who's paused
 ```
 

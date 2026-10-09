@@ -2,5 +2,5 @@
 Id = FM Radio
 Name = FM Radio
 Exec = /usr/bin/chumby-fm
-Icon = audio
+Icon = radio
 Color = #e0782a

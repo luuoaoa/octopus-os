@@ -6,6 +6,8 @@
 #   chumby-audio duck <source>      <source> needs the sound for a while
 #                                   (an alarm): the others pause...
 #   chumby-audio release <source>   ...and resume once it's done
+#   chumby-audio stop               everything stops (the volume control's
+#                                   stop button, snooze while it's open)
 #   chumby-audio list               the sources, and which play
 #
 # Sources are executables in /usr/share/chumby/audio.d/<name> (fm,
@@ -52,6 +54,13 @@ case "$1" in
 			[ -x "$D/$name" ] && "$D/$name" resume 9>&-
 		done
 		rm -f "$S/paused"
+		;;
+	stop)
+		for src in "$D"/*; do
+			[ -x "$src" ] || continue
+			"$src" active 9>&- && "$src" stop 9>&-
+		done
+		rm -f "$S/paused" "$S/current"
 		;;
 	list)
 		for src in "$D"/*; do

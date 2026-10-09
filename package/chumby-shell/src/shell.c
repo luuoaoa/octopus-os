@@ -25,7 +25,8 @@
  * off whatever is open; the clock app edits them and shows the ringing
  * state, talking to us through the run dir (see chumby.h). Held for
  * 4 s it starts the touchscreen calibration (run at start, too, while
- * there is none).
+ * there is none). With the volume control open, it stops whatever plays,
+ * like that control's stop button.
  */
 
 #define _GNU_SOURCE
@@ -86,6 +87,9 @@ static const struct { const char *name, *sym; } icons[] = {
 	{ "eye", LV_SYMBOL_EYE_OPEN }, { "file", LV_SYMBOL_FILE },
 	{ "charge", LV_SYMBOL_CHARGE }, { "play", LV_SYMBOL_PLAY },
 	{ "call", LV_SYMBOL_CALL }, { "keyboard", LV_SYMBOL_KEYBOARD },
+	/* libchumby's own (Material Icons): see CHUMBY_ICON_* */
+	{ "radio", CHUMBY_ICON_RADIO }, { "clock", CHUMBY_ICON_CLOCK },
+	{ "globe", CHUMBY_ICON_GLOBE }, { "sun", CHUMBY_ICON_SUN },
 };
 
 static const char *icon_symbol(const char *name)
@@ -396,6 +400,8 @@ static void launch(struct app_info *a)
 #define CORNER_R	8	/* every corner: the screen's (chumby-wm), tabs, plates */
 #define TAB_TITLE_MAX	80
 #define POPUP_IDLE_MS	4000
+#define STOP_SIZE	36	/* the volume control's stop button */
+static void stop_btn_cb(lv_event_t *e);
 
 static lv_obj_t *panel_scr, *home_scr;
 static lv_obj_t *btn_home, *btn_vol, *btn_bri, *bar_clock;
@@ -484,7 +490,7 @@ static lv_obj_t *tab_create(lv_obj_t *parent, const char *sym, const char *name,
 
 	l = lv_label_create(b);
 	lv_label_set_text(l, sym);
-	lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+	lv_obj_set_style_text_font(l, chumby_icon_font(14), 0);
 	if (name) {
 		l = lv_label_create(b);
 		lv_label_set_text(l, name);
@@ -689,7 +695,7 @@ static void menu_open(void)
 
 		l = lv_label_create(row);
 		lv_label_set_text(l, apps[i].icon);
-		lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
+		lv_obj_set_style_text_font(l, chumby_icon_font(20), 0);
 		lv_obj_set_style_text_color(l, chumby_accent(apps[i].color), 0);
 		lv_obj_set_width(l, 24);
 		lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
@@ -896,8 +902,29 @@ static void popup_open(enum popup_kind kind)
 	lv_obj_set_style_bg_color(plate, chumby_color(CHUMBY_COLOR_TEXT), 0);
 
 	popup_bar = lv_slider_create(plate);
-	lv_obj_set_size(popup_bar, CHUMBY_POPUP_W - 2 * 16, CHUMBY_POPUP_H - 2 * 14);
-	lv_obj_center(popup_bar);
+	if (kind == POPUP_VOLUME) {
+		/* Volume: a stop button for whatever plays, then the bar. */
+		lv_obj_t *stop = lv_button_create(plate), *l;
+
+		lv_obj_set_size(stop, STOP_SIZE, STOP_SIZE);
+		lv_obj_align(stop, LV_ALIGN_LEFT_MID, 8, 0);
+		lv_obj_set_style_radius(stop, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_shadow_width(stop, 0, 0);
+		lv_obj_set_style_bg_color(stop, chumby_color(CHUMBY_COLOR_BG), 0);
+		lv_obj_set_style_bg_opa(stop, LV_OPA_30, 0);
+		lv_obj_set_style_bg_opa(stop, LV_OPA_60, LV_STATE_PRESSED);
+		lv_obj_set_style_text_color(stop, chumby_color(CHUMBY_COLOR_BG), 0);
+		lv_obj_add_event_cb(stop, stop_btn_cb, LV_EVENT_CLICKED, NULL);
+		l = lv_label_create(stop);
+		lv_label_set_text(l, LV_SYMBOL_STOP);
+		lv_obj_center(l);
+		lv_obj_set_size(popup_bar, CHUMBY_POPUP_W - 8 - STOP_SIZE - 10 - 16,
+				CHUMBY_POPUP_H - 2 * 14);
+		lv_obj_align(popup_bar, LV_ALIGN_LEFT_MID, 8 + STOP_SIZE + 10, 0);
+	} else {
+		lv_obj_set_size(popup_bar, CHUMBY_POPUP_W - 2 * 16, CHUMBY_POPUP_H - 2 * 14);
+		lv_obj_center(popup_bar);
+	}
 	lv_slider_set_range(popup_bar, kind == POPUP_VOLUME ? 0 : 5, 100);
 	lv_obj_set_style_radius(popup_bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
 	lv_obj_set_style_radius(popup_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
@@ -913,6 +940,22 @@ static void popup_open(enum popup_kind kind)
 
 	popup_set(popup_get());
 	quick_buttons_update();
+}
+
+/* Stop whatever plays (FM, a stream: every chumby-audio source). */
+static void media_stop(void)
+{
+	char *argv[] = { "chumby-audio", "stop", NULL };
+
+	chumby_spawn(AUDIO, argv);
+	if (popup_disp)
+		popup_keepalive();
+}
+
+static void stop_btn_cb(lv_event_t *e)
+{
+	(void)e;
+	media_stop();
 }
 
 /* Tray button: open its slider, or close it if it's already showing. */
@@ -970,7 +1013,7 @@ static void build_panel(lv_obj_t *scr)
 	btn_vol = tray_button(tray, LV_SYMBOL_VOLUME_MAX);
 	lv_obj_add_event_cb(btn_vol, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_VOLUME);
-	btn_bri = tray_button(tray, LV_SYMBOL_EYE_OPEN);
+	btn_bri = tray_button(tray, CHUMBY_ICON_SUN);
 	lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_BRIGHTNESS);
 	box = bar_box(tray);
@@ -1032,7 +1075,7 @@ static void build_home(lv_obj_t *scr)
 
 		ic = lv_label_create(pair);
 		lv_label_set_text(ic, apps[i].icon);
-		lv_obj_set_style_text_font(ic, &lv_font_montserrat_28, 0);
+		lv_obj_set_style_text_font(ic, chumby_icon_font(28), 0);
 		lv_obj_set_style_text_color(ic, chumby_accent(apps[i].color), 0);
 
 		nm = lv_label_create(pair);
@@ -1433,7 +1476,11 @@ static void snooze_readable(int fd, void *user)
 		} else if (snooze_down) {
 			snooze_down = false;
 			lv_timer_pause(snooze_hold_timer);
-			if (!snooze_held)
+			if (snooze_held)
+				continue;
+			if (popup_disp && popup_kind == POPUP_VOLUME)
+				media_stop();	/* the volume control's stop, too */
+			else
 				snooze_pressed();
 		}
 	}

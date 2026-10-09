@@ -270,6 +270,21 @@ static void fonts_load(void)
 	fonts[CHUMBY_FONT_MEDIUM] = nimbus(&nimbus_14x2, &lv_font_montserrat_28);
 }
 
+extern lv_font_t chumby_icons_14, chumby_icons_20, chumby_icons_28;
+
+const lv_font_t *chumby_icon_font(int px)
+{
+	static bool init;
+
+	if (!init) {	/* LVGL's symbols for everything else */
+		chumby_icons_14.fallback = &lv_font_montserrat_14;
+		chumby_icons_20.fallback = &lv_font_montserrat_20;
+		chumby_icons_28.fallback = &lv_font_montserrat_28;
+		init = true;
+	}
+	return px >= 28 ? &chumby_icons_28 : px >= 20 ? &chumby_icons_20 : &chumby_icons_14;
+}
+
 const lv_font_t *chumby_font(chumby_font_t f)
 {
 	return fonts[f < CHUMBY_FONT_COUNT ? f : CHUMBY_FONT_BODY];
