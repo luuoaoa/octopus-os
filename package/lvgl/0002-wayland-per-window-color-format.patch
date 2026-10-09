@@ -1,0 +1,61 @@
+From: chumby <chumby@localhost>
+Subject: [PATCH] wayland: let a window be created with its own color format
+
+A window's SHM buffers take the display's color format when the window
+is made, so it can't be changed afterwards. Add
+lv_wayland_window_set_next_color_format() to give the next window
+another one, e.g. ARGB8888 for a popup with rounded corners in an
+otherwise RGB565 UI.
+
+--- a/include/lvgl/drivers/wayland/lv_wayland_window.h
++++ b/include/lvgl/drivers/wayland/lv_wayland_window.h
+@@ -46,6 +46,15 @@
+                                         lv_wayland_display_close_cb_t close_cb);
+
+ /**
++ * Give the next window created this color format instead of the default
++ * (e.g. LV_COLOR_FORMAT_ARGB8888 for one with transparent parts). The
++ * format is chosen when the window's buffers are made, so it can't be
++ * changed later.
++ * @param cf The color format, LV_COLOR_FORMAT_UNKNOWN for the default
++ */
++void lv_wayland_window_set_next_color_format(lv_color_format_t cf);
++
++/**
+  * Closes the window programmatically
+  * @param display Reference to the LVGL display associated to the window @nullable
+  */
+--- a/src/drivers/wayland/lv_wayland_window.c
++++ b/src/drivers/wayland/lv_wayland_window.c
+@@ -35,6 +35,8 @@
+  *  STATIC VARIABLES
+  **********************/
+
++static lv_color_format_t next_color_format = LV_COLOR_FORMAT_UNKNOWN;
++
+ /**********************
+  *      MACROS
+  **********************/
+@@ -43,6 +45,11 @@
+  *   GLOBAL FUNCTIONS
+  **********************/
+
++void lv_wayland_window_set_next_color_format(lv_color_format_t cf)
++{
++    next_color_format = cf;
++}
++
+ lv_display_t * lv_wayland_window_create(uint32_t hor_res, uint32_t ver_res, char * title,
+                                         lv_wayland_display_close_cb_t close_cb)
+ {
+@@ -74,6 +81,10 @@
+         LV_LOG_ERROR("failed to create lvgl display");
+         goto create_display_error;
+     }
++    if(next_color_format != LV_COLOR_FORMAT_UNKNOWN) {
++        lv_display_set_color_format(window->lv_disp, next_color_format);
++        next_color_format = LV_COLOR_FORMAT_UNKNOWN;
++    }
+
+     window->body = wl_compositor_create_surface(lv_wl_ctx.wl_compositor);
+     if(!window->body) {

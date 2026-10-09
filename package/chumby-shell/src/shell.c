@@ -498,6 +498,7 @@ static void popup_close(void);
 #define MENU_ROW_H	44
 #define MENU_PAD	6
 #define MENU_IDLE_MS	8000
+#define MENU_RADIUS	10
 
 static lv_display_t *menu_disp;
 static lv_timer_t *menu_timer;
@@ -558,12 +559,14 @@ static void menu_row_cb(lv_event_t *e)
 static void menu_open(void)
 {
 	int h = (n_apps ? n_apps : 1) * (MENU_ROW_H + 4) - 4 + 2 * MENU_PAD;
-	lv_obj_t *scr, *row, *l;
+	lv_obj_t *scr, *plate, *corner, *row, *l;
 	int i;
 
 	popup_close();
 	if (menu_disp)
 		return;
+	/* With alpha: the plate's rounded corners show what's under them. */
+	lv_wayland_window_set_next_color_format(LV_COLOR_FORMAT_ARGB8888);
 	menu_disp = chumby_window_create("chumby-menu", MENU_W, h);
 	if (!menu_disp)
 		return;
@@ -571,15 +574,28 @@ static void menu_open(void)
 	lv_timer_resume(menu_timer);
 	scr = lv_display_get_screen_active(menu_disp);
 	lv_obj_set_scrollable(scr, false);
-	/* The open Home button's color: one piece, through the line. */
-	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_style_text_color(scr, chumby_color(CHUMBY_COLOR_BG), 0);
-	lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_all(scr, MENU_PAD, 0);
-	lv_obj_set_style_pad_row(scr, 4, 0);
+	lv_obj_set_style_bg_opa(scr, LV_OPA_TRANSP, 0);
+
+	/* The open Home button's color, one piece with it through the line:
+	 * rounded but for the top left corner, where it hangs from it. */
+	corner = lv_obj_create(scr);
+	lv_obj_remove_style_all(corner);
+	lv_obj_set_size(corner, MENU_RADIUS, MENU_RADIUS);
+	lv_obj_set_style_bg_opa(corner, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(corner, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	plate = lv_obj_create(scr);
+	lv_obj_remove_style_all(plate);
+	lv_obj_set_size(plate, MENU_W, h);
+	lv_obj_set_scrollable(plate, false);
+	lv_obj_set_style_radius(plate, MENU_RADIUS, 0);
+	lv_obj_set_style_bg_opa(plate, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(plate, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_flex_flow(plate, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_all(plate, MENU_PAD, 0);
+	lv_obj_set_style_pad_row(plate, 4, 0);
 
 	for (i = 0; i < n_apps; i++) {
-		row = lv_button_create(scr);
+		row = lv_button_create(plate);
 		lv_obj_set_size(row, LV_PCT(100), MENU_ROW_H);
 		lv_obj_set_style_radius(row, 8, 0);
 		lv_obj_set_style_shadow_width(row, 0, 0);
@@ -604,7 +620,8 @@ static void menu_open(void)
 		lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
 	}
 	if (!n_apps) {
-		l = lv_label_create(scr);
+		l = lv_label_create(plate);
+		lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_BG), 0);
 		lv_label_set_text(l, "No apps installed");
 	}
 	home_style();
@@ -827,7 +844,7 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_remove_style_all(bar_tabs);
 	lv_obj_set_scrollable(bar_tabs, false);
 	lv_obj_set_size(bar_tabs, LV_SIZE_CONTENT, CHUMBY_BAR_H + TAB_FOOT);
-	lv_obj_set_pos(bar_tabs, 4, 0);
+	lv_obj_set_pos(bar_tabs, 0, 0);
 	lv_obj_set_flex_flow(bar_tabs, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(bar_tabs, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
 			      LV_FLEX_ALIGN_END);
