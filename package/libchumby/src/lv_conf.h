@@ -933,7 +933,7 @@
 #define LV_USE_BMP 0
 
 /** Also decodes split JPEG, a custom format optimized for embedded systems. */
-#define LV_USE_TJPGD 0
+#define LV_USE_TJPGD 1	/* chumby: FM station logos (Wikipedia JPEGs) */
 
 /** High-performance decoder supporting the complete JPEG specifications. */
 #define LV_USE_LIBJPEG_TURBO 0

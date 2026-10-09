@@ -8,9 +8,10 @@
 #   2. which station: the FCC's licensed FM stations on <MHz>, nearest
 #      transmitter (US only)
 #   3. its logo: the "logo" of the station's Wikipedia infobox, as a
-#      120 px PNG
+#      120 px PNG or JPEG
 #
-# Results go to $ART/<MHz>.info (call=, city=, logo=) and $ART/<MHz>.png.
+# Results go to $ART/<MHz>.info (call=, city=, logo=) and the
+# logo as $ART/<MHz>.png or .jpg (LVGL picks the decoder by extension).
 # Lookups that found nothing are remembered too (call= empty), and retried
 # after a month; network failures after an hour. Prints the .info path.
 set -u
@@ -19,9 +20,12 @@ ART=${CHUMBY_ART_DIR:-/var/lib/chumby/art}
 UA="chumby-station-art/1.0 (Chumby One; +https://github.com/luuoaoa/pifansrf)"
 MHZ=$(printf '%.1f' "${1:?usage: chumby-station-art <MHz>}")
 INFO="$ART/$MHZ.info"
-PNG="$ART/$MHZ.png"
+IMG="$ART/$MHZ.img"
 
 mkdir -p "$ART"
+# curl's mbed TLS can't use the certificate directory, only the bundle.
+[ -r /etc/ssl/certs/ca-certificates.crt ] &&
+	export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 get() { curl -fsSL -m 20 -A "$UA" "$@"; }
 fail() {
 	# Try again in an hour (the network may just not be up yet).
@@ -53,11 +57,14 @@ STATION=$(printf '%s\n' "$FCC" | awk -F'|' -v loc="$LOC" '
 			out = out (i > 1 ? " " : "") toupper(substr(w[i], 1, 1)) substr(w[i], 2)
 		return out
 	}
+	# busybox awk has no math functions: cos() by its Taylor series (it
+	# only scales longitude by latitude, a few digits are plenty).
+	function cosine(x,   x2) { x2 = x * x; return 1 - x2 / 2 + x2 * x2 / 24 - x2 * x2 * x2 / 720 }
 	BEGIN { split(loc, h, ","); best = -1; pi = 3.14159265 }
 	NF > 27 {
 		lat = $21 + $22 / 60 + $23 / 3600; if (trim($20) == "S") lat = -lat
 		lon = $25 + $26 / 60 + $27 / 3600; if (trim($24) == "W") lon = -lon
-		dx = (lon - h[2]) * cos(h[1] * pi / 180); dy = lat - h[1]
+		dx = (lon - h[2]) * cosine(h[1] * pi / 180); dy = lat - h[1]
 		d = dx * dx + dy * dy
 		if (best < 0 || d < best) { best = d; call = trim($2); city = title(trim($11)) }
 	}
@@ -79,13 +86,20 @@ if [ -n "$CALL" ]; then
 		f=$(printf '%s' "File:$file" | sed 's/ /%20/g')
 		url=$(api "action=query&prop=imageinfo&iiprop=url&iiurlwidth=120&titles=$f" |
 			jq -r '.query.pages[].imageinfo[0].thumburl // empty')
-		if [ -n "$url" ] && get -o "$PNG.new" "$url" &&
-		   [ "$(head -c 4 "$PNG.new" | tail -c 3)" = "PNG" ]; then
-			mv "$PNG.new" "$PNG"
-			LOGO=$PNG
-			break
+		if [ -n "$url" ] && get -o "$IMG.new" "$url"; then
+			case $(head -c 4 "$IMG.new" | od -An -tx1 | tr -d ' \n') in
+			89504e47) ext=png ;;
+			ffd8ff*) ext=jpg ;;
+			*) ext= ;;
+			esac
+			if [ -n "$ext" ]; then
+				rm -f "$ART/$MHZ.png" "$ART/$MHZ.jpg"
+				LOGO="$ART/$MHZ.$ext"
+				mv "$IMG.new" "$LOGO"
+				break
+			fi
 		fi
-		rm -f "$PNG.new"
+		rm -f "$IMG.new"
 	done
 fi
 
