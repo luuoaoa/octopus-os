@@ -377,8 +377,7 @@ static void launch(struct app_info *a)
  * Tabs are drawn taller than the bar: the window clips their bottom
  * (rounded) corners, leaving square feet on the line.
  */
-#define TAB_Y		6	/* an inactive tab's top */
-#define TAB_ON_Y	3	/* the filled one stands a little taller */
+#define TAB_Y		5	/* a tab's top, filled or not */
 #define TAB_FOOT	10	/* drawn below the bar, clipped */
 #define LINE_H		2
 #define TAB_GAP		3
@@ -425,19 +424,18 @@ static bool tl_alive(struct toplevel *t)
 	return i != NULL;
 }
 
+/* Filled or not, a tab keeps its size (the border stays, unseen when
+ * filled): switching never nudges its neighbours. */
 static void tab_style(lv_obj_t *b, bool on)
 {
-	int y = on ? TAB_ON_Y : TAB_Y;
-
-	lv_obj_set_height(b, CHUMBY_BAR_H - y + TAB_FOOT);
 	lv_obj_set_style_radius(b, 7, 0);
 	lv_obj_set_style_bg_color(b, chumby_color(on ? CHUMBY_COLOR_ACCENT
 						     : CHUMBY_COLOR_SURFACE), 0);
 	lv_obj_set_style_bg_opa(b, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 	lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_PRESSED);
-	lv_obj_set_style_border_width(b, on ? 0 : 1, 0);
+	lv_obj_set_style_border_width(b, 1, 0);
 	lv_obj_set_style_border_color(b, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_border_opa(b, LV_OPA_40, 0);
+	lv_obj_set_style_border_opa(b, on ? LV_OPA_TRANSP : LV_OPA_40, 0);
 	lv_obj_set_style_text_color(b, chumby_color(on ? CHUMBY_COLOR_BG
 						       : CHUMBY_COLOR_TEXT_DIM), 0);
 }
@@ -486,8 +484,18 @@ static void tray_style(lv_obj_t *b, bool on)
 	tab_style(b, on);
 	if (on)		/* not the accent: that's the app's tab */
 		lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	else
-		lv_obj_set_style_border_width(b, 0, 0);	/* plain icon at rest */
+	else	/* plain icon at rest */
+		lv_obj_set_style_border_opa(b, LV_OPA_TRANSP, 0);
+}
+
+static lv_obj_t *tray_button(lv_obj_t *parent, const char *sym)
+{
+	lv_obj_t *b = tab_create(parent, sym, NULL, false);
+
+	/* Narrower than a tab: the two sit close together. */
+	lv_obj_set_style_min_width(b, 30, 0);
+	lv_obj_set_style_pad_hor(b, 7, 0);
+	return b;
 }
 
 static lv_obj_t *bar_tabs;	/* the tab row */
@@ -875,10 +883,10 @@ static void build_panel(lv_obj_t *scr)
 			      LV_FLEX_ALIGN_END);
 	lv_obj_set_style_pad_column(tray, TAB_GAP, 0);
 
-	btn_vol = tab_create(tray, LV_SYMBOL_VOLUME_MAX, NULL, false);
+	btn_vol = tray_button(tray, LV_SYMBOL_VOLUME_MAX);
 	lv_obj_add_event_cb(btn_vol, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_VOLUME);
-	btn_bri = tab_create(tray, LV_SYMBOL_EYE_OPEN, NULL, false);
+	btn_bri = tray_button(tray, LV_SYMBOL_EYE_OPEN);
 	lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_BRIGHTNESS);
 	box = bar_box(tray);
