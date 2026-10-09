@@ -9,12 +9,16 @@
  * Over http or https (libcurl), to the codec (ALSA, as the FM loop uses
  * it):
  *   - Shoutcast/Icecast streams, MP3 (libmpg123) or AAC (faad2, fixed
- *     point: no FPU here); their "ICY" metadata gives what's playing
+ *     point: no FPU here); their "ICY" metadata gives what's playing.
+ *     A thread downloads into a buffer of a few seconds, and playing
+ *     starts (again, after running dry) once ~2 s are in: Wi-Fi hiccups
+ *     don't reach the speaker
  *   - HLS (.m3u8): MPEG-TS or packed-audio segments of either, fetched
  *     by a thread on one kept-alive connection (a TLS handshake per 2 s
  *     segment would be too slow on this CPU) and queued for playing
  *   - .pls and .m3u playlists, followed to their first entry
- * A dropped stream is reconnected, backing off up to 30 s.
+ * A dropped stream is reconnected, backing off up to 30 s. We run above
+ * the UI's priority, so redraws can't make the decoder late.
  *
  * State goes to $run_dir/stream for the app ("state=", "url=", "name=",
  * "title=" lines), gone once stopped; our pid to $run_dir/stream.pid.
@@ -34,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -77,7 +82,10 @@ static void on_signal(int sig)
 	stop = 1;
 }
 
-static void status_write(void)
+static pthread_mutex_t status_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Called with status_lock held. */
+static void status_write_locked(void)
 {
 	char tmp[300];
 	FILE *f;
@@ -93,10 +101,12 @@ static void status_write(void)
 
 static void set_state(const char *s)
 {
+	pthread_mutex_lock(&status_lock);
 	if (strcmp(state, s)) {
 		snprintf(state, sizeof(state), "%s", s);
-		status_write();
+		status_write_locked();
 	}
+	pthread_mutex_unlock(&status_lock);
 }
 
 static pid_t running_pid(void)
@@ -431,8 +441,10 @@ static void icy_parse(void)
 	e = strstr(p, "';");
 	if (!e)
 		e = p + strlen(p);
+	pthread_mutex_lock(&status_lock);
 	snprintf(title, sizeof(title), "%.*s", (int)(e - p), p);
-	status_write();
+	status_write_locked();
+	pthread_mutex_unlock(&status_lock);
 }
 
 static size_t on_header(char *buf, size_t size, size_t n, void *user)
@@ -463,10 +475,47 @@ static size_t on_header(char *buf, size_t size, size_t n, void *user)
 		metaint = atol(v);
 		audio_left = metaint;
 	} else if (!strcasecmp(line, "icy-name") && !got_name && *v) {
+		pthread_mutex_lock(&status_lock);
 		snprintf(name, sizeof(name), "%s", v);
-		status_write();
+		status_write_locked();
+		pthread_mutex_unlock(&status_lock);
 	}
 	return len;
+}
+
+/* Compressed audio between the network thread and the player. */
+#define RING_SIZE	(256 * 1024)	/* ~10 s at 192 kbit/s */
+#define PREBUFFER	(48 * 1024)	/* ~2 s at 192 kbit/s, 3 s at 128 */
+
+static unsigned char ring[RING_SIZE];
+static size_t ring_head, ring_len;	/* read position, bytes held */
+static bool net_done;			/* the transfer ended */
+static pthread_mutex_t ring_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t ring_cond = PTHREAD_COND_INITIALIZER;
+
+/* From the network thread: blocks while the ring is full (TCP then
+ * slows the server down). */
+static void ring_put(const unsigned char *d, size_t n)
+{
+	size_t at, take;
+
+	pthread_mutex_lock(&ring_lock);
+	while (n > 0 && !stop) {
+		while (ring_len == RING_SIZE && !stop)
+			pthread_cond_wait(&ring_cond, &ring_lock);
+		at = (ring_head + ring_len) % RING_SIZE;
+		take = RING_SIZE - ring_len;
+		if (take > RING_SIZE - at)
+			take = RING_SIZE - at;
+		if (take > n)
+			take = n;
+		memcpy(ring + at, d, take);
+		ring_len += take;
+		d += take;
+		n -= take;
+		pthread_cond_broadcast(&ring_cond);
+	}
+	pthread_mutex_unlock(&ring_lock);
 }
 
 static size_t on_data(char *p, size_t size, size_t n, void *user)
@@ -476,12 +525,12 @@ static size_t on_data(char *p, size_t size, size_t n, void *user)
 	(void)user;
 	while (i < len && !stop) {
 		if (!metaint) {
-			es_out((const unsigned char *)p + i, len - i);
+			ring_put((const unsigned char *)p + i, len - i);
 			break;
 		}
 		if (meta_len < 0 && audio_left > 0) {		/* audio */
 			take = len - i < (size_t)audio_left ? len - i : (size_t)audio_left;
-			es_out((const unsigned char *)p + i, take);
+			ring_put((const unsigned char *)p + i, take);
 			audio_left -= take;
 			i += take;
 		} else if (meta_len < 0) {			/* length byte */
@@ -861,6 +910,69 @@ static void sleep_s(int s)
 		usleep(100 * 1000);
 }
 
+static CURLcode net_res;
+
+static void *net_thread(void *arg)
+{
+	net_res = curl_easy_perform(arg);
+	pthread_mutex_lock(&ring_lock);
+	net_done = true;
+	pthread_cond_broadcast(&ring_cond);
+	pthread_mutex_unlock(&ring_lock);
+	return NULL;
+}
+
+/* Play from the ring until the transfer ends (or we're stopped). Wait
+ * for PREBUFFER first, and again whenever it runs dry. */
+static CURLcode stream_play(CURL *c)
+{
+	static unsigned char chunk[4096];
+	bool filled = false;
+	struct timespec ts;
+	pthread_t t;
+	size_t n;
+
+	ring_head = ring_len = 0;
+	net_done = false;
+	if (pthread_create(&t, NULL, net_thread, c))
+		return CURLE_FAILED_INIT;
+	while (!stop) {
+		pthread_mutex_lock(&ring_lock);
+		while (!stop && !net_done && ring_len < (filled ? 1 : PREBUFFER)) {
+			clock_gettime(CLOCK_REALTIME, &ts);
+			ts.tv_nsec += 200 * 1000000L;
+			if (ts.tv_nsec >= 1000000000L) {
+				ts.tv_sec++;
+				ts.tv_nsec -= 1000000000L;
+			}
+			pthread_cond_timedwait(&ring_cond, &ring_lock, &ts);
+		}
+		if (!ring_len) {
+			pthread_mutex_unlock(&ring_lock);
+			if (net_done || stop)
+				break;
+			continue;
+		}
+		filled = true;
+		n = ring_len < sizeof(chunk) ? ring_len : sizeof(chunk);
+		if (n > RING_SIZE - ring_head)
+			n = RING_SIZE - ring_head;
+		memcpy(chunk, ring + ring_head, n);
+		ring_head = (ring_head + n) % RING_SIZE;
+		ring_len -= n;
+		if (!ring_len)
+			filled = false;		/* ran dry: buffer up again */
+		pthread_cond_broadcast(&ring_cond);
+		pthread_mutex_unlock(&ring_lock);
+		es_out(chunk, n);
+	}
+	pthread_mutex_lock(&ring_lock);
+	pthread_cond_broadcast(&ring_cond);	/* a writer waiting for room */
+	pthread_mutex_unlock(&ring_lock);
+	pthread_join(t, NULL);
+	return net_res;
+}
+
 static void play(void)
 {
 	char target[1024];
@@ -899,7 +1011,7 @@ static void play(void)
 			/* A stalled stream: under 1 kB/s for 20 s. */
 			curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1000L);
 			curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 20L);
-			res = curl_easy_perform(c);
+			res = stream_play(c);
 			curl_slist_free_all(h);
 		}
 		curl_easy_cleanup(c);
@@ -947,6 +1059,7 @@ int main(int argc, char **argv)
 	if (pid > 0)
 		return 0;
 	setsid();
+	setpriority(PRIO_PROCESS, 0, -10);
 	mkdir(dir, 0755);
 	f = fopen(pid_path, "w");
 	if (f) {
