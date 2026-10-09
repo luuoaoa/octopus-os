@@ -312,6 +312,7 @@ static int scan(const char *region)
 		if (r < threshold)
 			threshold = r;
 	}
+	printf("noise floor %d\n", threshold);	/* for relative levels */
 	threshold += 12;
 
 	/* Measure the band, then report only peaks above the threshold: a
@@ -334,9 +335,11 @@ static int scan(const char *region)
  * reg 0x00 bit 1 enables it; bit 7 of reg 0x1b flips each time a group
  * is ready in regs 0x10..0x17 (blocks A..D, high byte first). Groups come
  * every ~88 ms; poll at 20 ms. Decoded state goes to `out` as key=value
- * lines (ps, rt, title, artist, pty, pi), rewritten atomically on change.
+ * lines (ps, rt, title, artist, pty, pi, and the signal strength rssi,
+ * sampled about once a second), rewritten atomically on change.
  */
 static volatile sig_atomic_t rds_quit;
+static int rds_rssi = -1;	/* signal strength, also published (rssi=) */
 
 static void rds_signal(int sig)
 {
@@ -353,8 +356,8 @@ static void rds_write(const char *out, const struct rds *r)
 	f = fopen(tmp, "w");
 	if (!f)
 		return;
-	fprintf(f, "pi=%04x\npty=%d\nps=%s\nrt=%s\ntitle=%s\nartist=%s\n",
-		r->pi, r->pty, r->ps, r->rt, r->title, r->artist);
+	fprintf(f, "pi=%04x\npty=%d\nps=%s\nrt=%s\ntitle=%s\nartist=%s\nrssi=%d\n",
+		r->pi, r->pty, r->ps, r->rt, r->title, r->artist, rds_rssi);
 	fclose(f);
 	rename(tmp, out);
 }
@@ -363,7 +366,7 @@ static int rds_run(const char *out)
 {
 	char dir[256], *slash;
 	struct rds r;
-	int prev, v, i;
+	int prev, v, i, tick = 0;
 
 	/* The output usually lives in /run/chumby, which may not exist yet. */
 	snprintf(dir, sizeof(dir), "%s", out);
@@ -385,6 +388,14 @@ static int rds_run(const char *out)
 		uint16_t blk[4];
 
 		msleep(20);
+		if (++tick >= 50) {	/* ~1 s */
+			tick = 0;
+			v = rd(0x1c);
+			if (v >= 0 && v != rds_rssi) {
+				rds_rssi = v;
+				rds_write(out, &r);
+			}
+		}
 		v = rd(0x1b);
 		if (v < 0 || (v & 0x80) == prev)
 			continue;

@@ -23,7 +23,8 @@
 # file on the CHUMBY config partition (clocks the tuner from the SoC PWM3).
 
 STATION_FILE=/var/lib/chumby/radio.station
-STATIONS_FILE=/var/lib/chumby/radio.stations	# from the last scan, MHz per line
+# From the last scan: "#floor <rssi>", then "<MHz> <rssi>" per station.
+STATIONS_FILE=/var/lib/chumby/radio.stations
 PIDFILE=/var/run/radio-loop.pid
 PCM=plughw:0,0
 RDS_PIDFILE=/var/run/radio-rds.pid
@@ -123,10 +124,11 @@ case "$1" in
 			qn8005 init $xclk || die "tuner init failed"
 		fi
 		found=$(qn8005 scan "$2") || die "scan failed"
-		printf '%s\n' "$found" | sed -n 's/^\([0-9.]*\) MHz.*/\1/p' > "$STATIONS_FILE.new" &&
+		printf '%s\n' "$found" | sed -n -e 's/^noise floor \([0-9]*\)$/#floor \1/p' \
+			-e 's/^\([0-9.]*\) MHz  *rssi \([0-9]*\)$/\1 \2/p' > "$STATIONS_FILE.new" &&
 			mv "$STATIONS_FILE.new" "$STATIONS_FILE"
 		printf '%s\n' "$found"
-		echo "radio: $(grep -c . "$STATIONS_FILE") stations saved"
+		echo "radio: $(grep -c -v '^#' "$STATIONS_FILE") stations saved"
 		if [ -n "$was_on" ]; then
 			tune "$(cat "$STATION_FILE" 2>/dev/null || echo 100.3)"
 		else
