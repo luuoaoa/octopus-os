@@ -219,6 +219,16 @@ chumby_alarm_state_t chumby_alarm_state(time_t *until);
 const char *chumby_run_dir(void);
 bool chumby_shell_command(const char *cmd);
 
+/*
+ * chumby-wm freezes (SIGSTOP) apps that aren't in front, until they're
+ * brought back. An app with work to do out of sight (a download, a
+ * timer that must fire) asks to keep running meanwhile, and lets go when
+ * done: stay_awake(true) marks this process ($run_dir/awake/<pid>), which
+ * chumby-wm checks before freezing; false (or exiting) removes the mark.
+ * Alarms don't need it: the shell rings them, and brings the clock up.
+ */
+void chumby_stay_awake(bool on);
+
 #ifdef __cplusplus
 }
 #endif

@@ -977,6 +977,41 @@ const char *chumby_run_dir(void)
 	return p && *p ? p : RUN_DIR;
 }
 
+static void awake_path(char *out, size_t size)
+{
+	snprintf(out, size, "%s/awake/%d", chumby_run_dir(), (int)getpid());
+}
+
+static void awake_clear(void)
+{
+	char path[256];
+
+	awake_path(path, sizeof(path));
+	unlink(path);
+}
+
+void chumby_stay_awake(bool on)
+{
+	static bool registered;
+	char path[256];
+	int fd;
+
+	if (!on) {
+		awake_clear();
+		return;
+	}
+	snprintf(path, sizeof(path), "%s/awake", chumby_run_dir());
+	mkdir(path, 0755);
+	awake_path(path, sizeof(path));
+	fd = open(path, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+	if (fd >= 0)
+		close(fd);
+	if (!registered) {
+		atexit(awake_clear);
+		registered = true;
+	}
+}
+
 /* The shell writes "ringing" or "snoozed <epoch>"; no file = idle. */
 chumby_alarm_state_t chumby_alarm_state(time_t *until)
 {

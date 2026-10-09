@@ -20,6 +20,8 @@
  *                   so they get no CPU until they're brought back
  *                   (SIGCONT), their last frame already on screen. Their
  *                   sound, if any, is another process (radio, chumby-stream).
+ *                   An app with work to do out of sight opts out with
+ *                   chumby_stay_awake() ($run_dir/awake/<pid>).
  *
  * Apps are exported through wlr-foreign-toplevel-management so the shell
  * can list, activate, minimize and close them. Input is touch (plus an
@@ -221,6 +223,15 @@ static void view_freeze(struct view *v, bool freeze)
 	wl_client_get_credentials(client, &pid, &uid, &gid);
 	if (pid <= 0 || pid == getpid())
 		return;
+	if (freeze) {	/* asked to keep running (chumby_stay_awake())? */
+		const char *dir = getenv("CHUMBY_RUN_DIR");
+		char path[256];
+
+		snprintf(path, sizeof(path), "%s/awake/%d", dir && *dir ? dir : "/run/chumby",
+			 (int)pid);
+		if (access(path, F_OK) == 0)
+			return;
+	}
 	/* Its pending events (the deactivating configure) wait in its
 	 * socket; frozen views get no frame callbacks meanwhile. */
 	wl_client_flush(client);
