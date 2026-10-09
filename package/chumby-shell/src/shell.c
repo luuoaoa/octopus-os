@@ -365,8 +365,8 @@ static void launch(struct app_info *a)
  *
  * Before them, the Home button: like Windows' Start button it isn't a
  * place but a menu. It drops the list of apps down from the bar, button
- * and menu filled in the accent like one tab; picking one starts it or
- * brings it up. The app in front stays until then.
+ * and menu filled in one piece like volume and brightness; picking one
+ * starts it or brings it up. The app in front stays until then.
  *
  * At the right end: volume, brightness and the time. Volume and
  * brightness drop their slider down from the bar, under them; their
@@ -503,10 +503,26 @@ static lv_display_t *menu_disp;
 static lv_timer_t *menu_timer;
 
 /* Filled while its menu is open. */
+static lv_obj_t *home_join;	/* the open Home button, through the line */
+
 static void home_style(void)
 {
-	if (btn_home)
-		tab_style(btn_home, menu_disp != NULL);
+	bool open = menu_disp != NULL;
+
+	if (!btn_home)
+		return;
+	tab_style(btn_home, open);
+	if (open)	/* like volume and brightness: not the app tab's accent */
+		lv_obj_set_style_bg_color(btn_home, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	if (!home_join)
+		return;
+	lv_obj_set_hidden(home_join, !open);
+	if (open) {
+		lv_obj_update_layout(btn_home);
+		lv_obj_set_pos(home_join, lv_obj_get_x(bar_tabs) + lv_obj_get_x(btn_home),
+			       CHUMBY_BAR_H - LINE_H);
+		lv_obj_set_width(home_join, lv_obj_get_width(btn_home));
+	}
 }
 
 static void menu_close(void)
@@ -555,8 +571,8 @@ static void menu_open(void)
 	lv_timer_resume(menu_timer);
 	scr = lv_display_get_screen_active(menu_disp);
 	lv_obj_set_scrollable(scr, false);
-	/* The Home button's color: one tab, through the line. */
-	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	/* The open Home button's color: one piece, through the line. */
+	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_text_color(scr, chumby_color(CHUMBY_COLOR_BG), 0);
 	lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_all(scr, MENU_PAD, 0);
@@ -634,6 +650,7 @@ static void tabs_rebuild(void)
 	/* Home: a button for the menu, filled only while that is open. */
 	btn_home = tab_create(bar_tabs, LV_SYMBOL_HOME, NULL, menu_disp != NULL);
 	lv_obj_add_event_cb(btn_home, home_tab_cb, LV_EVENT_CLICKED, NULL);
+	home_style();
 	if (cur) {
 		a = app_by_id(cur->app_id);
 		b = tab_create(bar_tabs, a ? a->icon : LV_SYMBOL_FILE,
@@ -824,6 +841,12 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_set_pos(line, 0, CHUMBY_BAR_H - LINE_H);
 	lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(line, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	home_join = lv_obj_create(scr);
+	lv_obj_remove_style_all(home_join);
+	lv_obj_set_height(home_join, LINE_H);
+	lv_obj_set_style_bg_opa(home_join, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(home_join, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_hidden(home_join, true);
 
 	tray = lv_obj_create(scr);
 	lv_obj_remove_style_all(tray);
