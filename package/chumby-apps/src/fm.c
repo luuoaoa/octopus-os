@@ -525,7 +525,7 @@ static void on_mode(chumby_mode_t mode, void *user)
 	(void)user;
 	lv_obj_set_style_text_color(lbl_freq, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_text_color(lbl_name, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_style_text_color(lbl_song, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(lbl_song, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_text_color(art_note, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	/* A white logo tile would glare at night. */
 	lv_obj_set_style_opa(art_tile, mode == CHUMBY_MODE_NIGHT ? LV_OPA_50 : LV_OPA_COVER, 0);

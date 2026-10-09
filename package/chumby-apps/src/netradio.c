@@ -4,10 +4,10 @@
  *
  *   left        station logo
  *   right       its category, and the stream's codec and bitrate at the
- *               right (where FM has its signal bars), small
- *               station name
- *               what's playing (the stream's ICY title) or how it's going,
- *               its baseline on the logo's bottom edge
+ *               right (where FM has its signal bars), small, level with
+ *               the logo's top; under it, close together, the station's
+ *               name and what's playing (the stream's ICY title, or how
+ *               it's going)
  *   bottom      station list, previous station, play/stop, next station
  *
  * The name and what's playing scroll twice when they change (if too long),
@@ -51,6 +51,7 @@
 #define SMALL_BTN	38
 #define INFO_W		70			/* "AAC 320k" */
 #define START_GRACE_MS	4000	/* a stream just started: no status yet */
+#define LINE_GAP	2	/* between the category and the name */
 #define TILE_H		44
 #define TILE_GAP	6
 #define LIST_HEAD_H	30
@@ -674,7 +675,7 @@ static void on_mode(chumby_mode_t mode, void *user)
 	lv_obj_set_style_text_color(lbl_name, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_text_color(lbl_cat, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_style_text_color(lbl_info, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_text_color(lbl_song, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(lbl_song, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_text_color(art_note, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	/* A white logo tile would glare at night. */
 	lv_obj_set_style_opa(art_tile, mode == CHUMBY_MODE_NIGHT ? LV_OPA_50 : LV_OPA_COVER, 0);
@@ -690,18 +691,10 @@ static void on_mode(chumby_mode_t mode, void *user)
 		list_close();
 }
 
-/* Put a label's text baseline at y (in its parent). */
-static void baseline_at(lv_obj_t *l, int32_t y)
-{
-	const lv_font_t *f = lv_obj_get_style_text_font(l, 0);
-
-	lv_obj_set_y(l, y - (f->line_height - f->base_line));
-}
-
 int main(void)
 {
 	lv_obj_t *row;
-	int32_t art_y;
+	int32_t art_y, name_y;
 
 	scr = chumby_app_init("Internet Radio");
 	lv_obj_set_scrollable(scr, false);
@@ -765,21 +758,18 @@ int main(void)
 	lv_label_set_text(lbl_info, "");
 	lv_obj_set_pos(lbl_info, COL_X + COL_W - INFO_W, art_y);
 
-	/* Bottom: what's playing, its baseline on the logo's bottom edge. */
-	lbl_song = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_song, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_width(lbl_song, COL_W);
-	lv_obj_set_x(lbl_song, COL_X);
-	chumby_scroll_label_init(lbl_song);
-	baseline_at(lbl_song, art_y + ART_SIZE);
-
-	/* Between them: the station's name. */
+	/* Under it, close together: the station's name, what's playing. */
 	lbl_name = lv_label_create(scr);
 	lv_obj_set_style_text_font(lbl_name, chumby_font(CHUMBY_FONT_LARGE), 0);
 	lv_obj_set_width(lbl_name, COL_W);
-	lv_obj_set_x(lbl_name, COL_X);
 	chumby_scroll_label_init(lbl_name);
-	chumby_center_y_between(lbl_name, lbl_cat, lbl_song);
+	name_y = art_y + lv_font_get_line_height(chumby_font(CHUMBY_FONT_BODY)) + LINE_GAP;
+	lv_obj_set_pos(lbl_name, COL_X, name_y);
+	lbl_song = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_song, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_width(lbl_song, COL_W);
+	chumby_scroll_label_init(lbl_song);
+	lv_obj_set_pos(lbl_song, COL_X, name_y + lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE)));
 
 	switch_timer = lv_timer_create(switch_timer_cb, 600, NULL);
 	lv_timer_pause(switch_timer);
