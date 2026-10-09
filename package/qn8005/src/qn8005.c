@@ -333,7 +333,8 @@ static int scan(const char *region)
 /*
  * RDS (stock QND_RDSEnable / QND_RDSCheckBufferReady / QND_RDSLoadData):
  * reg 0x00 bit 1 enables it; bit 7 of reg 0x1b flips each time a group
- * is ready in regs 0x10..0x17 (blocks A..D, high byte first). Groups come
+ * is ready in regs 0x10..0x17 (blocks A..D, high byte first), and its
+ * bits 3..0 flag blocks A..D received with errors. Groups come
  * every ~88 ms; poll at 20 ms. Decoded state goes to `out` as key=value
  * lines (ps, rt, title, artist, pty, pi, psdyn = 1 while the PS scrolls
  * text, pstext = those words joined, and the signal strength rssi,
@@ -413,7 +414,7 @@ static int rds_run(const char *out)
 			continue;
 		for (i = 0; i < 4; i++)
 			blk[i] = raw[2 * i] << 8 | raw[2 * i + 1];
-		rds_group(&r, blk);
+		rds_group(&r, blk, v & 0x0f);	/* the bad-block flags */
 		if (r.changed) {
 			r.changed = false;
 			rds_write(out, &r);

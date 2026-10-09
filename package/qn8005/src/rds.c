@@ -10,7 +10,7 @@
 #define RTPLUS_AID	0x4bd7
 #define RTP_TITLE	1	/* ITEM.TITLE */
 #define RTP_ARTIST	4	/* ITEM.ARTIST */
-#define PI_CONFIRM	4	/* groups in a row before a new PI counts */
+#define PI_CONFIRM	2	/* good block As in a row before a new PI counts */
 #define PS_DYN_GROUPS	342	/* ~30 s: 3 PS changes within it = scrolling */
 #define PS_STILL_GROUPS	1368	/* ~2 min without a change: a name again */
 #define PS_CYCLE_WORDS	24	/* a cycle longer than this: publish anyway */
@@ -44,7 +44,15 @@ static void set_str(struct rds *r, char *dst, const char *src, size_t n)
 		n--;
 	if (n > RDS_PSTEXT_MAX)
 		n = RDS_PSTEXT_MAX;
-	memcpy(buf, src, n);
+	/* Runs of spaces (padding stations put in RadioText) as one. */
+	{
+		size_t i, o = 0;
+
+		for (i = 0; i < n; i++)
+			if (src[i] != ' ' || !o || buf[o - 1] != ' ')
+				buf[o++] = src[i];
+		n = o;
+	}
 	buf[n] = '\0';
 	if (strcmp(dst, buf)) {
 		strcpy(dst, buf);
@@ -115,19 +123,20 @@ static void do_ps(struct rds *r, uint16_t b, uint16_t d)
 	uint8_t now[2] = { d >> 8, d & 0xff };
 	char c0 = rds_char(now[0]), c1 = rds_char(now[1]), word[9];
 
-	if (!confirmed(r->ps_last[seg], &r->ps_seen[seg], now, 2))
-		return;
-	/* A segment that changed starts a new name: never publish one put
-	 * together from two (the station moved on mid-way: "Maexis"). */
-	if (r->ps_work[seg * 2] != c0 || r->ps_work[seg * 2 + 1] != c1)
-		r->ps_ok = 0;
 	r->ps_work[seg * 2] = c0;
 	r->ps_work[seg * 2 + 1] = c1;
 	r->ps_ok |= 1 << seg;
 	if (r->ps_ok != 0xf)
 		return;
 	r->ps_ok = 0;
+	/* A name counts once two whole passes in a row agree: one put
+	 * together from two (the station moved on mid-way: "Maexis") or
+	 * with a bad block doesn't repeat. */
 	ps_trim(r->ps_work, word);
+	if (strcmp(word, r->ps_cand)) {
+		strcpy(r->ps_cand, word);
+		return;
+	}
 	if (strcmp(word, r->ps)) {
 		set_str(r, r->ps, word, strlen(word));
 		ps_scroll(r, word);
@@ -202,16 +211,25 @@ static void do_rtplus(struct rds *r, uint16_t b, uint16_t c, uint16_t d)
 	rtp_tag(r, ((c & 1) << 5) | (d >> 11), (d >> 5) & 0x3f, (d & 0x1f) + 1);
 }
 
-void rds_group(struct rds *r, const uint16_t blk[4])
+void rds_group(struct rds *r, const uint16_t blk[4], unsigned bad)
 {
 	uint16_t a = blk[0], b = blk[1], c = blk[2], d = blk[3];
 	int type = b >> 12, code = (type << 1) | !!(b & 0x800);
 	bool version_b = b & 0x800;
 	int pty = (b >> 5) & 0x1f;
+	bool c_ok = !(bad & RDS_BAD_C), d_ok = !(bad & RDS_BAD_D);
 
 	r->groups++;
+	if (bad & RDS_BAD_B)
+		return;		/* what kind of group it is: unknown */
+	/* A bad block A: the group is still ours if we have a station. */
+	if (bad & RDS_BAD_A) {
+		if (!r->pi)
+			return;
+		a = r->pi;
+	}
 	/* A new station (PI) counts once seen PI_CONFIRM times in a row: a
-	 * corrupted block A must not wipe what we have. Until then, drop the
+	 * wrong block A must not wipe what we have. Until then, drop the
 	 * group. */
 	if (a != r->pi) {
 		if (!a)
@@ -241,18 +259,20 @@ void rds_group(struct rds *r, const uint16_t blk[4])
 		r->ps_dynamic = false;	/* the PS stopped scrolling */
 		r->changed = true;
 	}
-	if (code == r->rtp_group && r->rtp_group >= 0)
+	if (code == r->rtp_group && r->rtp_group >= 0 && c_ok && d_ok)
 		do_rtplus(r, b, c, d);
 	switch (type) {
-	case 0:
-		do_ps(r, b, d);
+	case 0:			/* PS in D */
+		if (d_ok)
+			do_ps(r, b, d);
 		break;
-	case 2:
-		do_rt(r, b, c, d, version_b);
+	case 2:			/* RadioText in C and D (2A), D (2B) */
+		if (d_ok && (c_ok || version_b))
+			do_rt(r, b, c, d, version_b);
 		break;
 	case 3:
 		/* ODA announcement: which group carries RT+. */
-		if (!version_b && d == RTPLUS_AID)
+		if (!version_b && d_ok && d == RTPLUS_AID)
 			r->rtp_group = b & 0x1f;
 		break;
 	}

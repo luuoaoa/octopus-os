@@ -4,8 +4,10 @@
  * RadioText (2A/2B) and RadioText+ title/artist tags (ODA 0x4BD7,
  * announced in 3A). Fed one group of four blocks at a time.
  *
- * The QN8005 gives no per-block error flags, so every 2- or 4-character
- * segment is only taken after the same value arrived twice in a row.
+ * Blocks the QN8005 flags as bad (reg 0x1b bits 3..0 for blocks A..D)
+ * are ignored. On top of that, as flagged-good blocks can still be wrong
+ * on a weak signal, a RadioText segment is only taken after the same
+ * value arrived twice in a row, and a PS once two whole passes agree.
  *
  * Many stations scroll text through the 8-character PS (one word at a
  * time) instead of, or besides, RadioText. A PS that keeps changing is
@@ -41,7 +43,8 @@ struct rds {
 	char ps_first[9];		/* the cycle's first word */
 	int ps_words;
 	char ps_work[8];
-	uint8_t ps_last[4][2], ps_seen[4], ps_ok;
+	char ps_cand[9];		/* the last whole pass, to agree with */
+	uint8_t ps_ok;
 	char rt_work[RDS_RT_MAX];
 	uint8_t rt_last[16][4], rt_seen[16];
 	uint16_t rt_ok;
@@ -50,6 +53,12 @@ struct rds {
 };
 
 void rds_init(struct rds *r);
-void rds_group(struct rds *r, const uint16_t blk[4]);
+/* Bad blocks, as the QN8005 flags them (reg 0x1b's low nibble). */
+#define RDS_BAD_A	0x8
+#define RDS_BAD_B	0x4
+#define RDS_BAD_C	0x2
+#define RDS_BAD_D	0x1
+
+void rds_group(struct rds *r, const uint16_t blk[4], unsigned bad);
 
 #endif
