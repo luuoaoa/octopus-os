@@ -952,6 +952,7 @@ static void build_panel(lv_obj_t *scr)
 			    (void *)(intptr_t)POPUP_BRIGHTNESS);
 	box = bar_box(tray);
 	lv_obj_set_style_pad_left(box, 6, 0);
+	lv_obj_set_style_pad_right(box, 6, 0);	/* clear of the screen's edge */
 	bar_clock = lv_label_create(box);
 	lv_label_set_text(bar_clock, "");
 	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_BODY), 0);
