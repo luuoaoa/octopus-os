@@ -13,6 +13,8 @@
 #                                        hidden: true      # optional
 #   /boot/user-data            hostname: chumby
 #                              timezone: Europe/Berlin  (a tz database name)
+#                              location: 37.77,-122.42  (FM station names/art;
+#                                        default: guessed from the IP address)
 #                              ssh_pwauth: true|false  (default true)
 #                              passwd: <crypt hash, e.g. from mkpasswd -m sha-512>
 #   /boot/authorized_keys      installed as /root/.ssh/authorized_keys
@@ -49,6 +51,7 @@ if [ -d /run/systemd/system ]; then
     SHADOW=$OUT/shadow
     AUTH_KEYS=$OUT/authorized_keys
     DROPBEAR_DEFAULT=$OUT/dropbear
+    LOCATION_FILE=$OUT/location
 else
     WPA=/etc/wpa_supplicant.conf
     HOSTNAME_FILE=/etc/hostname
@@ -58,6 +61,7 @@ else
     SHADOW=/etc/shadow
     AUTH_KEYS=/root/.ssh/authorized_keys
     DROPBEAR_DEFAULT=/etc/default/dropbear
+    LOCATION_FILE=/etc/chumby-location
 fi
 
 if ! mountpoint -q "$BOOT"; then
@@ -132,6 +136,13 @@ if [ -f "$BOOT/user-data" ]; then
             log "WARN: unknown timezone '$TZNAME' (no /usr/share/zoneinfo/$TZNAME)"
         fi
     fi
+
+    LOC=$(strip "$(printf '%s\n' "$USR" | sed -nE 's/^location:[[:space:]]+(.*)$/\1/p' | head -1)")
+    case "$LOC" in
+        *[0-9],*[0-9]) echo "$LOC" | tr -d ' ' > "$LOCATION_FILE"; log "location=$LOC" ;;
+        "") ;;
+        *) log "WARN: location: '$LOC' is not <lat>,<lon>; ignoring" ;;
+    esac
 
     V=$(strip "$(printf '%s\n' "$USR" | sed -nE 's/^ssh_pwauth:[[:space:]]+(.*)$/\1/p' | head -1)")
     case "$V" in

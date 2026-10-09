@@ -4,6 +4,9 @@ hostname: chumby
 # Europe/London, America/New_York, Asia/Tokyo. The clock is set over the
 # network (NTP) once WiFi is up.
 timezone: America/Los_Angeles
+# Optional: where the Chumby is, "<latitude>,<longitude>", to name FM
+# stations and fetch their logos. If unset it's guessed from the IP address.
+#location: 37.77,-122.42
 # false = key-only SSH (put keys in authorized_keys on this partition).
 ssh_pwauth: true
 # Uncomment to replace the default root password ("root").

@@ -20,6 +20,8 @@ endef
 define CHUMBY_APPS_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/chumby-clock $(TARGET_DIR)/usr/bin/chumby-clock
 	$(INSTALL) -D -m 0755 $(@D)/chumby-fm $(TARGET_DIR)/usr/bin/chumby-fm
+	$(INSTALL) -D -m 0755 $(CHUMBY_APPS_PKGDIR)/chumby-station-art \
+		$(TARGET_DIR)/usr/bin/chumby-station-art
 	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/clock.app \
 		$(TARGET_DIR)/usr/share/chumby/apps/clock.app
 	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/fm.app \

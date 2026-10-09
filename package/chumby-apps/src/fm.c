@@ -1,23 +1,25 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * chumby-fm: FM radio, laid out like a "now playing" screen:
+ * chumby-fm: FM radio, laid out like an iPod's "now playing":
  *
- *   header      the station's RDS name (else "FM Radio"), signal bars
- *               (like a phone's reception), scan button
- *   dial        < frequency MHz >   (0.1 MHz steps, hold to repeat)
- *               what's playing (RadioText+ title - artist, else RadioText)
- *               status: only transient messages (scanning, errors)
+ *   header      "FM Radio", signal bars (1-5, like a phone), scan
+ *   middle      station art | frequency, with < > (0.1 MHz) under it
+ *   title       station name (RDS, else call sign and city from the FCC
+ *               lookup) and what's playing; scrolls when too long
  *   bottom      previous station, on/off, next station
  *
- * The 1-5 signal bars are relative: from the scan's noise floor to its
- * strongest station. Live while playing (the RDS reader samples it), else
- * the level the station had at the last scan. Scanning is on a long press, so a
- * stray tap can't replace the list.
+ * Art: chumby-station-art finds the station (FCC, nearest transmitter)
+ * and its logo (Wikipedia), cached in /var/lib/chumby/art per frequency;
+ * a music note on a gradient tile when there is none.
  *
- * Drives /usr/bin/radio in child processes so the UI never blocks on the
- * ~2.5 s tuner init; the radio script keeps "qn8005 rds" writing RDS and
- * the signal strength to $run_dir/rds while it plays. Volume lives in the
- * shell.
+ * The signal bars are relative, from the last scan's noise floor to its
+ * strongest station: live while playing (the RDS reader samples it), else
+ * the level the station had at the last scan. Scanning is on a long press,
+ * so a stray tap can't replace the list.
+ *
+ * Drives /usr/bin/radio and chumby-station-art in child processes, so the
+ * UI never blocks (tuner init ~2.5 s, lookups need the network). Volume
+ * lives in the shell.
  */
 
 #include <signal.h>
@@ -25,14 +27,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <chumby.h>
 
 #define STATION_FILE	"/var/lib/chumby/radio.station"
 #define STATIONS_FILE	"/var/lib/chumby/radio.stations"	/* from "radio scan" */
+#define ART_DIR		"/var/lib/chumby/art"
+#define ART_TOOL	"/usr/bin/chumby-station-art"
 #define MAX_STATIONS	64
 #define RADIO_PIDFILE	"/var/run/radio-loop.pid"
 #define FREQ_MIN	876	/* tenths of MHz */
 #define FREQ_MAX	1080
+#define ART_SIZE	92	/* the tile */
+#define ART_PAD		8	/* logo inset on the tile */
+#define SIGNAL_BARS	5
 
 enum { REQ_NONE, REQ_ON, REQ_OFF, REQ_TUNE, REQ_SCAN };
 
@@ -44,13 +52,17 @@ struct station {
 static int freq = 1003;
 static bool radio_on;
 static int child = -1, child_req, pending = REQ_NONE;
+static int art_child = -1, art_freq;		/* lookup running, for which freq */
 static struct station stations[MAX_STATIONS];
 static int n_stations, noise_floor = -1;
 static int live_rssi = -1;			/* from the RDS reader */
-static lv_obj_t *lbl_title, *lbl_freq, *lbl_unit, *lbl_now, *lbl_status;
-#define SIGNAL_BARS	5
-static lv_obj_t *signal_bars[SIGNAL_BARS];
 static int signal_level;			/* 0 = unknown, else 1..5 */
+static char rds_name[16], rds_now[170];		/* from the RDS reader */
+static char call_name[48];			/* from the art lookup */
+static char message[64];			/* transient: scanning, errors */
+static lv_obj_t *signal_bars[SIGNAL_BARS];
+static lv_obj_t *lbl_app, *lbl_freq, *lbl_title;
+static lv_obj_t *art_tile, *art_img, *art_note;
 static lv_obj_t *btn_power, *btn_prev, *btn_next, *btn_down, *btn_up, *btn_scan;
 static lv_timer_t *tune_timer;
 
@@ -131,6 +143,9 @@ static int station_index(void)
 	return -1;
 }
 
+/* ------------------------------------------------------------------ */
+/* Signal bars                                                        */
+
 /* 0..100 between the scan's noise floor and its strongest station. */
 static int signal_pct(int rssi)
 {
@@ -172,12 +187,118 @@ static void signal_update(void)
 	}
 }
 
-/* The status line is for transient messages only (scanning, errors, hints):
- * on/off shows on the power button. */
-static void update_ui(const char *busy)
+/* ------------------------------------------------------------------ */
+/* Title line and art                                                 */
+
+/* Station name (RDS, else call sign) and what's playing; or a transient
+ * message. Scrolls (label long mode) when it doesn't fit. */
+static void title_update(void)
+{
+	char text[256];
+	const char *name = rds_name[0] ? rds_name : call_name;
+
+	if (message[0])
+		snprintf(text, sizeof(text), "%s", message);
+	else if (name[0] && rds_now[0])
+		snprintf(text, sizeof(text), "%s  |  %s", name, rds_now);
+	else if (name[0] || rds_now[0])
+		snprintf(text, sizeof(text), "%s", name[0] ? name : rds_now);
+	else
+		snprintf(text, sizeof(text), "%d.%d FM", freq / 10, freq % 10);
+	if (strcmp(lv_label_get_text(lbl_title), text))
+		lv_label_set_text(lbl_title, text);
+}
+
+static void art_show_note(void)
+{
+	lv_obj_set_hidden(art_img, true);
+	lv_obj_set_hidden(art_note, false);
+	lv_obj_set_style_bg_color(art_tile, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_bg_grad_color(art_tile, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_VER, 0);
+}
+
+static void art_show_logo(const char *path)
+{
+	static char src[160];
+	lv_image_header_t h;
+	int scale, sw, sh;
+
+	snprintf(src, sizeof(src), "A:%s", path);
+	if (lv_image_decoder_get_info(src, &h) != LV_RESULT_OK || !h.w || !h.h) {
+		art_show_note();
+		return;
+	}
+	/* Fit inside the tile, keep the aspect ratio. */
+	sw = (ART_SIZE - 2 * ART_PAD) * 256 / h.w;
+	sh = (ART_SIZE - 2 * ART_PAD) * 256 / h.h;
+	scale = sw < sh ? sw : sh;
+	lv_image_set_src(art_img, src);
+	lv_image_set_scale(art_img, scale);
+	lv_obj_center(art_img);
+	lv_obj_set_hidden(art_img, false);
+	lv_obj_set_hidden(art_note, true);
+	/* Logos are made for a white background, like album art. */
+	lv_obj_set_style_bg_color(art_tile, lv_color_white(), 0);
+	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_NONE, 0);
+}
+
+/* The lookup result for the current frequency: show it, and say whether
+ * a (new) lookup is due. */
+static bool art_load(void)
+{
+	char path[96], line[200], call[24] = "", city[40] = "", logo[128] = "";
+	long long retry = 0;
+	FILE *f;
+
+	snprintf(path, sizeof(path), ART_DIR "/%d.%d.info", freq / 10, freq % 10);
+	f = fopen(path, "r");
+	while (f && fgets(line, sizeof(line), f)) {
+		line[strcspn(line, "\n")] = '\0';
+		if (!strncmp(line, "call=", 5))
+			snprintf(call, sizeof(call), "%.23s", line + 5);
+		else if (!strncmp(line, "city=", 5))
+			snprintf(city, sizeof(city), "%.39s", line + 5);
+		else if (!strncmp(line, "logo=", 5))
+			snprintf(logo, sizeof(logo), "%.127s", line + 5);
+		else if (!strncmp(line, "retry=", 6))
+			retry = atoll(line + 6);
+	}
+	if (f)
+		fclose(f);
+	if (call[0] && city[0])
+		snprintf(call_name, sizeof(call_name), "%s, %s", call, city);
+	else
+		snprintf(call_name, sizeof(call_name), "%s", call);
+	if (logo[0])
+		art_show_logo(logo);
+	else
+		art_show_note();
+	title_update();
+	return !f || (retry && time(NULL) >= retry);
+}
+
+/* Look the station up in the background, once the frequency has settled. */
+static void art_refresh(void)
+{
+	char mhz[16];
+	char *argv[] = { "chumby-station-art", mhz, NULL };
+
+	if (!art_load() || art_child > 0)
+		return;
+	snprintf(mhz, sizeof(mhz), "%d.%d", freq / 10, freq % 10);
+	art_freq = freq;
+	art_child = chumby_spawn(ART_TOOL, argv);
+}
+
+/* ------------------------------------------------------------------ */
+/* Radio control                                                      */
+
+static void update_ui(const char *msg)
 {
 	lv_label_set_text_fmt(lbl_freq, "%d.%d", freq / 10, freq % 10);
-	lv_label_set_text(lbl_status, busy ? busy : "");
+	snprintf(message, sizeof(message), "%s", msg ? msg : "");
+	title_update();
 	if (radio_on)
 		lv_obj_add_state(btn_power, LV_STATE_CHECKED);
 	else
@@ -199,12 +320,12 @@ static void run_request(int req)
 		break;
 	case REQ_OFF:
 		argv[1] = "off";
-		update_ui("stopping...");
+		update_ui(NULL);
 		break;
 	case REQ_TUNE:
 		argv[1] = "tune";
 		argv[2] = f;
-		update_ui("tuning...");
+		update_ui(NULL);
 		break;
 	case REQ_SCAN:
 		argv[1] = "scan";
@@ -232,6 +353,13 @@ static void child_poll(lv_timer_t *t)
 	int status;
 
 	(void)t;
+	if (art_child > 0 && waitpid(art_child, &status, WNOHANG) == art_child) {
+		art_child = -1;
+		if (art_freq == freq)
+			art_load();
+		else
+			art_refresh();	/* moved on meanwhile */
+	}
 	if (child <= 0 || waitpid(child, &status, WNOHANG) != child)
 		return;
 	child = -1;
@@ -255,6 +383,7 @@ static void child_poll(lv_timer_t *t)
 	}
 }
 
+/* The frequency settled: tune, and look its station up. */
 static void tune_timer_cb(lv_timer_t *t)
 {
 	(void)t;
@@ -262,12 +391,15 @@ static void tune_timer_cb(lv_timer_t *t)
 	save_station();
 	if (radio_on)
 		request(REQ_TUNE);
+	art_refresh();
 }
 
 /* Tune after a short pause, so stepping through doesn't retune each time. */
 static void retune_soon(void)
 {
 	live_rssi = -1;
+	rds_name[0] = rds_now[0] = call_name[0] = '\0';
+	art_show_note();
 	update_ui(NULL);
 	lv_timer_reset(tune_timer);
 	lv_timer_resume(tune_timer);
@@ -319,21 +451,6 @@ static void power_cb(lv_event_t *e)
 	request(radio_on ? REQ_ON : REQ_OFF);
 }
 
-static lv_obj_t *round_button(lv_obj_t *parent, const char *sym, int size,
-			      const lv_font_t *font)
-{
-	lv_obj_t *b = lv_button_create(parent);
-	lv_obj_t *l = lv_label_create(b);
-
-	lv_obj_set_size(b, size, size);
-	lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_shadow_width(b, 0, 0);
-	lv_label_set_text(l, sym);
-	lv_obj_set_style_text_font(l, font, 0);
-	lv_obj_center(l);
-	return b;
-}
-
 /* RDS name, what's playing and the live signal, from the reader's file. */
 static void rds_show(void)
 {
@@ -365,11 +482,11 @@ static void rds_show(void)
 		snprintf(now, sizeof(now), "%s%s%s", title, artist[0] ? " - " : "", artist);
 	else
 		snprintf(now, sizeof(now), "%s", rt);
-	/* Only touch the labels on change: no redraw once a second. */
-	if (strcmp(lv_label_get_text(lbl_title), ps[0] ? ps : "FM Radio"))
-		lv_label_set_text(lbl_title, ps[0] ? ps : "FM Radio");
-	if (strcmp(lv_label_get_text(lbl_now), now))
-		lv_label_set_text(lbl_now, now);
+	if (strcmp(ps, rds_name) || strcmp(now, rds_now)) {
+		snprintf(rds_name, sizeof(rds_name), "%s", ps);
+		snprintf(rds_now, sizeof(rds_now), "%s", now);
+		title_update();
+	}
 	if (rssi != live_rssi) {
 		live_rssi = rssi;
 		signal_update();
@@ -382,17 +499,34 @@ static void rds_timer_cb(lv_timer_t *t)
 	rds_show();
 }
 
+/* ------------------------------------------------------------------ */
+
+static lv_obj_t *round_button(lv_obj_t *parent, const char *sym, int size,
+			      const lv_font_t *font)
+{
+	lv_obj_t *b = lv_button_create(parent);
+	lv_obj_t *l = lv_label_create(b);
+
+	lv_obj_set_size(b, size, size);
+	lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_shadow_width(b, 0, 0);
+	lv_label_set_text(l, sym);
+	lv_obj_set_style_text_font(l, font, 0);
+	lv_obj_center(l);
+	return b;
+}
+
 static void on_mode(chumby_mode_t mode, void *user)
 {
 	lv_color_t surface = chumby_color(CHUMBY_COLOR_SURFACE);
 
-	(void)mode;
 	(void)user;
-	lv_obj_set_style_text_color(lbl_title, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(lbl_app, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_style_text_color(lbl_freq, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_style_text_color(lbl_unit, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_text_color(lbl_now, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_style_text_color(lbl_status, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(lbl_title, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(art_note, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	/* A white logo tile would glare at night. */
+	lv_obj_set_style_opa(art_tile, mode == CHUMBY_MODE_NIGHT ? LV_OPA_50 : LV_OPA_COVER, 0);
 	signal_bars_style();
 	lv_obj_set_style_bg_color(btn_prev, surface, 0);
 	lv_obj_set_style_bg_color(btn_next, surface, 0);
@@ -402,18 +536,20 @@ static void on_mode(chumby_mode_t mode, void *user)
 	lv_obj_set_style_bg_color(btn_power, chumby_color(CHUMBY_COLOR_ACCENT), LV_STATE_CHECKED);
 	lv_obj_set_style_bg_color(btn_scan, surface, LV_STATE_PRESSED);
 	lv_obj_set_style_text_color(btn_scan, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	if (!lv_obj_is_hidden(art_note))
+		art_show_note();	/* gradient in the new palette */
 }
 
 int main(void)
 {
-	lv_obj_t *scr = chumby_app_init("FM Radio"), *dial, *tuner, *dfreq, *bars;
-	int i;
+	lv_obj_t *scr = chumby_app_init("FM Radio"), *bars, *content, *middle, *right, *steps;
 	const lv_font_t *xl = chumby_font(CHUMBY_FONT_XL);
+	int i;
 
 	lv_obj_set_scrollable(scr, false);
 
-	/* Header: station name, and a small scan button (hold to scan) with
-	 * a full-size touch area. */
+	/* Header: "FM Radio", signal bars, a small scan button (hold to scan)
+	 * with a full-size touch area. */
 	btn_scan = round_button(scr, LV_SYMBOL_REFRESH, CHUMBY_TOUCH_MIN,
 				&lv_font_montserrat_14);
 	lv_obj_set_style_bg_opa(btn_scan, LV_OPA_TRANSP, 0);
@@ -421,18 +557,15 @@ int main(void)
 	lv_obj_align(btn_scan, LV_ALIGN_TOP_RIGHT, -4, 2);
 	lv_obj_add_event_cb(btn_scan, scan_cb, LV_EVENT_SHORT_CLICKED, NULL);
 	lv_obj_add_event_cb(btn_scan, scan_cb, LV_EVENT_LONG_PRESSED, NULL);
-	lbl_title = lv_label_create(scr);
-	lv_label_set_text(lbl_title, "FM Radio");
-	lv_obj_set_style_text_font(lbl_title, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_label_set_long_mode(lbl_title, LV_LABEL_LONG_MODE_DOTS);
-	lv_obj_set_width(lbl_title, CHUMBY_APP_W - 12 - CHUMBY_TOUCH_MIN - 4 - 24 - 8);
-	lv_obj_align(lbl_title, LV_ALIGN_TOP_LEFT, 12, 0);
-	chumby_center_y_on(lbl_title, btn_scan);
+	lbl_app = lv_label_create(scr);
+	lv_label_set_text(lbl_app, "FM Radio");
+	lv_obj_set_style_text_font(lbl_app, chumby_font(CHUMBY_FONT_SMALL), 0);
+	lv_obj_align(lbl_app, LV_ALIGN_TOP_LEFT, 12, 0);
+	chumby_center_y_on(lbl_app, btn_scan);
 
-	/* Signal: 1-5 bars of rising height, like a phone's reception. */
 	bars = lv_obj_create(scr);
 	lv_obj_remove_style_all(bars);
-	lv_obj_set_size(bars, 5 * 3 + 4 * 2, 14);
+	lv_obj_set_size(bars, SIGNAL_BARS * 3 + (SIGNAL_BARS - 1) * 2, 14);
 	lv_obj_set_flex_flow(bars, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(bars, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
 	lv_obj_set_style_pad_column(bars, 2, 0);
@@ -445,45 +578,53 @@ int main(void)
 	}
 	lv_obj_align_to(bars, btn_scan, LV_ALIGN_OUT_LEFT_MID, -4, 0);
 
-	/* Dial: < frequency MHz >, now playing, status. */
-	dial = chumby_group(scr, LV_FLEX_FLOW_COLUMN, 6);
-	tuner = chumby_group(dial, LV_FLEX_FLOW_ROW, 8);
-	btn_down = round_button(tuner, "<", CHUMBY_TOUCH_MIN, chumby_font(CHUMBY_FONT_LARGE));
-	lv_obj_add_event_cb(btn_down, step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
-	lv_obj_add_event_cb(btn_down, step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)-1);
-	dfreq = chumby_group(tuner, LV_FLEX_FLOW_ROW, 6);
-	lv_obj_set_flex_align(dfreq, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
-			      LV_FLEX_ALIGN_END);
-	lbl_freq = lv_label_create(dfreq);
+	/* Content: art on the left, frequency and < > on the right; the
+	 * title under both. */
+	content = chumby_group(scr, LV_FLEX_FLOW_COLUMN, 8);
+	middle = chumby_group(content, LV_FLEX_FLOW_ROW, 16);
+	art_tile = lv_obj_create(middle);
+	lv_obj_remove_style_all(art_tile);
+	lv_obj_set_size(art_tile, ART_SIZE, ART_SIZE);
+	lv_obj_set_style_radius(art_tile, 10, 0);
+	lv_obj_set_style_bg_opa(art_tile, LV_OPA_COVER, 0);
+	lv_obj_set_style_clip_corner(art_tile, true, 0);
+	lv_obj_set_clickable(art_tile, false);
+	lv_obj_set_scrollable(art_tile, false);
+	art_img = lv_image_create(art_tile);
+	lv_obj_set_hidden(art_img, true);
+	art_note = lv_label_create(art_tile);
+	lv_label_set_text(art_note, LV_SYMBOL_AUDIO);
+	lv_obj_set_style_text_font(art_note, &lv_font_montserrat_48, 0);
+	lv_obj_center(art_note);
+
+	right = chumby_group(middle, LV_FLEX_FLOW_COLUMN, 8);
+	lbl_freq = lv_label_create(right);
 	lv_obj_set_style_text_font(lbl_freq, xl, 0);
-	/* Room for "108.0", so the < > buttons don't move as it changes. */
+	/* Room for "108.0", so the layout doesn't move as it changes. */
 	lv_obj_set_width(lbl_freq, 4 * lv_font_get_glyph_width(xl, '0', 0) +
 			 lv_font_get_glyph_width(xl, '.', 0));
-	lv_obj_set_style_text_align(lbl_freq, LV_TEXT_ALIGN_RIGHT, 0);
-	lbl_unit = lv_label_create(dfreq);
-	lv_label_set_text(lbl_unit, "MHz");
-	/* Bottom-aligned boxes: lift "MHz" by the difference in descent. */
-	lv_obj_set_style_pad_bottom(lbl_unit, xl->base_line -
-				    chumby_font(CHUMBY_FONT_BODY)->base_line, 0);
-	btn_up = round_button(tuner, ">", CHUMBY_TOUCH_MIN, chumby_font(CHUMBY_FONT_LARGE));
+	lv_obj_set_style_text_align(lbl_freq, LV_TEXT_ALIGN_CENTER, 0);
+	steps = chumby_group(right, LV_FLEX_FLOW_ROW, 12);
+	btn_down = round_button(steps, "<", CHUMBY_TOUCH_MIN, chumby_font(CHUMBY_FONT_LARGE));
+	lv_obj_add_event_cb(btn_down, step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
+	lv_obj_add_event_cb(btn_down, step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)-1);
+	btn_up = round_button(steps, ">", CHUMBY_TOUCH_MIN, chumby_font(CHUMBY_FONT_LARGE));
 	lv_obj_add_event_cb(btn_up, step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
 	lv_obj_add_event_cb(btn_up, step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)1);
 
-	lbl_now = lv_label_create(dial);
-	lv_obj_set_size(lbl_now, CHUMBY_APP_W - 24,
-			2 * chumby_font(CHUMBY_FONT_BODY)->line_height);
-	lv_label_set_long_mode(lbl_now, LV_LABEL_LONG_MODE_DOTS);
-	lv_obj_set_style_text_align(lbl_now, LV_TEXT_ALIGN_CENTER, 0);
-	lv_label_set_text(lbl_now, "");
-
-	lbl_status = lv_label_create(dial);
-	lv_obj_set_style_text_font(lbl_status, chumby_font(CHUMBY_FONT_SMALL), 0);
-	lv_obj_align(dial, LV_ALIGN_TOP_MID, 0, 0);
+	/* Title: the full width, scrolling smoothly when too long. */
+	lbl_title = lv_label_create(content);
+	lv_obj_set_style_text_font(lbl_title, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_width(lbl_title, CHUMBY_APP_W - 24);
+	lv_label_set_long_mode(lbl_title, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+	lv_obj_set_style_text_align(lbl_title, LV_TEXT_ALIGN_CENTER, 0);
+	lv_label_set_text(lbl_title, "");
+	lv_obj_align(content, LV_ALIGN_TOP_MID, 0, 0);
 
 	/* Bottom: previous station, power, next station. */
 	btn_power = round_button(scr, LV_SYMBOL_POWER, 56, &lv_font_montserrat_28);
 	lv_obj_set_checkable(btn_power, true);
-	lv_obj_align(btn_power, LV_ALIGN_BOTTOM_MID, 0, -10);
+	lv_obj_align(btn_power, LV_ALIGN_BOTTOM_MID, 0, -8);
 	lv_obj_add_event_cb(btn_power, power_cb, LV_EVENT_CLICKED, NULL);
 
 	btn_prev = round_button(scr, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
@@ -496,13 +637,14 @@ int main(void)
 	chumby_center_y_on(btn_next, btn_power);
 	lv_obj_add_event_cb(btn_next, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
 
-	chumby_center_y_between(dial, btn_scan, btn_power);
+	chumby_center_y_between(content, btn_scan, btn_power);
 
 	load_station();
 	load_stations();
 	radio_on = radio_running();
 	chumby_on_mode_change(on_mode, NULL);
 	update_ui(NULL);
+	art_refresh();
 
 	tune_timer = lv_timer_create(tune_timer_cb, 400, NULL);
 	lv_timer_pause(tune_timer);

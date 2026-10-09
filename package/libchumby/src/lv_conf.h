@@ -899,7 +899,9 @@
 /** Avoids repeatedly opening and decoding the same images, at the cost of RAM.
  *  Of little benefit with only the built-in image formats.
  */
-#define LV_CACHE_DEF_SIZE 0
+/* chumby: room for one decoded station logo (120x120 ARGB8888), so it
+ * isn't decoded again on every redraw. */
+#define LV_CACHE_DEF_SIZE (64 * 1024)
 
 /** Avoids repeatedly reading image headers, at the cost of RAM.
  *  Of little benefit with only the built-in image formats.
@@ -922,7 +924,7 @@
 #define LV_BIN_DECODER_RAM_LOAD 0
 
 /** PNG decoder (LodePNG) */
-#define LV_USE_LODEPNG 0
+#define LV_USE_LODEPNG 1	/* chumby: FM station logos */
 
 /** PNG decoder (libpng) */
 #define LV_USE_LIBPNG 0
@@ -1071,7 +1073,7 @@
 #define LV_FONT_MONTSERRAT_46 0
 
 /** Montserrat 48 */
-#define LV_FONT_MONTSERRAT_48 0
+#define LV_FONT_MONTSERRAT_48 1	/* chumby: the FM placeholder art's music note */
 
 /** Montserrat 28 (compressed) */
 #define LV_FONT_MONTSERRAT_28_COMPRESSED 0
@@ -1964,11 +1966,11 @@
 #define LV_FS_DEFAULT_DRIVER_LETTER 0
 
 /** stdio */
-#define LV_USE_FS_STDIO 0
+#define LV_USE_FS_STDIO 1	/* chumby: images from files, "A:/path" */
 
 #if LV_USE_FS_STDIO
 /** Drive letter for stdio (65 = 'A', 0 = disabled) */
-#define LV_FS_STDIO_LETTER 0
+#define LV_FS_STDIO_LETTER 'A'
 
 /** Working directory for stdio */
 #define LV_FS_STDIO_PATH ""
