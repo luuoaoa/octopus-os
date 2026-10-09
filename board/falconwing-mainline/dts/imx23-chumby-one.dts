@@ -30,7 +30,7 @@
 		 * is off, so these bootargs are used instead.
 		 */
 		/* p2 only carries the early boot and the rootfs image: init-ram
-		 * moves the system into RAM, then starts systemd. */
+		 * mounts the image read-only as the root, then starts systemd. */
 		bootargs = "console=ttyAMA0,115200 earlyprintk root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw init=/sbin/init-ram";
 		stdout-path = &duart;
 	};

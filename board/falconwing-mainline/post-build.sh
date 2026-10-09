@@ -8,11 +8,21 @@ TARGET_DIR="$1"
 # writes dropbear's args.
 mkdir -p "${TARGET_DIR}/boot" "${TARGET_DIR}/etc/default"
 
-# The root runs from RAM: SSH host keys live on the persistent /var
-# (dropbear.service.d/30-chumby.conf creates the directory).
+# The root is a read-only squashfs. SSH host keys live on the persistent
+# /var (dropbear.service.d/30-chumby.conf creates the directory).
 rm -rf "${TARGET_DIR}/etc/dropbear"
 ln -sfn /var/lib/dropbear "${TARGET_DIR}/etc/dropbear"
 mkdir -p "${TARGET_DIR}/var/lib/chumby"
+
+# (The /etc entries that point into /run/chumby-config are made in
+# post-fakeroot.sh, on the image's copy: buildroot itself still writes
+# /etc/hostname, /etc/timezone and /etc/shadow after this script.)
+# systemd mounts a generated machine-id over an empty one on a ro root.
+: > "${TARGET_DIR}/etc/machine-id"
+# Nothing to mark: the image is replaced whole, never updated in place.
+ln -sfn /dev/null "${TARGET_DIR}/etc/systemd/system/systemd-update-done.service"
+# Where init-ram leaves the carrier (p2) after pivoting.
+mkdir -p "${TARGET_DIR}/media/sd"
 
 # systemd units replace the shared overlay's sysvinit scripts.
 rm -f "${TARGET_DIR}"/etc/init.d/S[0-9]*

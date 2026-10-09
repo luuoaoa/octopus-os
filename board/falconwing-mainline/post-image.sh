@@ -53,14 +53,14 @@ rm -rf "${BINARIES_DIR}/config"
 cp -r "${FW_DIR}/config-partition" "${BINARIES_DIR}/config"
 
 # p2, the "carrier": early boot (busybox + its libraries + /sbin/init-ram),
-# the system image (rootfs.squashfs, copied into RAM at boot) and the
+# the system image (rootfs.squashfs, mounted read-only as the root) and the
 # persistent data (/data/var, bound onto /var). See carrier/sbin/init-ram.
 CARRIER="${BUILD_DIR}/carrier"
 rm -rf "${CARRIER}"
-mkdir -p "${CARRIER}"/{bin,lib,dev,proc,ram,data/var}
+mkdir -p "${CARRIER}"/{bin,lib,dev,proc,newroot,data/var}
 cp -a "${BOARD_DIR}/carrier/." "${CARRIER}/"
 cp "${TARGET_DIR}/bin/busybox" "${CARRIER}/bin/"
-for applet in sh mount umount cp mkdir pivot_root chroot; do
+for applet in sh mount umount mkdir pivot_root chroot; do
 	ln -sf busybox "${CARRIER}/bin/${applet}"
 done
 

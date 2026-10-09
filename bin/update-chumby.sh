@@ -1,12 +1,15 @@
 #!/bin/sh
 # Update a running Chumby One (falconwing-mainline) over SSH, no reflash.
 #
-# The system runs from RAM (see board/falconwing-mainline/README.md), so
-# the SD card's copies are not in use and can be replaced live:
+# The root is a read-only squashfs file on the card, and nothing else on
+# the card is in use (see board/falconwing-mainline/README.md), so it can be
+# replaced live:
 #
 #   rootfs.squashfs   -> /media/sd (carrier, p2): streamed to a temp name,
-#                        SHA-256 checked, then renamed into place
-#   early boot        -> /media/sd/{bin,lib,sbin} (init-ram, busybox, libs)
+#                        SHA-256 checked, then renamed into place (the
+#                        mounted old file stays valid until the reboot)
+#   early boot        -> /media/sd/{bin,lib,sbin,newroot} (init-ram, busybox,
+#                        libs, mountpoint)
 #   kernel + DTB      -> the krnA slot of p1, only if it differs; read
 #                        back and compared after writing (the one step
 #                        that could leave the board unbootable)
@@ -81,7 +84,7 @@ fi
 
 # --- early boot (the carrier's busybox, libraries, init-ram) ---
 echo "==> early boot files"
-tar -C "${CARRIER}" -cf - bin lib sbin | on 'tar -C /media/sd -xf - && sync'
+tar -C "${CARRIER}" -cf - bin lib sbin newroot | on 'tar -C /media/sd -xf - && sync'
 
 # --- kernel: the krnA slot of p1 ---
 # Slot offset/size from the config block, as post-image.sh does.

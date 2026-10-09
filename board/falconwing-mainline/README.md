@@ -17,10 +17,9 @@ bash docker-build.sh falconwing-mainline
 
 Same FAT config partition as `board/falconwing` (network-config /
 user-data / authorized_keys; the apply script is shared via
-`board/falconwing/rootfs-common`), but systemd, and the system runs from
-RAM.
+`board/falconwing/rootfs-common`), but systemd, and a read-only root.
 
-## Running from RAM
+## Read-only root
 
 The stock bootloader only loads the kernel slot, so there is no separate
 initramfs. SD partition 2 is a small ext4 "carrier" instead:
@@ -32,17 +31,26 @@ initramfs. SD partition 2 is a small ext4 "carrier" instead:
 /data/var            the persistent /var
 ```
 
-The kernel mounts it as root and runs `init-ram`, which copies
-`rootfs.squashfs` into a tmpfs, loop-mounts it under a tmpfs overlay
-(writable; changes are lost at reboot), binds `/data/var` onto `/var`,
-pivots (the carrier stays at `/media/sd`) and execs systemd. After that
-the card is only written through `/var`: alarms and the last FM station
-(`/var/lib/chumby`), SSH host keys (`/etc/dropbear` -> `/var/lib/dropbear`),
-timesyncd's clock. Everything in `/etc` that is configurable (WiFi,
-hostname, timezone, password, SSH keys) is re-applied every boot from the
-FAT partition by `chumby-config.service`. The journal is in RAM (2 MB).
+The kernel mounts it as root and runs `init-ram`, which loop-mounts
+`rootfs.squashfs` read-only, binds `/data/var` onto `/var`, pivots (the
+carrier stays at `/media/sd`) and execs systemd. The root stays
+read-only; the card is only written through `/var`: alarms and the last
+FM station (`/var/lib/chumby`), SSH host keys (`/etc/dropbear` ->
+`/var/lib/dropbear`), timesyncd's clock, ALSA state.
 
-**Updating without reflashing**: since nothing runs from the card,
+What used to be written to `/etc` at boot is in RAM instead: the image's
+`/etc/{hostname,localtime,timezone,shadow,default/dropbear,
+wpa_supplicant/wpa_supplicant-wlan0.conf}` and `/root/.ssh/authorized_keys`
+are symlinks into `/run/chumby-config`, filled every boot from the FAT
+partition by `chumby-config.service` (tmpfiles seeds `shadow` from
+`/etc/shadow.default` and `localtime` with UTC first). systemd mounts a
+generated `/etc/machine-id`; `systemd-update-done` is masked. `/tmp` and
+`/run` are tmpfs; the journal is in RAM (2 MB).
+
+(It first ran the squashfs from a copy in RAM, like the Pi image, but
+that pinned 16 MB of the 64 and starved the display of contiguous memory.)
+
+**Updating without reflashing**: since the squashfs is only a file,
 `bin/update-chumby.sh <host>` replaces it live over SSH: rootfs.squashfs
 (streamed to a temp name, SHA-256 checked, renamed), the early-boot
 files, the kernel slot (only if changed, read back and compared), and
@@ -50,8 +58,8 @@ optionally `customize-chumby/{network-config,user-data,authorized_keys}`
 into the FAT partition; then reboots. ~3 minutes, mostly dropbear's
 crypto on this CPU.
 
-RAM cost: the squashfs (see the post-image log line "carrier:") plus
-whatever is written to the overlay; pages of it decompress on demand.
+RAM cost: none pinned; pages of the squashfs decompress into the page
+cache on demand like any file system.
 
 ## systemd
 

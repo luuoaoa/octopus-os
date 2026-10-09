@@ -77,9 +77,9 @@ BR2_PACKAGE_ALSA_UTILS_APLAY=y
 # BR2_PACKAGE_ALSA_UTILS_ALSAMIXER is not set
 # BR2_PACKAGE_IFUPDOWN_SCRIPTS is not set
 
-# Root filesystem: a squashfs that runs from RAM. post-image.sh puts it on
-# the p2 "carrier" ext4 with the early boot (board/falconwing-mainline/
-# carrier/sbin/init-ram copies it into a tmpfs) and the persistent /var.
+# Root filesystem: a read-only squashfs. post-image.sh puts it on the p2
+# "carrier" ext4 with the early boot (board/falconwing-mainline/carrier/
+# sbin/init-ram loop-mounts it as the root) and the persistent /var.
 # zstd: close to xz in size, several times faster to unpack on demand.
 BR2_TARGET_ROOTFS_SQUASHFS=y
 BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD=y

@@ -34,11 +34,30 @@ strip() {
 # FAT tools sometimes leave CRLF line endings; strip them into a temp copy.
 unix() { tr -d '\r' < "$1"; }
 
-WPA=/etc/wpa_supplicant.conf
-# Under systemd, wpa_supplicant@wlan0 reads its own path.
+# Where the results go. Stock-kernel board: the real files in a writable
+# /etc. falconwing-mainline (systemd) has a read-only root whose /etc
+# entries are symlinks into /run/chumby-config (see its post-build.sh), so
+# everything is written there, in RAM, every boot.
 if [ -d /run/systemd/system ]; then
-    WPA=/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
-    mkdir -p /etc/wpa_supplicant
+    OUT=/run/chumby-config
+    mkdir -p "$OUT"
+    WPA=$OUT/wpa_supplicant-wlan0.conf
+    HOSTNAME_FILE=$OUT/hostname
+    LOCALTIME=$OUT/localtime
+    TIMEZONE_FILE=$OUT/timezone
+    SHADOW_IN=/etc/shadow.default
+    SHADOW=$OUT/shadow
+    AUTH_KEYS=$OUT/authorized_keys
+    DROPBEAR_DEFAULT=$OUT/dropbear
+else
+    WPA=/etc/wpa_supplicant.conf
+    HOSTNAME_FILE=/etc/hostname
+    LOCALTIME=/etc/localtime
+    TIMEZONE_FILE=/etc/timezone
+    SHADOW_IN=/etc/shadow
+    SHADOW=/etc/shadow
+    AUTH_KEYS=/root/.ssh/authorized_keys
+    DROPBEAR_DEFAULT=/etc/default/dropbear
 fi
 
 if ! mountpoint -q "$BOOT"; then
@@ -98,7 +117,7 @@ if [ -f "$BOOT/user-data" ]; then
 
     HOST=$(strip "$(printf '%s\n' "$USR" | sed -nE 's/^hostname:[[:space:]]+(.*)$/\1/p' | head -1)")
     if [ -n "$HOST" ]; then
-        echo "$HOST" > /etc/hostname
+        echo "$HOST" > "$HOSTNAME_FILE"
         hostname "$HOST"
         log "hostname=$HOST"
     fi
@@ -106,8 +125,8 @@ if [ -f "$BOOT/user-data" ]; then
     TZNAME=$(strip "$(printf '%s\n' "$USR" | sed -nE 's/^timezone:[[:space:]]+(.*)$/\1/p' | head -1)")
     if [ -n "$TZNAME" ]; then
         if [ -f "/usr/share/zoneinfo/$TZNAME" ]; then
-            ln -sf "/usr/share/zoneinfo/$TZNAME" /etc/localtime
-            echo "$TZNAME" > /etc/timezone
+            ln -sf "/usr/share/zoneinfo/$TZNAME" "$LOCALTIME"
+            echo "$TZNAME" > "$TIMEZONE_FILE"
             log "timezone=$TZNAME"
         else
             log "WARN: unknown timezone '$TZNAME' (no /usr/share/zoneinfo/$TZNAME)"
@@ -123,14 +142,14 @@ if [ -f "$BOOT/user-data" ]; then
     if [ -n "$PW" ]; then
         case "$PW" in
             *\$*\$*\$*)
-                if awk -F: -v OFS=: -v h="$PW" '$1=="root"{$2=h} 1' /etc/shadow > /etc/shadow.new \
-                   && [ -s /etc/shadow.new ]; then
-                    chmod 600 /etc/shadow.new
-                    mv /etc/shadow.new /etc/shadow
+                if awk -F: -v OFS=: -v h="$PW" '$1=="root"{$2=h} 1' "$SHADOW_IN" > "$SHADOW.new" \
+                   && [ -s "$SHADOW.new" ]; then
+                    chmod 600 "$SHADOW.new"
+                    mv "$SHADOW.new" "$SHADOW"
                     log "root password hash updated from user-data"
                 else
-                    rm -f /etc/shadow.new
-                    log "WARN: failed to rewrite /etc/shadow"
+                    rm -f "$SHADOW.new"
+                    log "WARN: failed to rewrite $SHADOW"
                 fi
                 ;;
             *) log "WARN: passwd: is not a \$id\$salt\$hash crypt string; ignoring" ;;
@@ -140,19 +159,18 @@ fi
 
 # === SSH ===
 if [ -f "$BOOT/authorized_keys" ]; then
-    mkdir -p /root/.ssh
-    chmod 700 /root/.ssh
-    unix "$BOOT/authorized_keys" > /root/.ssh/authorized_keys
-    chmod 600 /root/.ssh/authorized_keys
-    log "installed $(grep -c . /root/.ssh/authorized_keys) authorized key(s)"
+    mkdir -p "$(dirname "$AUTH_KEYS")"
+    unix "$BOOT/authorized_keys" > "$AUTH_KEYS"
+    chmod 600 "$AUTH_KEYS"
+    log "installed $(grep -c . "$AUTH_KEYS") authorized key(s)"
 fi
 
 if [ "$SSH_PWAUTH" = true ]; then
-    echo 'DROPBEAR_ARGS=""' > /etc/default/dropbear
+    echo 'DROPBEAR_ARGS=""' > "$DROPBEAR_DEFAULT"
     log "ssh: password logins enabled"
 else
     # -s: disable password logins, -g: disable them for root too.
-    echo 'DROPBEAR_ARGS="-s -g"' > /etc/default/dropbear
+    echo 'DROPBEAR_ARGS="-s -g"' > "$DROPBEAR_DEFAULT"
     log "ssh: key-only logins"
 fi
 

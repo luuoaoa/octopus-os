@@ -1,4 +1,4 @@
-# The root (squashfs + tmpfs overlay in RAM), /var (bound from the p2
+# The root (read-only squashfs), /var (bound from the p2
 # carrier, mounted at /media/sd) and /dev, /proc, /sys, /run are set up
 # by /sbin/init-ram and systemd.
 # <file system>	<mount pt>	<type>	<options>	<dump>	<pass>

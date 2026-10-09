@@ -21,9 +21,9 @@ CONFIG_RTC_DRV_STMP=y
 CONFIG_DEVTMPFS=y
 CONFIG_DEVTMPFS_MOUNT=y
 CONFIG_EXT4_FS=y
-# Root runs from RAM: /sbin/init-ram on p2 copies rootfs.squashfs into a
-# tmpfs, loop-mounts it and puts a tmpfs overlay on top. Built in: all of
-# it happens before any module could be loaded.
+# Read-only root: /sbin/init-ram on p2 loop-mounts rootfs.squashfs as the
+# root. Built in: it happens before any module could be loaded. (Overlay
+# is unused since the root went read-only; kept for experiments.)
 CONFIG_SQUASHFS=y
 CONFIG_SQUASHFS_ZSTD=y
 # (mxs_defconfig has the whole "Block devices" menu off: without BLK_DEV
