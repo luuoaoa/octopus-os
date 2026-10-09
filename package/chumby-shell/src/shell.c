@@ -433,14 +433,15 @@ static bool is_clock(const char *app_id)
 	return app_id && !strcmp(app_id, CLOCK_ID);
 }
 
-/* The app that was in front before `cur` (any other, if none was); never
- * the clock, which has its own tab. */
-static struct toplevel *tl_previous(struct toplevel *cur)
+/* The app that was in front last, other than `cur` and `skip` (any
+ * other, if none was); never the clock, which has its own tab. */
+static struct toplevel *tl_previous(struct toplevel *cur, struct toplevel *skip)
 {
 	struct toplevel *t, *best = NULL;
 
 	for (t = toplevels; t; t = t->next)
-		if (t != cur && !is_clock(t->app_id) && (!best || t->seen > best->seen))
+		if (t != cur && t != skip && !is_clock(t->app_id) &&
+		    (!best || t->seen > best->seen))
 			best = t;
 	return best;
 }
@@ -788,9 +789,25 @@ static void clock_tab_cb(lv_event_t *e)
 		show_clock();
 }
 
+/* An app not in front: its icon, in its hue (dim at night). */
+static void prev_tab(struct toplevel *t)
+{
+	struct app_info *a;
+	lv_obj_t *b;
+
+	if (!t)
+		return;
+	a = app_by_id(t->app_id);
+	b = tab_create(bar_tabs, a ? a->icon : LV_SYMBOL_FILE, NULL, false);
+	if (a && chumby_mode() == CHUMBY_MODE_DAY)
+		lv_obj_set_style_text_color(lv_obj_get_child(b, 0), chumby_accent(a->color), 0);
+	lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_SHORT_CLICKED, t);
+	lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_LONG_PRESSED, t);
+}
+
 static void tabs_rebuild(void)
 {
-	struct toplevel *cur, *prev;
+	struct toplevel *cur, *prev, *prev2 = NULL;
 	struct app_info *a;
 	lv_obj_t *b;
 
@@ -798,8 +815,12 @@ static void tabs_rebuild(void)
 		return;
 	lv_obj_clean(bar_tabs);
 	cur = tl_current();
-	prev = tl_previous(cur);
 	clock_front = cur && is_clock(cur->app_id);
+	/* Two app tabs beside Home, the clock not counted: the app in front
+	 * and the one before it, or (the clock in front) the last two. */
+	prev = tl_previous(cur, NULL);
+	if (clock_front)
+		prev2 = tl_previous(cur, prev);
 	clock_tab_style();
 
 	/* Home: a button for the menu, filled only while that is open. */
@@ -819,14 +840,8 @@ static void tabs_rebuild(void)
 	if (bar_line)
 		lv_obj_set_style_bg_color(bar_line, chumby_accent(cur && app_by_id(cur->app_id) ?
 					  app_by_id(cur->app_id)->color : CHUMBY_ACCENT_DEFAULT), 0);
-	if (prev) {
-		a = app_by_id(prev->app_id);
-		b = tab_create(bar_tabs, a ? a->icon : LV_SYMBOL_FILE, NULL, false);
-		if (a && chumby_mode() == CHUMBY_MODE_DAY)	/* its hue; dim at night */
-			lv_obj_set_style_text_color(lv_obj_get_child(b, 0), chumby_accent(a->color), 0);
-		lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_SHORT_CLICKED, prev);
-		lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_LONG_PRESSED, prev);
-	}
+	prev_tab(prev);
+	prev_tab(prev2);
 }
 
 static void bar_clock_update(void)
