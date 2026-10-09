@@ -285,11 +285,14 @@ static int parse_mhz(const char *s)
 	return f - (f % 5);	/* 50 kHz grid */
 }
 
+#define MAX_CHANNELS	256	/* 76-90 MHz or 87.5-108 MHz in 0.1 steps */
+
 static int scan(const char *region)
 {
 	unsigned int start = 8790, stop = 10790, step = 20;	/* stock "US" */
+	int rssi[MAX_CHANNELS];
 	unsigned int f;
-	int threshold;
+	int threshold, i, n;
 
 	if (region && !strcmp(region, "eu")) {
 		start = 8750; stop = 10800; step = 10;
@@ -311,13 +314,17 @@ static int scan(const char *region)
 	}
 	threshold += 12;
 
-	for (f = start; f <= stop; f += step) {
-		int r = get_rssi_at(f);
-
-		if (r < 0)
+	/* Measure the band, then report only peaks above the threshold: a
+	 * strong station also lifts its neighbouring channels. */
+	for (f = start, n = 0; f <= stop && n < MAX_CHANNELS; f += step)
+		if ((rssi[n++] = get_rssi_at(f)) < 0)
 			return -1;
-		if (r >= threshold)
-			printf("%u.%02u MHz  rssi %d\n", f / 100, f % 100, r);
+	for (i = 0; i < n; i++) {
+		f = start + i * step;
+		if (rssi[i] >= threshold &&
+		    (i == 0 || rssi[i] >= rssi[i - 1]) &&
+		    (i == n - 1 || rssi[i] > rssi[i + 1]))
+			printf("%u.%02u MHz  rssi %d\n", f / 100, f % 100, rssi[i]);
 	}
 	return wr(0x52, 0x00);
 }

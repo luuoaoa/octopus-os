@@ -11,7 +11,7 @@
 #   radio on [MHz] [--bypass]   init tuner, route audio (default: last station)
 #   radio tune <MHz>
 #   radio off
-#   radio scan [us|eu|jp]
+#   radio scan [us|eu|jp]       find stations, save them for prev/next
 #   radio vol <0-100>           DAC / HP volume
 #   radio status
 #
@@ -23,6 +23,7 @@
 # file on the CHUMBY config partition (clocks the tuner from the SoC PWM3).
 
 STATION_FILE=/var/lib/chumby/radio.station
+STATIONS_FILE=/var/lib/chumby/radio.stations	# from the last scan, MHz per line
 PIDFILE=/var/run/radio-loop.pid
 PCM=plughw:0,0
 RDS_PIDFILE=/var/run/radio-rds.pid
@@ -113,8 +114,24 @@ case "$1" in
 		echo "radio: off"
 		;;
 	scan)
+		# The tuner must be up; afterwards back to the station (or muted).
+		modprobe i2c-dev 2>/dev/null
+		was_on=; loop_running && was_on=1
 		stop_rds
-		qn8005 scan "$2"
+		if [ -z "$was_on" ]; then
+			xclk=; [ -e /boot/fmradio_xclk ] && xclk=--xclk
+			qn8005 init $xclk || die "tuner init failed"
+		fi
+		found=$(qn8005 scan "$2") || die "scan failed"
+		printf '%s\n' "$found" | sed -n 's/^\([0-9.]*\) MHz.*/\1/p' > "$STATIONS_FILE.new" &&
+			mv "$STATIONS_FILE.new" "$STATIONS_FILE"
+		printf '%s\n' "$found"
+		echo "radio: $(grep -c . "$STATIONS_FILE") stations saved"
+		if [ -n "$was_on" ]; then
+			tune "$(cat "$STATION_FILE" 2>/dev/null || echo 100.3)"
+		else
+			qn8005 mute
+		fi
 		;;
 	vol)
 		[ -n "$2" ] || die "usage: radio vol <0-100>"
