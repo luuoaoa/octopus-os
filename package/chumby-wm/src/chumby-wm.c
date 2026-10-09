@@ -9,6 +9,8 @@
  *   "chumby-popup"  the shell's transient controls (volume, brightness):
  *                   POPUP_W x POPUP_H, dropping down from the bar's right
  *                   end, above apps, below the bar
+ *   "chumby-menu"   the shell's app menu (its Home button): dropping down
+ *                   from the bar's left end, sized by the shell
  *   "chumby-home"   the app list, behind every app (background layer)
  *   anything else   an app: maximized into the area under the bar, one
  *                   visible at a time (the most recently activated)
@@ -57,9 +59,10 @@
 #define APP_PANEL	"chumby-panel"
 #define APP_HOME	"chumby-home"
 #define APP_POPUP	"chumby-popup"
+#define APP_MENU	"chumby-menu"
 #define MAX_TOUCH	10
 
-enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_APP };
+enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_MENU, VIEW_APP };
 
 struct server {
 	struct wl_display *display;
@@ -133,6 +136,11 @@ static void view_configure(struct view *v)
 	case VIEW_POPUP:
 		wlr_scene_node_set_position(&v->tree->node, s->width - POPUP_W, BAR_H);
 		wlr_xdg_toplevel_set_size(v->xdg, POPUP_W, POPUP_H);
+		break;
+	case VIEW_MENU:
+		/* Its size is the shell's: as tall as its list of apps. */
+		wlr_scene_node_set_position(&v->tree->node, 0, BAR_H);
+		wlr_xdg_toplevel_set_size(v->xdg, 0, 0);
 		break;
 	case VIEW_HOME:
 	case VIEW_APP:
@@ -326,6 +334,9 @@ static void view_commit(struct wl_listener *l, void *data)
 		wlr_scene_node_reparent(&v->tree->node, s->home_tree);
 	} else if (!strcmp(id, APP_POPUP)) {
 		v->kind = VIEW_POPUP;
+		wlr_scene_node_reparent(&v->tree->node, s->popup_tree);
+	} else if (!strcmp(id, APP_MENU)) {
+		v->kind = VIEW_MENU;
 		wlr_scene_node_reparent(&v->tree->node, s->popup_tree);
 	} else {
 		v->kind = VIEW_APP;
