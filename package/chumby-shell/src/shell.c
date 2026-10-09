@@ -405,6 +405,10 @@ static void stop_btn_cb(lv_event_t *e);
 
 static lv_obj_t *panel_scr, *home_scr;
 static lv_obj_t *btn_home, *btn_vol, *btn_bri, *bar_clock;
+/* The clock's own tab, at the far right: the time, or "Clock" while the
+ * clock app is in front. */
+static lv_obj_t *bar_clock_tab;
+static bool clock_front;
 static int volume_pct = 50;	/* cached: the mixer may not exist yet */
 
 enum popup_kind { POPUP_NONE, POPUP_VOLUME, POPUP_BRIGHTNESS };
@@ -424,13 +428,19 @@ static struct toplevel *tl_current(void)
 	return NULL;
 }
 
-/* The app that was in front before `cur` (any other, if none was). */
+static bool is_clock(const char *app_id)
+{
+	return app_id && !strcmp(app_id, CLOCK_ID);
+}
+
+/* The app that was in front before `cur` (any other, if none was); never
+ * the clock, which has its own tab. */
 static struct toplevel *tl_previous(struct toplevel *cur)
 {
 	struct toplevel *t, *best = NULL;
 
 	for (t = toplevels; t; t = t->next)
-		if (t != cur && (!best || t->seen > best->seen))
+		if (t != cur && !is_clock(t->app_id) && (!best || t->seen > best->seen))
 			best = t;
 	return best;
 }
@@ -596,7 +606,7 @@ static void bar_join_update(void)
 		r_left = 0;
 	/* Not into a filled tab beside it: only as wide as the gap. */
 	next = lv_obj_get_sibling(b, 1);
-	if (b == btn_home && next)
+	if ((b == btn_home && next) || (next == bar_clock_tab && clock_front))
 		r_right = TAB_GAP;
 	join_part(a.x1 - r_left, CHUMBY_BAR_H - LINE_H,
 		  lv_area_get_width(&a) + r_left + r_right, LINE_H);
@@ -647,9 +657,12 @@ static void menu_row_cb(lv_event_t *e)
 
 static void menu_open(void)
 {
-	int h = (n_apps ? n_apps : 1) * (MENU_ROW_H + 4) - 4 + 2 * MENU_PAD;
 	lv_obj_t *scr, *plate, *row, *l;
-	int i;
+	int i, n = 0, h;
+
+	for (i = 0; i < n_apps; i++)
+		n += !is_clock(apps[i].id);
+	h = (n ? n : 1) * (MENU_ROW_H + 4) - 4 + 2 * MENU_PAD;
 
 	popup_close();
 	if (menu_disp)
@@ -678,6 +691,8 @@ static void menu_open(void)
 	lv_obj_set_style_pad_row(plate, 4, 0);
 
 	for (i = 0; i < n_apps; i++) {
+		if (is_clock(apps[i].id))
+			continue;
 		row = lv_button_create(plate);
 		lv_obj_set_size(row, LV_PCT(100), MENU_ROW_H);
 		lv_obj_set_style_radius(row, 8, 0);
@@ -703,7 +718,7 @@ static void menu_open(void)
 		lv_label_set_text(l, apps[i].name);
 		lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
 	}
-	if (!n_apps) {
+	if (!n) {
 		l = lv_label_create(plate);
 		lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_BG), 0);
 		lv_label_set_text(l, "No apps installed");
@@ -734,6 +749,45 @@ static void app_tab_cb(lv_event_t *e)
 	wl_display_flush(wl);
 }
 
+static void bar_clock_update(void);
+
+/* The clock's tab: filled, "Clock", while its app is in front; else just
+ * the time, no tab. Its width stays put (the tray doesn't shift). */
+static void clock_tab_style(void)
+{
+	struct app_info *a = app_by_id(CLOCK_ID);
+
+	if (!bar_clock_tab)
+		return;
+	tab_style(bar_clock_tab, clock_front);
+	if (clock_front) {
+		chumby_glossy(bar_clock_tab, chumby_accent(a ? a->color : CHUMBY_ACCENT_DEFAULT), 0);
+		lv_obj_set_style_text_color(bar_clock_tab, chumby_on_accent(), 0);
+		lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_BODY), 0);
+		lv_obj_set_style_translate_y(bar_clock, 0, 0);
+		lv_obj_set_style_text_color(bar_clock, chumby_on_accent(), 0);
+		lv_label_set_text(bar_clock, "Clock");
+	} else {
+		lv_obj_set_style_border_opa(bar_clock_tab, LV_OPA_TRANSP, 0);
+		/* Bigger than the tab titles, but on their baseline (centred,
+		 * the 19 px font's sits a pixel lower). */
+		lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_LARGE), 0);
+		lv_obj_set_style_translate_y(bar_clock, -1, 0);
+		lv_obj_set_style_text_color(bar_clock, chumby_color(CHUMBY_COLOR_TEXT), 0);
+		lv_label_set_text(bar_clock, "");
+		bar_clock_update();
+	}
+}
+
+static void show_clock(void);
+
+static void clock_tab_cb(lv_event_t *e)
+{
+	(void)e;
+	if (!clock_front)
+		show_clock();
+}
+
 static void tabs_rebuild(void)
 {
 	struct toplevel *cur, *prev;
@@ -745,15 +799,15 @@ static void tabs_rebuild(void)
 	lv_obj_clean(bar_tabs);
 	cur = tl_current();
 	prev = tl_previous(cur);
-	if (bar_clock)		/* the clock app shows it already */
-		lv_obj_set_hidden(bar_clock, cur && !strcmp(cur->app_id, CLOCK_ID));
+	clock_front = cur && is_clock(cur->app_id);
+	clock_tab_style();
 
 	/* Home: a button for the menu, filled only while that is open. */
 	btn_home = tab_create(bar_tabs, LV_SYMBOL_HOME, NULL, menu_disp != NULL);
 	lv_obj_set_style_pad_hor(btn_home, 13, 0);	/* a little roomier */
 	lv_obj_add_event_cb(btn_home, home_tab_cb, LV_EVENT_CLICKED, NULL);
 	home_style();
-	if (cur) {
+	if (cur && !clock_front) {	/* the clock's tab is at the right */
 		a = app_by_id(cur->app_id);
 		b = tab_create(bar_tabs, a ? a->icon : LV_SYMBOL_FILE,
 			       !a ? cur->app_id : a->short_name[0] ? a->short_name : a->name, true);
@@ -781,7 +835,7 @@ static void bar_clock_update(void)
 	time_t now = time(NULL);
 	struct tm tm;
 
-	if (!bar_clock)
+	if (!bar_clock || clock_front)	/* "Clock" */
 		return;
 	if (chumby_time_valid()) {
 		localtime_r(&now, &tm);
@@ -973,6 +1027,7 @@ static void quick_btn_cb(lv_event_t *e)
 static void build_panel(lv_obj_t *scr)
 {
 	lv_obj_t *tray, *line, *box;
+	int w;
 
 	lv_obj_clean(scr);
 	lv_obj_set_scrollable(scr, false);
@@ -1017,15 +1072,23 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_BRIGHTNESS);
 	box = bar_box(tray);
-	lv_obj_set_style_pad_left(box, 2, 0);	/* close to the tray, like its buttons */
-	lv_obj_set_style_pad_right(box, 6, 0);	/* clear of the screen's edge */
+	bar_clock_tab = box;
+	lv_obj_set_clickable(box, true);
+	lv_obj_set_ext_click_area(box, TAB_Y);
+	lv_obj_add_event_cb(box, clock_tab_cb, LV_EVENT_CLICKED, NULL);
 	bar_clock = lv_label_create(box);
-	lv_label_set_text(bar_clock, "");
-	/* Bigger than the tab titles, but on their baseline (centred, the
-	 * 19 px font's sits a pixel lower). */
+	/* As wide as the wider of the time and the "Clock" tab. */
+	lv_label_set_text(bar_clock, "Clock");
+	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_update_layout(bar_clock);
+	w = lv_obj_get_width(bar_clock) + 2 * 9;
+	lv_label_set_text(bar_clock, "00:00");
 	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_style_translate_y(bar_clock, -1, 0);
-	lv_obj_set_style_text_color(bar_clock, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_update_layout(bar_clock);
+	if (lv_obj_get_width(bar_clock) + 2 * 4 > w)
+		w = lv_obj_get_width(bar_clock) + 2 * 4;
+	lv_obj_set_width(box, w);
+	lv_label_set_text(bar_clock, "");
 
 	/* Over everything else in the bar. */
 	bar_join = lv_obj_create(scr);
@@ -1033,6 +1096,7 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_set_clickable(bar_join, false);
 	lv_obj_set_size(bar_join, CHUMBY_SCREEN_W, CHUMBY_BAR_H);
 
+	clock_front = false;
 	tabs_rebuild();
 	quick_buttons_update();
 	bar_clock_update();
@@ -1063,8 +1127,11 @@ static void build_home(lv_obj_t *scr)
 	lv_obj_set_scroll_dir(grid, LV_DIR_VER);
 
 	for (i = 0; i < n_apps; i++) {
-		lv_obj_t *tile = lv_button_create(grid), *pair, *ic, *nm;
+		lv_obj_t *tile, *pair, *ic, *nm;
 
+		if (is_clock(apps[i].id))	/* the tab at the right */
+			continue;
+		tile = lv_button_create(grid);
 		/* Two big tiles per row. */
 		lv_obj_set_size(tile, (CHUMBY_APP_W - 3 * HOME_GAP) / 2, 84);
 		lv_obj_set_style_radius(tile, CORNER_R, 0);
