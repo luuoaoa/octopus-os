@@ -550,6 +550,11 @@ int chumby_run(void)
 		}
 		if (poll(pfd, n, idle) <= 0)
 			continue;
+		/* The compositor went away (session restart): so do we. */
+		if (pfd[0].revents & (POLLHUP | POLLERR)) {
+			fprintf(stderr, "libchumby: lost the Wayland compositor\n");
+			exit(0);
+		}
 		for (i = 0; i < n_watches; i++)
 			if (pfd[i + 1].revents & (POLLIN | POLLHUP | POLLERR))
 				watches[i].cb(watches[i].fd, watches[i].user);

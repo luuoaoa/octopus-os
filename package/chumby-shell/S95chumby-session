@@ -36,6 +36,11 @@ stop() {
 	printf "Stopping chumby session: "
 	start-stop-daemon -K -q -p "$PIDFILE" && echo "OK" || echo "FAIL"
 	rm -f "$PIDFILE"
+	# Apps exit when the compositor goes; make sure of it.
+	for exe in /usr/bin/chumby-shell /usr/bin/chumby-alarm-tone \
+		   $(sed -n 's/^Exec *= *//p' /usr/share/chumby/apps/*.app 2>/dev/null); do
+		start-stop-daemon -K -q -x "$exe" 2>/dev/null
+	done
 }
 
 case "$1" in
