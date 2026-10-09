@@ -156,21 +156,22 @@ static chumby_mode_t policy_mode_now(void)
 
 static chumby_mode_t mode = CHUMBY_MODE_DAY;
 
+/* Shades of grey. Day: dark on light. Night: light on dark, the text a
+ * soft grey rather than white so it doesn't light up a bedroom. */
 static const uint32_t palette[2][CHUMBY_COLOR_COUNT] = {
 	[CHUMBY_MODE_DAY] = {
-		[CHUMBY_COLOR_BG]	= 0x101418,
-		[CHUMBY_COLOR_SURFACE]	= 0x1e252c,
-		[CHUMBY_COLOR_TEXT]	= 0xe8edf2,
-		[CHUMBY_COLOR_TEXT_DIM]	= 0x8c97a3,
-		[CHUMBY_COLOR_ACCENT]	= 0x3d9bff,
+		[CHUMBY_COLOR_BG]	= 0xe4e4e4,
+		[CHUMBY_COLOR_SURFACE]	= 0xf5f5f5,
+		[CHUMBY_COLOR_TEXT]	= 0x1c1c1c,
+		[CHUMBY_COLOR_TEXT_DIM]	= 0x6e6e6e,
+		[CHUMBY_COLOR_ACCENT]	= 0x4a4a4a,
 	},
-	/* Night: near-black, warm and dim so it doesn't light up a bedroom. */
 	[CHUMBY_MODE_NIGHT] = {
 		[CHUMBY_COLOR_BG]	= 0x000000,
-		[CHUMBY_COLOR_SURFACE]	= 0x140c0a,
-		[CHUMBY_COLOR_TEXT]	= 0xb8705a,
-		[CHUMBY_COLOR_TEXT_DIM]	= 0x6a4034,
-		[CHUMBY_COLOR_ACCENT]	= 0xa8422a,
+		[CHUMBY_COLOR_SURFACE]	= 0x1e1e1e,
+		[CHUMBY_COLOR_TEXT]	= 0xc8c8c8,
+		[CHUMBY_COLOR_TEXT_DIM]	= 0x6a6a6a,
+		[CHUMBY_COLOR_ACCENT]	= 0x7a7a7a,
 	},
 };
 
@@ -573,6 +574,8 @@ static void theme_styles_init(void)
 	lv_style_set_text_color(&st_btn, chumby_color(CHUMBY_COLOR_TEXT));
 	lv_style_set_shadow_width(&st_btn, 0);
 	lv_style_set_bg_color(&st_btn_checked, chumby_color(CHUMBY_COLOR_ACCENT));
+	/* On the accent: the background's shade (light by day, black at night). */
+	lv_style_set_text_color(&st_btn_checked, chumby_color(CHUMBY_COLOR_BG));
 	/* Tracks must stay visible on the night palette's black. */
 	lv_style_set_bg_color(&st_track, chumby_color(CHUMBY_COLOR_TEXT_DIM));
 	lv_style_set_bg_opa(&st_track, LV_OPA_40);
@@ -593,7 +596,7 @@ static void theme_apply(lv_display_t *disp)
 {
 	lv_theme_t *th = lv_theme_default_init(disp, chumby_color(CHUMBY_COLOR_ACCENT),
 					       chumby_color(CHUMBY_COLOR_ACCENT),
-					       true, chumby_font(CHUMBY_FONT_BODY));
+					       mode == CHUMBY_MODE_NIGHT, chumby_font(CHUMBY_FONT_BODY));
 	lv_obj_t *scr = lv_display_get_screen_active(disp);
 
 	theme_styles_init();
