@@ -116,6 +116,8 @@ CONFIG_USB_CHIPIDEA_HOST=y
 CONFIG_USB_MXS_PHY=y
 CONFIG_I2C_CHARDEV=y
 CONFIG_I2C_MXS=y
+# The FM tuner's reads need protocol mangling: bit-banged bus (see DTS).
+CONFIG_I2C_GPIO=y
 
 # --- Phase 3: display, backlight, touch, knob ---
 CONFIG_DRM_PANEL_SIMPLE=m

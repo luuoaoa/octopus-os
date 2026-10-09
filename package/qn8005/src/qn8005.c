@@ -61,12 +61,21 @@ static int wr(uint8_t reg, uint8_t val)
 	return 0;
 }
 
+/*
+ * The QN8005's register read is not a standard write-then-read: it wants
+ * START, the address with the *read* bit, the register number written,
+ * then the data clocked out - one transaction, no repeated start (what
+ * the vendor kernel's "CHUMBY_radio_fix" generated). A repeated-start
+ * read is NAKed. In Linux terms: a write with I2C_M_REV_DIR_ADDR, then a
+ * read with I2C_M_NOSTART - protocol mangling, which the bit-banged
+ * i2c-gpio bus (see the DTS) supports.
+ */
 static int rd(uint8_t reg)
 {
 	uint8_t val;
 	struct i2c_msg msgs[2] = {
-		{ .addr = addr, .flags = 0, .len = 1, .buf = &reg },
-		{ .addr = addr, .flags = I2C_M_RD, .len = 1, .buf = &val },
+		{ .addr = addr, .flags = I2C_M_REV_DIR_ADDR, .len = 1, .buf = &reg },
+		{ .addr = addr, .flags = I2C_M_RD | I2C_M_NOSTART, .len = 1, .buf = &val },
 	};
 	struct i2c_rdwr_ioctl_data data = { .msgs = msgs, .nmsgs = 2 };
 
@@ -409,7 +418,8 @@ int main(int argc, char **argv)
 	const char *cmd;
 	int opt, ret = 0;
 
-	while ((opt = getopt(argc, argv, "d:a:h")) != -1) {
+	/* "+": stop at the command, so its own options (init --xclk) stay. */
+	while ((opt = getopt(argc, argv, "+d:a:h")) != -1) {
 		switch (opt) {
 		case 'd': dev = optarg; break;
 		case 'a': addr = strtol(optarg, NULL, 0); break;

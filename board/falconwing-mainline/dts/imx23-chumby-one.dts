@@ -20,6 +20,7 @@
 
 	aliases {
 		mmc0 = &ssp0;
+		i2c0 = &i2c_gpio;
 	};
 
 	chosen {
@@ -158,6 +159,18 @@
 				/* Knob: the vendor kernel used the TIMROT hardware
 				 * quadrature decoder on ROTARYA/B, which has no mainline
 				 * driver; read the same pins as GPIOs instead. */
+				/* I2C_SCL/SDA (B0P30/31) as GPIOs for i2c-gpio. */
+				i2c_gpio_pins: i2c-gpio@0 {
+					reg = <0>;
+					fsl,pinmux-ids = <
+						MX23_PAD_I2C_SCL__GPIO_0_30
+						MX23_PAD_I2C_SDA__GPIO_0_31
+					>;
+					fsl,drive-strength = <MXS_DRIVE_8mA>;
+					fsl,voltage = <MXS_VOLTAGE_HIGH>;
+					fsl,pull-up = <MXS_PULL_ENABLE>;
+				};
+
 				rotary_pins: rotary@0 {
 					reg = <0>;
 					fsl,pinmux-ids = <
@@ -187,11 +200,9 @@
 		apbx-bus@80040000 {
 			/* I2C0 on the dedicated I2C_SCL/SDA pads (B0P30/31):
 			 * QN8005 FM tuner at 0x2b (7-bit), plus the accelerometer. */
+			/* The I2C block can't do the tuner's reads: see i2c_gpio. */
 			i2c: i2c@80058000 {
-				pinctrl-names = "default";
-				pinctrl-0 = <&i2c_pins_a>;
-				clock-frequency = <100000>;
-				status = "okay";
+				status = "disabled";
 			};
 
 			usbphy0: usbphy@8007c000 {
@@ -307,6 +318,26 @@
 		compatible = "simple-audio-amplifier";
 		enable-gpios = <&gpio0 8 GPIO_ACTIVE_LOW>;
 		sound-name-prefix = "Speaker Amp";
+	};
+
+	/*
+	 * I2C0 on the dedicated I2C_SCL/SDA pads, bit-banged: QN8005 FM
+	 * tuner at 0x2b (7-bit), MMA7455 accelerometer at 0x1d, EEPROM.
+	 * The tuner's register read is not standard I2C: START, address with
+	 * the read bit, the register number written, then the data read, with
+	 * no repeated start (the vendor kernel special-cased it). Only the
+	 * bit-banging algorithm can do that (I2C_M_REV_DIR_ADDR +
+	 * I2C_M_NOSTART); i2c-mxs NAKs. ~100 kHz.
+	 */
+	i2c_gpio: i2c {
+		compatible = "i2c-gpio";
+		pinctrl-names = "default";
+		pinctrl-0 = <&i2c_gpio_pins>;
+		sda-gpios = <&gpio0 31 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpio0 30 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <5>;
+		#address-cells = <1>;
+		#size-cells = <0>;
 	};
 
 	rotary {
