@@ -11,14 +11,15 @@
 # Sources are executables in /usr/share/chumby/audio.d/<name> (fm,
 # stream, ...), each taking stop | pause | resume | active (exit status:
 # playing?). A source calls "play" itself as it starts; its "resume"
-# mustn't (we hold the lock then).
+# mustn't (we hold the lock then). Sources run without the lock's fd: a
+# player they leave running in the background mustn't keep holding it.
 
 D=/usr/share/chumby/audio.d
 S=${CHUMBY_RUN_DIR:-/run/chumby}/audio
 
 mkdir -p "$S"
 exec 9>"$S/lock"
-flock -w 20 9 || { echo "chumby-audio: busy" >&2; exit 1; }
+flock 9	# busybox: no -w; sources finish in seconds
 
 others() {
 	for src in "$D"/*; do
@@ -32,7 +33,7 @@ case "$1" in
 	play)
 		[ -n "$2" ] || exit 2
 		for src in $(others "$2"); do
-			"$src" active && "$src" stop
+			"$src" active 9>&- && "$src" stop 9>&-
 		done
 		rm -f "$S/paused"	# nothing to come back to now
 		echo "$2" > "$S/current"
@@ -40,7 +41,7 @@ case "$1" in
 	duck)
 		[ -n "$2" ] || exit 2
 		for src in $(others "$2"); do
-			if "$src" active && "$src" pause; then
+			if "$src" active 9>&- && "$src" pause 9>&-; then
 				echo "${src##*/}" >> "$S/paused"
 			fi
 		done
@@ -48,17 +49,17 @@ case "$1" in
 	release)
 		[ -f "$S/paused" ] || exit 0
 		for name in $(cat "$S/paused"); do
-			[ -x "$D/$name" ] && "$D/$name" resume
+			[ -x "$D/$name" ] && "$D/$name" resume 9>&-
 		done
 		rm -f "$S/paused"
 		;;
 	list)
 		for src in "$D"/*; do
 			[ -x "$src" ] || continue
-			if "$src" active; then st=playing; else st=-; fi
+			if "$src" active 9>&-; then st=playing; else st=-; fi
 			echo "${src##*/} $st"
 		done
-		[ -f "$S/paused" ] && echo "paused: $(cat "$S/paused" | tr '\n' ' ')"
+		if [ -f "$S/paused" ]; then echo "paused: $(tr '\n' ' ' < "$S/paused")"; fi
 		;;
 	*)
 		sed -n '2,/^$/s/^# \{0,1\}//p' "$0"

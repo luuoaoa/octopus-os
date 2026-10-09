@@ -1172,6 +1172,19 @@ int main(int argc, char **argv)
 		return 0;
 	setsid();
 	setpriority(PRIO_PROCESS, 0, -10);
+	/* Let go of what we were started with: a terminal, chumby-audio's
+	 * lock (it would stay held as long as we play). stderr stays (the
+	 * journal, from the apps). */
+	{
+		int fd = open("/dev/null", O_RDWR);
+
+		if (fd >= 0) {
+			dup2(fd, 0);
+			dup2(fd, 1);
+		}
+		for (fd = 3; fd < 256; fd++)
+			close(fd);
+	}
 	mkdir(dir, 0755);
 	f = fopen(pid_path, "w");
 	if (f) {
