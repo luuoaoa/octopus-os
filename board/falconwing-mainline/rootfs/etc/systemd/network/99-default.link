@@ -1,0 +1,9 @@
+# Keep the kernel's interface names (wlan0, eth0): systemd's predictable
+# names would make the USB WiFi "wlu1u2", and wpa_supplicant@wlan0 /
+# udhcpc@wlan0 would wait for a wlan0 that never appears.
+[Match]
+OriginalName=*
+
+[Link]
+NamePolicy=keep kernel
+MACAddressPolicy=persistent
