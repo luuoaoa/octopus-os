@@ -270,9 +270,19 @@ static void edit_delete_cb(lv_event_t *e)
 	list_show();
 }
 
+/*
+ * In the app's 208 px: the buttons along the top, then the time with each
+ * number's + over - beside it (outside: [+-] HH : MM [+-]), then the days.
+ */
+#define STEP_W		56
+#define DIGITS_W	72
+#define COLON_W		28
+#define STEP_Y		54			/* under the top row */
+#define DAYS_H		44
+
 static lv_obj_t *step_button(const char *sym, int which, int x, int y)
 {
-	lv_obj_t *b = button(view_edit, sym, &lv_font_montserrat_28, 100, BAR_H,
+	lv_obj_t *b = button(view_edit, sym, &lv_font_montserrat_28, STEP_W, BAR_H,
 			     step_cb, (void *)(intptr_t)which);
 
 	lv_obj_add_event_cb(b, step_cb, LV_EVENT_LONG_PRESSED_REPEAT,
@@ -284,7 +294,11 @@ static lv_obj_t *step_button(const char *sym, int which, int x, int y)
 static void build_edit(void)
 {
 	lv_obj_t *b, *colon, *h_up, *h_down, *m_up, *m_down;
-	const int col1 = 16, col2 = CHUMBY_APP_W - 16 - 100;
+	const int row_w = 2 * (STEP_W + 6 + DIGITS_W) + COLON_W;
+	const int x0 = (CHUMBY_APP_W - row_w) / 2;
+	const int hour_x = x0 + STEP_W + 6, min_x = hour_x + DIGITS_W + COLON_W;
+	const int down_y = STEP_Y + BAR_H + 4;
+	const int days_y = down_y + BAR_H + 10;
 
 	b = button(view_edit, LV_SYMBOL_CLOSE, &lv_font_montserrat_28, 56, BAR_H,
 		   edit_cancel_cb, NULL);
@@ -297,20 +311,20 @@ static void build_edit(void)
 	lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 	lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -GAP, 4);
 
-	h_up = step_button(LV_SYMBOL_PLUS, 1, col1, 52);
-	h_down = step_button(LV_SYMBOL_MINUS, -1, col1, 140);
-	m_up = step_button(LV_SYMBOL_PLUS, 2, col2, 52);
-	m_down = step_button(LV_SYMBOL_MINUS, -2, col2, 140);
+	h_up = step_button(LV_SYMBOL_PLUS, 1, x0, STEP_Y);
+	h_down = step_button(LV_SYMBOL_MINUS, -1, x0, down_y);
+	m_up = step_button(LV_SYMBOL_PLUS, 2, min_x + DIGITS_W + 6, STEP_Y);
+	m_down = step_button(LV_SYMBOL_MINUS, -2, min_x + DIGITS_W + 6, down_y);
 
 	lbl_hour = label(view_edit, CHUMBY_FONT_XL, CHUMBY_COLOR_TEXT);
-	lv_obj_set_width(lbl_hour, 100);
+	lv_obj_set_width(lbl_hour, DIGITS_W);
 	lv_obj_set_style_text_align(lbl_hour, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_pos(lbl_hour, col1, 0);
+	lv_obj_set_pos(lbl_hour, hour_x, 0);
 	chumby_center_y_between(lbl_hour, h_up, h_down);
 	lbl_min = label(view_edit, CHUMBY_FONT_XL, CHUMBY_COLOR_TEXT);
-	lv_obj_set_width(lbl_min, 100);
+	lv_obj_set_width(lbl_min, DIGITS_W);
 	lv_obj_set_style_text_align(lbl_min, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_pos(lbl_min, col2, 0);
+	lv_obj_set_pos(lbl_min, min_x, 0);
 	chumby_center_y_between(lbl_min, m_up, m_down);
 	colon = label(view_edit, CHUMBY_FONT_XL, CHUMBY_COLOR_TEXT_DIM);
 	lv_label_set_text(colon, ":");
@@ -318,9 +332,9 @@ static void build_edit(void)
 	chumby_center_y_between(colon, h_up, h_down);
 
 	b = lv_button_create(view_edit);
-	lv_obj_set_size(b, CHUMBY_APP_W - 2 * 16, 44);
+	lv_obj_set_size(b, row_w, DAYS_H);
 	lv_obj_set_style_radius(b, 12, 0);
-	lv_obj_set_pos(b, 16, 190);
+	lv_obj_set_pos(b, x0, days_y);
 	lv_obj_add_event_cb(b, days_cb, LV_EVENT_CLICKED, NULL);
 	lbl_days = lv_label_create(b);
 	lv_obj_center(lbl_days);
