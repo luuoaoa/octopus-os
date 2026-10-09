@@ -1,0 +1,32 @@
+From: chumby <chumby@localhost>
+Subject: [PATCH] wayland: don't let a stale touch point take a new contact's up
+
+touch_handle_up() releases the first *pressed* point with the contact's
+id, whatever surface it is on. A point whose up never arrives (its
+surface was destroyed mid-touch, e.g. a popup window closed under the
+finger) stays pressed in the seat's list forever; on single-touch
+hardware every later contact has the same id, so each later up releases
+that dead point instead, and the new point stays pressed. The window it
+is on then reads "pressed" for good and ignores all taps.
+
+A down for an id means any earlier contact with that id is over, so
+drop pressed points with that id before adding the new one.
+
+--- a/src/drivers/wayland/lv_wayland_touch.c
++++ b/src/drivers/wayland/lv_wayland_touch.c
+@@ -208,6 +208,15 @@
+     tdata->touches[i].state     = LV_INDEV_STATE_PRESSED;
+     tdata->event_cnt++;
+ #else
++    /* A down reuses the id of a contact that is over: drop any point still
++     * pressed with it (its up never came, e.g. its surface was destroyed
++     * mid-touch). Left in the list, it would take this contact's up, and
++     * this point would stay pressed forever. */
++    lv_wl_touch_point_t * stale;
++    while((stale = get_pressed_touch_point(tdata, id)) != NULL) {
++        touch_point_delete(tdata, stale);
++    }
++
+     lv_wl_touch_point_t * touch_point = lv_ll_ins_tail(&tdata->touch_point_ll);
+     LV_ASSERT_MALLOC(touch_point);
+     if(!touch_point) {

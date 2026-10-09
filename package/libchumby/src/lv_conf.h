@@ -812,7 +812,7 @@
  *  - LV_LOG_LEVEL_USER: only logs added by the user
  *  - LV_LOG_LEVEL_NONE: nothing is logged
  */
-#define LV_LOG_LEVEL LV_LOG_LEVEL_WARN
+#define LV_LOG_LEVEL LV_LOG_LEVEL_ERROR	/* chumby: WARN floods the journal (e.g. every drag off a window) */
 
 /** If not set, the user needs to register a callback with lv_log_register_print_cb(). */
 #define LV_LOG_PRINTF 1

@@ -212,9 +212,15 @@
 			};
 
 			/* 4-wire resistive touchscreen on LRADC (vendor: X+ ch2,
-			 * Y+ ch3), plus the general-purpose ADC channels. */
+			 * Y+ ch3), plus the general-purpose ADC channels.
+			 * Settling and averaging above the driver's defaults (5 ms,
+			 * 4 samples): with those, a press often began or ended on
+			 * a half-scale reading (plate not yet/no longer in contact),
+			 * a jump to mid-screen that sent the tap to the wrong window. */
 			lradc@80050000 {
 				fsl,lradc-touchscreen-wires = <4>;
+				fsl,settling = <20>;	/* 0.5 ms units: 10 ms */
+				fsl,ave-ctrl = <8>;
 				status = "okay";
 			};
 
