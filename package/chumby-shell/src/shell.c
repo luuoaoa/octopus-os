@@ -9,8 +9,8 @@
  *     installed apps, to start or bring up one
  *   popup (app_id "chumby-popup", under the bar, transient): the volume
  *     or brightness slider, opened from the bar or the knob
- *   home (app_id "chumby-home", behind all apps): the same list, seen
- *     only while no app runs
+ * With no app running there is nothing under the bar but chumby-wm's
+ * backdrop: the menu is the way in.
  *
  * Apps come from one ".app" descriptor each in /usr/share/chumby/apps.
  *
@@ -403,7 +403,7 @@ static void launch(struct app_info *a)
 #define STOP_SIZE	36	/* the volume control's stop button */
 static void stop_btn_cb(lv_event_t *e);
 
-static lv_obj_t *panel_scr, *home_scr;
+static lv_obj_t *panel_scr;
 static lv_obj_t *btn_home, *btn_vol, *btn_bri, *bar_clock;
 /* The clock's own tab, at the far right: the time, or "Clock" while the
  * clock app is in front. */
@@ -1170,71 +1170,12 @@ static void build_panel(lv_obj_t *scr)
 	bar_clock_update();
 }
 
-/* ------------------------------------------------------------------ */
-/* Home: installed apps                                               */
-
-#define HOME_GAP	10
-
-static void tile_cb(lv_event_t *e)
-{
-	launch(lv_event_get_user_data(e));
-}
-
-static void build_home(lv_obj_t *scr)
-{
-	lv_obj_t *grid;
-	int i;
-
-	lv_obj_set_scrollable(scr, false);
-	grid = lv_obj_create(scr);
-	lv_obj_remove_style_all(grid);
-	lv_obj_set_size(grid, LV_PCT(100), LV_PCT(100));
-	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_style_pad_all(grid, HOME_GAP, 0);
-	lv_obj_set_style_pad_gap(grid, HOME_GAP, 0);
-	lv_obj_set_scroll_dir(grid, LV_DIR_VER);
-
-	for (i = 0; i < n_apps; i++) {
-		lv_obj_t *tile, *pair, *ic, *nm;
-
-		if (is_clock(apps[i].id))	/* the tab at the right */
-			continue;
-		tile = lv_button_create(grid);
-		/* Two big tiles per row. */
-		lv_obj_set_size(tile, (CHUMBY_APP_W - 3 * HOME_GAP) / 2, 84);
-		lv_obj_set_style_radius(tile, CORNER_R, 0);
-		lv_obj_add_event_cb(tile, tile_cb, LV_EVENT_CLICKED, &apps[i]);
-		/* Icon over name, the pair centred in the tile. */
-		pair = chumby_group(tile, LV_FLEX_FLOW_COLUMN, 8);
-		lv_obj_align(pair, LV_ALIGN_TOP_MID, 0, 0);
-
-		ic = lv_label_create(pair);
-		lv_label_set_text(ic, apps[i].icon);
-		lv_obj_set_style_text_font(ic, chumby_icon_font(28), 0);
-		lv_obj_set_style_text_color(ic, chumby_accent(apps[i].color), 0);
-
-		nm = lv_label_create(pair);
-		lv_label_set_text(nm, apps[i].name);
-		lv_obj_set_style_text_color(nm, chumby_color(CHUMBY_COLOR_TEXT), 0);
-		chumby_center_y_on(pair, tile);
-	}
-	if (!n_apps) {
-		lv_obj_t *l = lv_label_create(grid);
-
-		lv_label_set_text(l, "No apps installed in " APPS_DIR);
-	}
-}
-
 /* Rebuild the styled parts when day/night flips (colors are per mode). */
 static void on_mode(chumby_mode_t mode, void *user)
 {
 	const struct chumby_policy *p = chumby_policy();
 
 	(void)user;
-	if (home_scr) {
-		lv_obj_clean(home_scr);
-		build_home(home_scr);
-	}
 	if (panel_scr)
 		build_panel(panel_scr);
 	/* Apply the policy brightness on each switch (and at start); the
@@ -1418,8 +1359,15 @@ static void alarm_publish(void)
 
 static void tone_stop(void)
 {
-	if (tone_pid > 0)
+	int i;
+
+	if (tone_pid > 0) {
 		kill(tone_pid, SIGTERM);
+		/* Gone (and the sound card free) before what it paused resumes:
+		 * FM's aplay doesn't retry a busy card. A second at most. */
+		for (i = 0; i < 50 && waitpid(tone_pid, NULL, WNOHANG) == 0; i++)
+			usleep(20 * 1000);
+	}
 	tone_pid = -1;
 	if (volume_before >= 0) {
 		volume_pct = volume_before;
@@ -1470,7 +1418,12 @@ static void alarm_snooze(void)
 {
 	if (alarm_state != CHUMBY_ALARM_RINGING)
 		return;
+	char *release_argv[] = { "chumby-audio", "release", "alarm", NULL };
+
 	tone_stop();
+	/* What played before it, back on until it rings again (which pauses
+	 * it again). */
+	chumby_spawn(AUDIO, release_argv);
 	alarm_state = CHUMBY_ALARM_SNOOZED;
 	snooze_until = time(NULL) + chumby_policy()->snooze_minutes * 60;
 	alarm_publish();
@@ -1712,26 +1665,24 @@ static void volume_sync_cb(lv_timer_t *t)
 
 int main(void)
 {
-	lv_display_t *panel, *home;
+	lv_display_t *panel;
 
 	chumby_init();
 	load_apps();
 	ftl_init();
 
-	home = chumby_window_create("chumby-home", CHUMBY_APP_W, CHUMBY_APP_H);
 	panel = chumby_window_create("chumby-panel", CHUMBY_SCREEN_W, CHUMBY_BAR_H);
-	if (!home || !panel) {
+	if (!panel) {
 		fprintf(stderr, "chumby-shell: cannot create windows\n");
 		return 1;
 	}
-	home_scr = lv_display_get_screen_active(home);
 	panel_scr = lv_display_get_screen_active(panel);
 
 	popup_timer = lv_timer_create(popup_timer_cb, POPUP_IDLE_MS, NULL);
 	lv_timer_pause(popup_timer);
 	menu_timer = lv_timer_create(menu_timer_cb, MENU_IDLE_MS, NULL);
 	lv_timer_pause(menu_timer);
-	/* Builds the bar and home, sets the brightness. */
+	/* Builds the bar, sets the brightness. */
 	chumby_on_mode_change(on_mode, NULL);
 	lv_timer_create(bar_clock_cb, 1000, NULL);
 
