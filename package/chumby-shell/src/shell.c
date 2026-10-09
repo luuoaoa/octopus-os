@@ -371,9 +371,9 @@ static void launch(struct app_info *a)
  * switch, hold one to close its app.
  *
  * Before them, the Home button: like Windows' Start button it isn't a
- * place but a menu. It drops the list of apps down from the bar, button
- * and menu filled in one piece like volume and brightness; picking one
- * starts it or brings it up. The app in front stays until then.
+ * place but a menu. A plain icon, it opens the list of apps as a card
+ * just under the bar; picking one starts it or brings it up. The app in
+ * front stays until then.
  *
  * At the right end: volume, brightness and the time. Volume and
  * brightness drop their slider down from the bar, under them; their
@@ -388,6 +388,7 @@ static void launch(struct app_info *a)
 #define TAB_FOOT	10	/* drawn below the bar, clipped */
 #define LINE_H		2
 #define TAB_GAP		3
+#define CORNER_R	8	/* every corner: the screen's (chumby-wm), tabs, plates */
 #define TAB_TITLE_MAX	80
 #define POPUP_IDLE_MS	4000
 
@@ -436,7 +437,7 @@ static bool tl_alive(struct toplevel *t)
  * filled): switching never nudges its neighbours. */
 static void tab_style(lv_obj_t *b, bool on)
 {
-	lv_obj_set_style_radius(b, 7, 0);
+	lv_obj_set_style_radius(b, CORNER_R, 0);
 	lv_obj_set_style_bg_color(b, chumby_color(on ? CHUMBY_COLOR_ACCENT
 						     : CHUMBY_COLOR_SURFACE), 0);
 	lv_obj_set_style_bg_opa(b, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
@@ -521,7 +522,7 @@ static void popup_close(void);
 #define MENU_ROW_H	44
 #define MENU_PAD	6
 #define MENU_IDLE_MS	8000
-#define MENU_RADIUS	10
+#define MENU_RADIUS	CORNER_R
 
 static lv_display_t *menu_disp;
 static lv_timer_t *menu_timer;
@@ -566,8 +567,7 @@ static void join_fillet(int x, int right, int r)
 
 static void bar_join_update(void)
 {
-	lv_obj_t *b = menu_disp ? btn_home :
-		      popup_kind == POPUP_VOLUME ? btn_vol :
+	lv_obj_t *b = popup_kind == POPUP_VOLUME ? btn_vol :
 		      popup_kind == POPUP_BRIGHTNESS ? btn_bri : NULL;
 	lv_obj_t *next;
 	lv_area_t a;
@@ -593,19 +593,14 @@ static void bar_join_update(void)
 	join_fillet(a.x2 + 1, 1, r_right);
 }
 
-/* Filled while its menu is open. */
+/* A plain icon, menu open or not: not a tab, no border, no fill (its
+ * menu is a card of its own under the bar). */
 static void home_style(void)
 {
-	bool open = menu_disp != NULL;
-
 	if (!btn_home)
 		return;
-	tab_style(btn_home, open);
-	if (open)	/* like volume and brightness: not the app tab's accent */
-		lv_obj_set_style_bg_color(btn_home, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	else		/* a plain icon at rest, not a tab: no border */
-		lv_obj_set_style_border_opa(btn_home, LV_OPA_TRANSP, 0);
-	bar_join_update();
+	tab_style(btn_home, false);
+	lv_obj_set_style_border_opa(btn_home, LV_OPA_TRANSP, 0);
 }
 
 static void menu_close(void)
@@ -641,7 +636,7 @@ static void menu_row_cb(lv_event_t *e)
 static void menu_open(void)
 {
 	int h = (n_apps ? n_apps : 1) * (MENU_ROW_H + 4) - 4 + 2 * MENU_PAD;
-	lv_obj_t *scr, *plate, *corner, *row, *l;
+	lv_obj_t *scr, *plate, *row, *l;
 	int i;
 
 	popup_close();
@@ -658,13 +653,7 @@ static void menu_open(void)
 	lv_obj_set_scrollable(scr, false);
 	lv_obj_set_style_bg_opa(scr, LV_OPA_TRANSP, 0);
 
-	/* The open Home button's color, one piece with it through the line:
-	 * rounded but for the top left corner, where it hangs from it. */
-	corner = lv_obj_create(scr);
-	lv_obj_remove_style_all(corner);
-	lv_obj_set_size(corner, MENU_RADIUS, MENU_RADIUS);
-	lv_obj_set_style_bg_opa(corner, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(corner, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	/* A card of its own, rounded all round, in the highlight shade. */
 	plate = lv_obj_create(scr);
 	lv_obj_remove_style_all(plate);
 	lv_obj_set_size(plate, MENU_W, h);
@@ -970,7 +959,7 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_BRIGHTNESS);
 	box = bar_box(tray);
-	lv_obj_set_style_pad_left(box, 6, 0);
+	lv_obj_set_style_pad_left(box, 2, 0);	/* close to the tray, like its buttons */
 	lv_obj_set_style_pad_right(box, 6, 0);	/* clear of the screen's edge */
 	bar_clock = lv_label_create(box);
 	lv_label_set_text(bar_clock, "");
@@ -1020,7 +1009,7 @@ static void build_home(lv_obj_t *scr)
 
 		/* Two big tiles per row. */
 		lv_obj_set_size(tile, (CHUMBY_APP_W - 3 * HOME_GAP) / 2, 84);
-		lv_obj_set_style_radius(tile, 12, 0);
+		lv_obj_set_style_radius(tile, CORNER_R, 0);
 		lv_obj_add_event_cb(tile, tile_cb, LV_EVENT_CLICKED, &apps[i]);
 		/* Icon over name, the pair centred in the tile. */
 		pair = chumby_group(tile, LV_FLEX_FLOW_COLUMN, 8);

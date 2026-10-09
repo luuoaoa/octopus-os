@@ -9,8 +9,8 @@
  *   "chumby-popup"  the shell's transient controls (volume, brightness):
  *                   POPUP_W x POPUP_H, dropping down from the bar's right
  *                   end, above apps, below the bar
- *   "chumby-menu"   the shell's app menu (its Home button): dropping down
- *                   from the bar's left end, sized by the shell
+ *   "chumby-menu"   the shell's app menu (its Home button): a card under
+ *                   the bar's left end, sized by the shell
  *   "chumby-home"   the app list, behind every app (background layer)
  *   "chumby-calibrate"  the touchscreen calibration tool: the whole
  *                   screen, above everything
@@ -90,6 +90,7 @@
 #define CAL_FILE	CAL_DIR "/" CAL_NAME
 #define MAX_TOUCH	10
 #define CORNER_R	8	/* the screen's rounded corners */
+#define MENU_GAP	4	/* the app menu card, from the edge and the bar */
 
 enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_MENU, VIEW_CAL,
 		 VIEW_APP };
@@ -178,8 +179,9 @@ static void view_configure(struct view *v)
 		wlr_xdg_toplevel_set_size(v->xdg, s->width, s->height);
 		break;
 	case VIEW_MENU:
-		/* Its size is the shell's: as tall as its list of apps. */
-		wlr_scene_node_set_position(&v->tree->node, 0, BAR_H);
+		/* Its size is the shell's: as tall as its list of apps. A
+		 * card just under the bar, clear of the screen's edge. */
+		wlr_scene_node_set_position(&v->tree->node, MENU_GAP, BAR_H + MENU_GAP);
 		wlr_xdg_toplevel_set_size(v->xdg, 0, 0);
 		break;
 	case VIEW_HOME:
