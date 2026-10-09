@@ -1,6 +1,7 @@
 #!/bin/bash
 # Assemble sdcard.img: stock boot partition with our kernel in krnA, the
-# ext4 rootfs and the FAT config partition.
+# ext4 carrier (early boot + rootfs.squashfs + persistent data) and the
+# FAT config partition.
 set -euo pipefail
 
 BOARD_DIR="$(dirname "$0")"
@@ -50,6 +51,48 @@ dd if="${KERNEL}" of="${BOOT_IMG}" bs=1 seek="${KRN_OFF}" conv=notrunc status=no
 
 rm -rf "${BINARIES_DIR}/config"
 cp -r "${FW_DIR}/config-partition" "${BINARIES_DIR}/config"
+
+# p2, the "carrier": early boot (busybox + its libraries + /sbin/init-ram),
+# the system image (rootfs.squashfs, copied into RAM at boot) and the
+# persistent data (/data/var, bound onto /var). See carrier/sbin/init-ram.
+CARRIER="${BUILD_DIR}/carrier"
+rm -rf "${CARRIER}"
+mkdir -p "${CARRIER}"/{bin,lib,dev,proc,ram,data/var}
+cp -a "${BOARD_DIR}/carrier/." "${CARRIER}/"
+cp "${TARGET_DIR}/bin/busybox" "${CARRIER}/bin/"
+for applet in sh mount umount cp mkdir pivot_root chroot; do
+	ln -sf busybox "${CARRIER}/bin/${applet}"
+done
+
+READELF=$(ls "${HOST_DIR}"/bin/*-readelf | head -n 1)
+find_lib() {
+	for d in lib usr/lib; do
+		[ -e "${TARGET_DIR}/${d}/$1" ] && { echo "${TARGET_DIR}/${d}/$1"; return; }
+	done
+	echo "ERROR: $1 (needed by busybox) not in the target" >&2
+	exit 1
+}
+copy_with_deps() {
+	local f dep
+	for dep in $("${READELF}" -d "$1" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+		[ -e "${CARRIER}/lib/${dep}" ] && continue
+		f=$(find_lib "${dep}")
+		cp -L "${f}" "${CARRIER}/lib/${dep}"
+		copy_with_deps "${CARRIER}/lib/${dep}"
+	done
+}
+copy_with_deps "${CARRIER}/bin/busybox"
+INTERP=$("${READELF}" -l "${CARRIER}/bin/busybox" | sed -n 's/.*interpreter: \(.*\)\]/\1/p')
+cp -L "$(find_lib "$(basename "${INTERP}")")" "${CARRIER}${INTERP}"
+
+cp "${BINARIES_DIR}/rootfs.squashfs" "${CARRIER}/rootfs.squashfs"
+cp -a "${TARGET_DIR}/var/." "${CARRIER}/data/var/"
+echo "carrier: rootfs.squashfs $(stat -c %s "${CARRIER}/rootfs.squashfs") bytes," \
+	"early boot $(du -sk "${CARRIER}/bin" "${CARRIER}/lib" | awk '{s+=$1} END {print s}') KiB"
+
+rm -f "${BINARIES_DIR}/carrier.ext4"
+"${HOST_DIR}/sbin/mkfs.ext4" -q -F -L chumby -E root_owner=0:0 \
+	-d "${CARRIER}" "${BINARIES_DIR}/carrier.ext4" 256M
 
 trap 'rm -rf "${ROOTPATH_TMP}"' EXIT
 ROOTPATH_TMP="$(mktemp -d)"

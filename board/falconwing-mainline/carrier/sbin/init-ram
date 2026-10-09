@@ -1,0 +1,52 @@
+#!/bin/busybox sh
+#
+# Early boot for the Chumby One: run the system from RAM.
+#
+# The stock bootloader can only load the kernel slot, so there is no
+# separate initramfs. Instead the kernel mounts SD partition 2 (this
+# "carrier" filesystem: busybox, its libraries, this script, the system
+# image and persistent data) as root and runs us (init=/sbin/init-ram):
+#
+#   1. copy /rootfs.squashfs into a tmpfs - after this the system never
+#      reads the SD card except for /var
+#   2. loop-mount it, with a tmpfs overlay on top (the root is writable;
+#      changes are lost at reboot - settings are re-applied every boot
+#      from the FAT config partition)
+#   3. bind /data/var (persistent, on this partition) onto /var
+#   4. pivot into it - this partition stays mounted at /media/sd - and
+#      exec systemd
+#
+# On any failure we drop to a shell on the console.
+
+PATH=/bin
+export PATH
+
+fail() {
+	echo "init-ram: $*" >/dev/console
+	echo "init-ram: dropping to a shell" >/dev/console
+	exec /bin/busybox sh </dev/console >/dev/console 2>&1
+}
+
+mount -t proc proc /proc
+[ -e /dev/console ] || mount -t devtmpfs devtmpfs /dev
+
+mount -t tmpfs -o mode=0755 ram /ram || fail "cannot mount the RAM tmpfs"
+echo "init-ram: loading the system into RAM" >/dev/console
+cp /rootfs.squashfs /ram/rootfs.squashfs || fail "cannot copy rootfs.squashfs (out of RAM?)"
+mkdir -p /ram/lower /ram/upper /ram/work /ram/root
+mount -t squashfs -o loop,ro /ram/rootfs.squashfs /ram/lower ||
+	fail "cannot mount rootfs.squashfs"
+mount -t overlay overlay \
+	-o lowerdir=/ram/lower,upperdir=/ram/upper,workdir=/ram/work /ram/root ||
+	fail "cannot mount the overlay"
+
+mkdir -p /data/var
+mount --bind /data/var /ram/root/var || fail "cannot bind /data/var"
+
+umount /proc
+mount --move /dev /ram/root/dev || fail "cannot move /dev"
+cd /ram/root || fail "no new root"
+mkdir -p media/sd
+pivot_root . media/sd || exec /bin/busybox sh </ram/root/dev/console >/ram/root/dev/console 2>&1
+# Our busybox now lives under the old root, at /media/sd.
+exec /media/sd/bin/busybox chroot . /sbin/init "$@" <dev/console >dev/console 2>&1

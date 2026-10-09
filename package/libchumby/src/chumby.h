@@ -10,7 +10,7 @@
  *     the system policy (/etc/chumby/policy.conf, default 19:00-07:00)
  *   - volume / brightness / screen power helpers and a main loop that can
  *     watch extra fds
- *   - alarms (/etc/chumby/alarms.conf), rung by the shell
+ *   - alarms (/var/lib/chumby/alarms.conf), rung by the shell
  *
  * Minimal app:
  *
@@ -136,9 +136,11 @@ const struct chumby_policy *chumby_policy(void);
 /* Is the local time now in [start, end) (minutes, may wrap midnight)? */
 bool chumby_in_window(int start, int end);
 /*
- * Is the clock set? There's no RTC battery: after a power cut the time
- * starts in 1970 until NTP syncs. Time-of-day policy (night mode, screen
- * off, alarms) must not act on that.
+ * Is the clock set? There's no RTC battery: after a power cut the time is
+ * wrong (1970, or timesyncd's last saved time) until NTP syncs. True once
+ * timesyncd has synchronised, or when the RTC holds a real date (it kept
+ * running across a reboot). Time-of-day policy (night mode, screen off,
+ * alarms) must not act on a wrong clock.
  */
 bool chumby_time_valid(void);
 
@@ -160,7 +162,7 @@ bool chumby_screen_is_on(void);
 int chumby_spawn(const char *path, char *const argv[]);
 
 /*
- * Alarms. /etc/chumby/alarms.conf, one per line: "06:30 MTWTF-- on"
+ * Alarms. /var/lib/chumby/alarms.conf, one per line: "06:30 MTWTF-- on"
  * (days Monday..Sunday, '-' = not that day, "once" = next occurrence
  * only). The clock app edits them; the shell rings them, so they go off
  * whatever app is open.

@@ -22,7 +22,7 @@
 # If tuning works but nothing is received, create an empty "fmradio_xclk"
 # file on the CHUMBY config partition (clocks the tuner from the SoC PWM3).
 
-STATION_FILE=/etc/radio.station
+STATION_FILE=/var/lib/chumby/radio.station
 PIDFILE=/var/run/radio-loop.pid
 PCM=plughw:0,0
 RDS_PIDFILE=/var/run/radio-rds.pid

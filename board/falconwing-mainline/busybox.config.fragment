@@ -1,5 +1,0 @@
-# Busybox additions for falconwing-mainline on top of buildroot's default.
-#
-# Network time: the Chumby has no RTC battery, so after a power cut the
-# clock starts at 1970 until ntpd syncs (see /etc/init.d/S45ntp).
-CONFIG_NTPD=y

@@ -14,7 +14,7 @@
 #include <sys/wait.h>
 #include <chumby.h>
 
-#define STATION_FILE	"/etc/radio.station"
+#define STATION_FILE	"/var/lib/chumby/radio.station"
 #define RADIO_PIDFILE	"/var/run/radio-loop.pid"
 #define FREQ_MIN	876	/* tenths of MHz */
 #define FREQ_MAX	1080

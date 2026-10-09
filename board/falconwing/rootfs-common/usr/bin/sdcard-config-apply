@@ -35,6 +35,11 @@ strip() {
 unix() { tr -d '\r' < "$1"; }
 
 WPA=/etc/wpa_supplicant.conf
+# Under systemd, wpa_supplicant@wlan0 reads its own path.
+if [ -d /run/systemd/system ]; then
+    WPA=/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+    mkdir -p /etc/wpa_supplicant
+fi
 
 if ! mountpoint -q "$BOOT"; then
     mount "$BOOT" 2>/dev/null || { log "no config partition at $BOOT; nothing to apply"; exit 0; }

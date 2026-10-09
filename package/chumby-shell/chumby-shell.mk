@@ -29,4 +29,9 @@ define CHUMBY_SHELL_INSTALL_INIT_SYSV
 		$(TARGET_DIR)/etc/init.d/S95chumby-session
 endef
 
+define CHUMBY_SHELL_INSTALL_INIT_SYSTEMD
+	$(INSTALL) -D -m 0644 $(CHUMBY_SHELL_PKGDIR)/chumby-session.service \
+		$(TARGET_DIR)/usr/lib/systemd/system/chumby-session.service
+endef
+
 $(eval $(generic-package))

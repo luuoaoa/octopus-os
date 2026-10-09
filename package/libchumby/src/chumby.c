@@ -22,7 +22,7 @@
 extern char **environ;
 
 #define POLICY_FILE	"/etc/chumby/policy.conf"
-#define ALARMS_FILE	"/etc/chumby/alarms.conf"
+#define ALARMS_FILE	"/var/lib/chumby/alarms.conf"
 #define RUN_DIR		"/run/chumby"
 #define BACKLIGHT	"/sys/class/backlight/backlight/"
 #define CPU_GOVERNOR	"/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
@@ -113,9 +113,29 @@ bool chumby_in_window(int start, int end)
 	return now >= start && now < end;
 }
 
+/*
+ * No RTC battery: after a power cut the RTC restarts near 1970, and
+ * timesyncd moves the system clock to its last saved time - plausible but
+ * stale - until it reaches a server. So trust timesyncd's sync flag, or
+ * the RTC itself: it only holds a real date if it kept running (a reboot)
+ * or the kernel wrote synchronised time into it (CONFIG_RTC_SYSTOHC).
+ */
+#define TIME_VALID_AFTER	1704067200	/* 2024-01-01 */
+
 bool chumby_time_valid(void)
 {
-	return time(NULL) >= 1704067200;	/* 2024-01-01 */
+	long long rtc = 0;
+	FILE *f;
+
+	if (access("/run/systemd/timesync/synchronized", F_OK) == 0)
+		return true;
+	f = fopen("/sys/class/rtc/rtc0/since_epoch", "r");
+	if (!f)
+		return time(NULL) >= TIME_VALID_AFTER;	/* no RTC: best guess */
+	if (fscanf(f, "%lld", &rtc) != 1)
+		rtc = 0;
+	fclose(f);
+	return rtc >= TIME_VALID_AFTER;
 }
 
 static chumby_mode_t policy_mode_now(void)

@@ -1,0 +1,4 @@
+# WiFi is wpa_supplicant@wlan0 (linked in post-fakeroot.sh). The generic
+# D-Bus wpa_supplicant.service would take the same control directory and
+# cost RAM for nothing.
+disable wpa_supplicant.service

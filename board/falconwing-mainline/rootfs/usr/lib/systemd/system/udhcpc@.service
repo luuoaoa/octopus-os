@@ -1,0 +1,17 @@
+[Unit]
+Description=DHCP client on %i
+# busybox udhcpc: addresses, routes and /etc/resolv.conf through
+# /usr/share/udhcpc/default.script, in a fraction of networkd's RAM.
+BindsTo=sys-subsystem-net-devices-%i.device
+After=sys-subsystem-net-devices-%i.device wpa_supplicant@%i.service
+Before=network-online.target
+Wants=network.target
+Before=network.target
+
+[Service]
+ExecStart=/bin/sh -c 'exec /sbin/udhcpc -f -i %i -x hostname:"$(hostname)"'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

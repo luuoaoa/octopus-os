@@ -1,0 +1,16 @@
+[Unit]
+Description=Apply settings from the CHUMBY config partition (/boot)
+# WiFi, hostname, timezone, root password, SSH keys: the root runs from
+# RAM, so this re-applies them on every boot.
+DefaultDependencies=no
+After=local-fs.target
+RequiresMountsFor=/boot
+Before=wpa_supplicant@wlan0.service dropbear.service chumby-session.service sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/sdcard-config-apply
+
+[Install]
+WantedBy=sysinit.target

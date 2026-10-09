@@ -8,11 +8,14 @@ TARGET_DIR="$1"
 # writes dropbear's args.
 mkdir -p "${TARGET_DIR}/boot" "${TARGET_DIR}/etc/default"
 
-# Host keys persist on the rw ext4 rootfs (buildroot defaults to tmpfs).
-if [ -L "${TARGET_DIR}/etc/dropbear" ]; then
-    rm -f "${TARGET_DIR}/etc/dropbear"
-fi
-mkdir -p "${TARGET_DIR}/etc/dropbear"
+# The root runs from RAM: SSH host keys live on the persistent /var
+# (dropbear.service.d/30-chumby.conf creates the directory).
+rm -rf "${TARGET_DIR}/etc/dropbear"
+ln -sfn /var/lib/dropbear "${TARGET_DIR}/etc/dropbear"
+mkdir -p "${TARGET_DIR}/var/lib/chumby"
+
+# systemd units replace the shared overlay's sysvinit scripts.
+rm -f "${TARGET_DIR}"/etc/init.d/S[0-9]*
 
 GIT_DIR="${BR2_EXTERNAL_PIFANSRF_PATH:-.}"
 COMMIT=unknown

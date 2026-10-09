@@ -5,7 +5,7 @@
 
 case "$1" in
   start)
-	/usr/sbin/sdcard-config-apply
+	/usr/bin/sdcard-config-apply
 	;;
   stop)
 	;;

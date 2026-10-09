@@ -29,7 +29,9 @@
 		 * rootfstype=ext3) is for the vendor kernel; ARM_ATAG_DTB_COMPAT
 		 * is off, so these bootargs are used instead.
 		 */
-		bootargs = "console=ttyAMA0,115200 earlyprintk root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw";
+		/* p2 only carries the early boot and the rootfs image: init-ram
+		 * moves the system into RAM, then starts systemd. */
+		bootargs = "console=ttyAMA0,115200 earlyprintk root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw init=/sbin/init-ram";
 		stdout-path = &duart;
 	};
 

@@ -15,9 +15,49 @@ bash docker-build.sh falconwing-mainline
 # -> output-falconwing-mainline/images/sdcard.img
 ```
 
-Same card layout and FAT config partition as `board/falconwing`
-(network-config / user-data / authorized_keys); the userland scripts are
-shared via `board/falconwing/rootfs-common`.
+Same FAT config partition as `board/falconwing` (network-config /
+user-data / authorized_keys; the apply script is shared via
+`board/falconwing/rootfs-common`), but systemd, and the system runs from
+RAM.
+
+## Running from RAM
+
+The stock bootloader only loads the kernel slot, so there is no separate
+initramfs. SD partition 2 is a small ext4 "carrier" instead:
+
+```
+/sbin/init-ram       early boot (busybox sh), init= in the DT bootargs
+/bin, /lib           busybox and the libraries it needs
+/rootfs.squashfs     the whole system, zstd (64 KiB blocks)
+/data/var            the persistent /var
+```
+
+The kernel mounts it as root and runs `init-ram`, which copies
+`rootfs.squashfs` into a tmpfs, loop-mounts it under a tmpfs overlay
+(writable; changes are lost at reboot), binds `/data/var` onto `/var`,
+pivots (the carrier stays at `/media/sd`) and execs systemd. After that
+the card is only written through `/var`: alarms and the last FM station
+(`/var/lib/chumby`), SSH host keys (`/etc/dropbear` -> `/var/lib/dropbear`),
+timesyncd's clock. Everything in `/etc` that is configurable (WiFi,
+hostname, timezone, password, SSH keys) is re-applied every boot from the
+FAT partition by `chumby-config.service`. The journal is in RAM (2 MB).
+
+RAM cost: the squashfs (see the post-image log line "carrier:") plus
+whatever is written to the overlay; pages of it decompress on demand.
+
+## systemd
+
+Lean for 64 MB: no networkd, resolved, hwdb, hostnamed, timedated.
+
+| Unit | Does |
+|---|---|
+| `chumby-config.service` | applies the FAT config partition (before WiFi, SSH, UI) |
+| `wpa_supplicant@wlan0` + `udhcpc@wlan0` | WiFi (busybox udhcpc writes resolv.conf) |
+| `systemd-timesyncd` | NTP; the kernel copies synced time into the RTC |
+| `dropbear.service` | SSH |
+| `chumby-session.service` | chumby-wm + chumby-shell + apps (one cgroup) |
+| `serial-getty@ttyAMA0` | console |
+| PID 1 | feeds the hardware watchdog (`RuntimeWatchdogSec=15s`) |
 
 ## What's in the kernel
 
@@ -25,7 +65,7 @@ shared via `board/falconwing/rootfs-common`.
 |---|---|
 | Debug UART (PWM0/1) | `ttyAMA0`, 115200; `DEBUG_LL` + `earlyprintk` |
 | Watchdog (armed for 20 s by the bootloader) | patch 0001: core keeps it fed until userspace opens it |
-| microSD (SSP1) | `mxs-mmc`, root on `mmcblk0p2` (ext4) |
+| microSD (SSP1) | `mxs-mmc`, `mmcblk0p2` is the carrier (see below) |
 | RTC | `stmp3xxx-rtc` |
 | USB host + internal wifi | ChipIdea + mxs PHY; power/reset lines as GPIO hogs/regulator; `rt2800usb`/`rt73usb` |
 | I2C | `i2c-mxs`, QN8005 tuner at **0x2b** (7-bit) |
@@ -130,8 +170,8 @@ Sized for the resistive touchscreen: every touch target is at least 42 px
   after 10 min. Commands go to the FIFO `/run/chumby/shell.cmd`:
   `echo snooze|stop|ring|volume|brightness > /run/chumby/shell.cmd`
   (handy over ssh; `ring` tests the alarm).
-  Started with the compositor by `/etc/init.d/S95chumby-session` (log in
-  /var/log/chumby-session.log).
+  Started with the compositor by `chumby-session.service` (logs:
+  `journalctl -u chumby-session`).
 - **libchumby** (package/libchumby): the framework every app links. LVGL
   9.6 on Wayland (wl_shm); Rockbox's Nimbus bitmap fonts as the only
   text font (14 px body, 19 px headings, 35 px big values, 35 px at 2x
@@ -149,7 +189,7 @@ Sized for the resistive touchscreen: every touch target is at least 42 px
   edit, On/Off on the right, + to add (up to 8). The editor has big
   + / − for hour and minute (hold the minute buttons to step by 5) and a
   Repeat button cycling Once / Every day / Weekdays / Weekends. Stored in
-  `/etc/chumby/alarms.conf` (`06:30 MTWTF-- on`, editable by hand; other
+  `/var/lib/chumby/alarms.conf` (`06:30 MTWTF-- on`, editable by hand; other
   day sets work, the UI just can't make them). While an alarm rings the
   Clock shows Snooze / Stop over everything.
 

@@ -45,7 +45,7 @@ The stock config block's active slot is A: `krnA` with
   for root).
 - `authorized_keys` — optional, installed as root's SSH keys.
 
-Applied every boot by `/usr/sbin/sdcard-config-apply`. SSH is dropbear,
+Applied every boot by `/usr/bin/sdcard-config-apply`. SSH is dropbear,
 `root` / `root` by default. Host keys persist on the ext3 rootfs.
 
 ## Boot sequence
