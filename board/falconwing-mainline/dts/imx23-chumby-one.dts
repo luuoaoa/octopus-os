@@ -260,11 +260,16 @@
 		};
 	};
 
-	/* Vendor: 24 MHz / 64 / 600 = 625 Hz, active high, brightness^2 curve. */
+	/*
+	 * Vendor: 24 MHz / 64 / 600 = 625 Hz, active high. Levels: the panel
+	 * is barely readable at 16 % duty (checked on hardware; 7 % is not),
+	 * so level 1 starts there and each step is ~18 % brighter. Off is
+	 * bl_power, not level 0.
+	 */
 	backlight: backlight {
 		compatible = "pwm-backlight";
 		pwms = <&pwm 2 1600000 0>;
-		brightness-levels = <0 1 2 4 7 11 16 23 32 43 56 72 100>;
+		brightness-levels = <0 16 19 22 26 31 36 43 51 60 71 84 100>;
 		default-brightness-level = <10>;
 	};
 
