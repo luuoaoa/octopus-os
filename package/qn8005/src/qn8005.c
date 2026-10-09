@@ -17,12 +17,14 @@
  *   init [--xclk]     power up and initialise (receive mode, muted -> unmuted)
  *   tune <MHz>        tune, e.g. "tune 100.3"
  *   mute | unmute
+ *   sleep | wake      standby (tuning kept) / back to receiving
  *   mono | stereo
  *   rssi              print the RSSI of the current channel
  *   freq              print the current frequency
  *   scan [us|eu|jp]   software scan of the band, print channels above threshold
  *   rds <file>        keep decoding RDS (station name, RadioText, RT+
  *                     title/artist) into <file> until killed
+ *   rdsdebug [secs]   each RDS group's status and blocks, and a count
  *   r <reg> | w <reg> <val> | dump
  */
 
@@ -458,6 +460,7 @@ static void usage(void)
 	fprintf(stderr,
 		"usage: qn8005 [-d /dev/i2c-N] [-a addr] <command>\n"
 		"  init [--xclk] | tune <MHz> | mute | unmute | mono | stereo\n"
+		"  sleep | wake\n"
 		"  rssi | freq | scan [us|eu|jp] | rds <file> | rdsdebug [secs]\n"
 		"  r <reg> | w <reg> <val> | dump\n");
 	exit(2);
@@ -502,6 +505,11 @@ int main(int argc, char **argv)
 			usage();
 		f = parse_mhz(argv[optind]);
 		ret = f < 0 ? -1 : tune(f);
+	} else if (!strcmp(cmd, "sleep")) {
+		/* QND_SetSysMode(QND_MODE_SLEEP): standby, tuning kept */
+		ret = setbits(0x00, 0xd0, 0x10);
+	} else if (!strcmp(cmd, "wake")) {
+		ret = set_rx_mode();
 	} else if (!strcmp(cmd, "mute") || !strcmp(cmd, "unmute")) {
 		ret = wr(0x52, cmd[0] == 'm' ? 0x0c : 0x00);
 	} else if (!strcmp(cmd, "mono") || !strcmp(cmd, "stereo")) {

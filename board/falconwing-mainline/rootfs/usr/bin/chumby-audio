@@ -1,0 +1,67 @@
+#!/bin/sh
+# chumby-audio: one sound source at a time.
+#
+#   chumby-audio play <source>      <source> starts playing: every other
+#                                   source that plays stops for good
+#   chumby-audio duck <source>      <source> needs the sound for a while
+#                                   (an alarm): the others pause...
+#   chumby-audio release <source>   ...and resume once it's done
+#   chumby-audio list               the sources, and which play
+#
+# Sources are executables in /usr/share/chumby/audio.d/<name> (fm,
+# stream, ...), each taking stop | pause | resume | active (exit status:
+# playing?). A source calls "play" itself as it starts; its "resume"
+# mustn't (we hold the lock then).
+
+D=/usr/share/chumby/audio.d
+S=${CHUMBY_RUN_DIR:-/run/chumby}/audio
+
+mkdir -p "$S"
+exec 9>"$S/lock"
+flock -w 20 9 || { echo "chumby-audio: busy" >&2; exit 1; }
+
+others() {
+	for src in "$D"/*; do
+		[ -x "$src" ] || continue
+		[ "${src##*/}" = "$1" ] && continue
+		echo "$src"
+	done
+}
+
+case "$1" in
+	play)
+		[ -n "$2" ] || exit 2
+		for src in $(others "$2"); do
+			"$src" active && "$src" stop
+		done
+		rm -f "$S/paused"	# nothing to come back to now
+		echo "$2" > "$S/current"
+		;;
+	duck)
+		[ -n "$2" ] || exit 2
+		for src in $(others "$2"); do
+			if "$src" active && "$src" pause; then
+				echo "${src##*/}" >> "$S/paused"
+			fi
+		done
+		;;
+	release)
+		[ -f "$S/paused" ] || exit 0
+		for name in $(cat "$S/paused"); do
+			[ -x "$D/$name" ] && "$D/$name" resume
+		done
+		rm -f "$S/paused"
+		;;
+	list)
+		for src in "$D"/*; do
+			[ -x "$src" ] || continue
+			if "$src" active; then st=playing; else st=-; fi
+			echo "${src##*/} $st"
+		done
+		[ -f "$S/paused" ] && echo "paused: $(cat "$S/paused" | tr '\n' ' ')"
+		;;
+	*)
+		sed -n '2,/^$/s/^# \{0,1\}//p' "$0"
+		exit 2
+		;;
+esac

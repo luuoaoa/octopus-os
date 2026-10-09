@@ -51,9 +51,7 @@
 #define MAX_APPS	16
 #define CLOCK_ID	"Clock"		/* app the snooze button brings up */
 #define ALARM_TONE	"/usr/bin/chumby-alarm-tone"
-#define RADIO		"/usr/bin/radio"
-#define RADIO_PIDFILE	"/var/run/radio-loop.pid"
-#define STREAM		"/usr/bin/chumby-stream"	/* internet radio */
+#define AUDIO		"/usr/bin/chumby-audio"	/* who plays: see there */
 #define CALIBRATE	"/usr/bin/chumby-calibrate"
 #define CAL_FILE	"/var/lib/chumby/touch.cal"	/* its result */
 #define RING_MAX_S	(10 * 60)	/* give up ringing after this */
@@ -1229,19 +1227,6 @@ static void alarm_publish(void)
 	rename(tmp, path);
 }
 
-static bool radio_playing(void)
-{
-	FILE *f = fopen(RADIO_PIDFILE, "r");
-	int pid = 0;
-
-	if (!f)
-		return false;
-	if (fscanf(f, "%d", &pid) != 1)
-		pid = 0;
-	fclose(f);
-	return pid > 0 && kill(pid, 0) == 0;
-}
-
 static void tone_stop(void)
 {
 	if (tone_pid > 0)
@@ -1268,8 +1253,7 @@ static void alarm_ring(void)
 {
 	const struct chumby_policy *p = chumby_policy();
 	char *tone_argv[] = { "chumby-alarm-tone", NULL };
-	char *radio_argv[] = { "radio", "off", NULL };
-	char *stream_argv[] = { "chumby-stream", "stop", NULL };
+	char *duck_argv[] = { "chumby-audio", "duck", "alarm", NULL };
 	int v;
 
 	if (alarm_state == CHUMBY_ALARM_RINGING)
@@ -1277,11 +1261,10 @@ static void alarm_ring(void)
 	alarm_state = CHUMBY_ALARM_RINGING;
 	ring_started = time(NULL);
 	snooze_until = 0;
-	/* The radio (FM or a stream) holds the sound card; the tone retries
-	 * until it's free. */
-	if (radio_playing())
-		chumby_spawn(RADIO, radio_argv);
-	chumby_spawn(STREAM, stream_argv);
+	/* Whatever plays (FM, a stream) pauses for the alarm, and resumes
+	 * once it's dismissed (chumby-audio); the tone retries until the
+	 * sound card is free. */
+	chumby_spawn(AUDIO, duck_argv);
 	v = chumby_volume_get();
 	if (v >= 0 && v < p->alarm_volume) {
 		volume_before = v;
@@ -1306,7 +1289,12 @@ static void alarm_snooze(void)
 
 static void alarm_stop(void)
 {
+	char *release_argv[] = { "chumby-audio", "release", "alarm", NULL };
+	bool was = alarm_state != CHUMBY_ALARM_IDLE;
+
 	tone_stop();
+	if (was)	/* what played before it, back on */
+		chumby_spawn(AUDIO, release_argv);
 	alarm_state = CHUMBY_ALARM_IDLE;
 	snooze_until = 0;
 	alarm_publish();

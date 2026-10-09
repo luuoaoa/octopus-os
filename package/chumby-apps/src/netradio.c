@@ -2,17 +2,23 @@
 /*
  * chumby-netradio: internet radio, laid out like the FM app:
  *
- *   top right   the station list
- *   middle      station logo | station name
- *   title       what's playing (the stream's ICY title), or how it's going;
- *               scrolls when too long
- *   bottom      previous station, play/stop, next station
+ *   left        station logo
+ *   right       station name
+ *               its category, and the stream's codec and bitrate where FM
+ *               has its signal bars
+ *               what's playing (the stream's ICY title) or how it's going,
+ *               its baseline on the logo's bottom edge
+ *   bottom      station list, previous station, play/stop, next station
  *
- * Stations: "name | stream URL | logo URL" lines in
- * /var/lib/chumby/streams.conf, else the defaults in
- * /usr/share/chumby/streams.conf. Logos are fetched once into
- * /var/lib/chumby/art; a note on a gradient tile until then (or when
- * there is none).
+ * The name and what's playing scroll twice when they change (if too long),
+ * then stop, cut with dots.
+ *
+ * Stations: "name | stream URL | logo URL" lines under "[Category]"
+ * headers in /var/lib/chumby/streams.conf, else the defaults in
+ * /usr/share/chumby/streams.conf. The list shows the categories as
+ * tiles, then a category's stations: few enough per screen not to
+ * scroll much. Logos are fetched once into /var/lib/chumby/art; a note on
+ * a gradient tile until then (or when there is none).
  *
  * chumby-stream does the playing, in the background: it carries on when
  * this app closes, and tells us how it's doing through $run_dir/stream.
@@ -36,28 +42,41 @@
 #define CURL		"/usr/bin/curl"
 #define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"
 #define MAX_STATIONS	64
+#define MAX_CATS	16
+#define ART_X		14
 #define ART_SIZE	92
 #define ART_PAD		8
+#define COL_X		(ART_X + ART_SIZE + 12)	/* the right column */
+#define COL_W		(CHUMBY_APP_W - 10 - COL_X)
+#define SMALL_BTN	38
+#define INFO_W		70			/* "AAC 320k" */
 #define START_GRACE_MS	4000	/* a stream just started: no status yet */
+#define TILE_H		44
+#define TILE_GAP	6
+#define LIST_HEAD_H	30
 
 struct station {
 	char name[64];
 	char url[512];
 	char logo[512];
+	int cat;
 	bool logo_tried;	/* fetched (or failed) this run */
 };
 
 static struct station stations[MAX_STATIONS];
 static int n_stations, cur;
+static char cats[MAX_CATS][32];
+static int n_cats;
 static bool playing;			/* we want it on (corrected by status) */
 static uint64_t start_grace_until;
-static char st_state[16], st_url[512], st_title[256];
+static char st_state[16], st_url[512], st_title[256], st_codec[8];
+static int st_bitrate;
 static char message[96];
-static int logo_child = -1, logo_station = -1;
+static int logo_child = -1, logo_station = -1, stream_child = -1;
 static char logo_tmp[300];
 
-static lv_obj_t *scr, *lbl_name, *lbl_title, *art_tile, *art_img, *art_note;
-static lv_obj_t *btn_play, *lbl_play, *btn_prev, *btn_next, *btn_list;
+static lv_obj_t *scr, *lbl_name, *lbl_cat, *lbl_info, *lbl_song, *art_tile, *art_img, *art_note;
+static lv_obj_t *btn_play, *btn_prev, *btn_next, *btn_list;
 static lv_obj_t *list_panel;
 static lv_timer_t *switch_timer;
 
@@ -81,20 +100,41 @@ static char *trim(char *s)
 	return s;
 }
 
+static int cat_index(const char *name)
+{
+	int i;
+
+	for (i = 0; i < n_cats; i++)
+		if (!strcmp(cats[i], name))
+			return i;
+	if (n_cats == MAX_CATS)
+		return n_cats - 1;
+	snprintf(cats[n_cats], sizeof(cats[0]), "%s", name);
+	return n_cats++;
+}
+
 static void load_stations(void)
 {
 	FILE *f = fopen(STATIONS_USER, "r");
 	char line[1200], *a, *b, *c;
+	int cat = -1;
 
 	if (!f)
 		f = fopen(STATIONS_DEFAULT, "r");
-	n_stations = 0;
+	n_stations = n_cats = 0;
 	while (f && n_stations < MAX_STATIONS && fgets(line, sizeof(line), f)) {
 		struct station *s = &stations[n_stations];
 
 		a = trim(line);
 		if (!*a || *a == '#')
 			continue;
+		if (*a == '[') {			/* [Category] */
+			b = strchr(a, ']');
+			if (b)
+				*b = '\0';
+			cat = cat_index(trim(a + 1));
+			continue;
+		}
 		b = strchr(a, '|');
 		if (!b)
 			continue;
@@ -107,6 +147,9 @@ static void load_stations(void)
 		snprintf(s->url, sizeof(s->url), "%s", trim(b));
 		if (c)
 			snprintf(s->logo, sizeof(s->logo), "%s", trim(c));
+		if (cat < 0)
+			cat = cat_index("Stations");
+		s->cat = cat;
 		if (s->url[0])
 			n_stations++;
 	}
@@ -265,44 +308,38 @@ static bool stream_is_current(void)
 	return n_stations && st_url[0] && !strcmp(st_url, stations[cur].url);
 }
 
-static void title_update(void)
-{
-	char text[300];
-	bool cur_stream = stream_is_current();
-
-	if (message[0])
-		snprintf(text, sizeof(text), "%s", message);
-	else if (!playing)
-		snprintf(text, sizeof(text), "%s", "");
-	else if (cur_stream && !strcmp(st_state, "playing") && st_title[0])
-		snprintf(text, sizeof(text), "%s", st_title);
-	else if (cur_stream && !strcmp(st_state, "playing"))
-		snprintf(text, sizeof(text), "%s", "");
-	else if (cur_stream && !strcmp(st_state, "error"))
-		snprintf(text, sizeof(text), "%s", "can't reach the station, retrying...");
-	else
-		snprintf(text, sizeof(text), "%s", "connecting...");
-	if (strcmp(lv_label_get_text(lbl_title), text)) {
-		chumby_label_scroll_speed(lbl_title, text, CHUMBY_SCROLL_SPEED);
-		lv_label_set_text(lbl_title, text);
-	}
-}
-
 static void ui_update(void)
 {
-	lv_label_set_text(lbl_name, n_stations ? stations[cur].name : "No stations");
-	lv_label_set_text(lbl_play, playing ? LV_SYMBOL_STOP : LV_SYMBOL_PLAY);
+	const char *song = "";
+	char info[24] = "";
+	bool live = playing && stream_is_current();
+
+	if (message[0])
+		song = message;
+	else if (live && !strcmp(st_state, "playing"))
+		song = st_title;
+	else if (live && !strcmp(st_state, "error"))
+		song = "can't reach the station, retrying...";
+	else if (playing)
+		song = "connecting...";
+	chumby_scroll_label_set(lbl_name, n_stations ? stations[cur].name : "No stations");
+	chumby_scroll_label_set(lbl_song, song);
+	lv_label_set_text(lbl_cat, n_stations ? cats[stations[cur].cat] : "");
+	if (live && st_codec[0] && st_bitrate > 0)
+		snprintf(info, sizeof(info), "%s %dk", st_codec, st_bitrate);
+	else if (live && st_codec[0])
+		snprintf(info, sizeof(info), "%s", st_codec);
+	if (strcmp(lv_label_get_text(lbl_info), info))
+		lv_label_set_text(lbl_info, info);
+	lv_label_set_text(lv_obj_get_child(btn_play, 0), playing ? LV_SYMBOL_STOP : LV_SYMBOL_PLAY);
 	if (playing)
 		lv_obj_add_state(btn_play, LV_STATE_CHECKED);
 	else
 		lv_obj_remove_state(btn_play, LV_STATE_CHECKED);
-	title_update();
 }
 
 /* chumby-stream stops the old stream (up to a second), then forks into
  * the background: reaped in poll_cb, so the UI never waits. */
-static int stream_child = -1;
-
 static void stream_run(char **argv)
 {
 	int pid = chumby_spawn(STREAM_TOOL, argv);
@@ -321,7 +358,8 @@ static void stream_start(void)
 	start_grace_until = mono_ms() + START_GRACE_MS;
 	snprintf(st_url, sizeof(st_url), "%s", stations[cur].url);
 	snprintf(st_state, sizeof(st_state), "connecting");
-	st_title[0] = '\0';
+	st_title[0] = st_codec[0] = '\0';
+	st_bitrate = 0;
 }
 
 static void stream_stop(void)
@@ -330,13 +368,15 @@ static void stream_stop(void)
 
 	stream_run(argv);
 	start_grace_until = mono_ms() + START_GRACE_MS;
-	st_url[0] = st_state[0] = st_title[0] = '\0';
+	st_url[0] = st_state[0] = st_title[0] = st_codec[0] = '\0';
+	st_bitrate = 0;
 }
 
 /* What chumby-stream says. */
 static void status_read(void)
 {
-	char path[256], line[600], state[16] = "", url[512] = "", title[256] = "";
+	char path[256], line[600], state[16] = "", url[512] = "", title[256] = "", codec[8] = "";
+	int bitrate = 0;
 	FILE *f;
 
 	snprintf(path, sizeof(path), "%s/stream", chumby_run_dir());
@@ -349,6 +389,10 @@ static void status_read(void)
 			snprintf(url, sizeof(url), "%.511s", line + 4);
 		else if (!strncmp(line, "title=", 6))
 			snprintf(title, sizeof(title), "%.255s", line + 6);
+		else if (!strncmp(line, "codec=", 6))
+			snprintf(codec, sizeof(codec), "%.7s", line + 6);
+		else if (!strncmp(line, "bitrate=", 8))
+			bitrate = atoi(line + 8);
 	}
 	if (f)
 		fclose(f);
@@ -357,19 +401,20 @@ static void status_read(void)
 		 * started and not up yet. */
 		if (playing && mono_ms() > start_grace_until) {
 			playing = false;
-			st_url[0] = st_state[0] = st_title[0] = '\0';
+			st_url[0] = st_state[0] = st_title[0] = st_codec[0] = '\0';
+			st_bitrate = 0;
 			ui_update();
 		}
 		return;
 	}
-	if (!playing && mono_ms() > start_grace_until) {
-		playing = true;		/* started elsewhere */
-		ui_update();
-	}
+	if (!playing && mono_ms() > start_grace_until)
+		playing = true;		/* started (or resumed) elsewhere */
 	snprintf(st_state, sizeof(st_state), "%s", state);
 	snprintf(st_url, sizeof(st_url), "%s", url);
 	snprintf(st_title, sizeof(st_title), "%s", title);
-	title_update();
+	snprintf(st_codec, sizeof(st_codec), "%s", codec);
+	st_bitrate = bitrate;
+	ui_update();
 }
 
 static void poll_cb(lv_timer_t *t)
@@ -434,7 +479,9 @@ static void play_cb(lv_event_t *e)
 }
 
 /* ------------------------------------------------------------------ */
-/* Station list                                                       */
+/* Station list: categories, then a category's stations, as tiles     */
+
+static void list_show(int cat);
 
 static void list_close(void)
 {
@@ -449,11 +496,14 @@ static void list_close_async(void *user)
 	list_close();
 }
 
-static void list_row_cb(lv_event_t *e)
+static void list_show_async(void *cat)
 {
-	int i = (int)(intptr_t)lv_event_get_user_data(e);
+	list_show((int)(intptr_t)cat);
+}
 
-	cur = i;
+static void station_tile_cb(lv_event_t *e)
+{
+	cur = (int)(intptr_t)lv_event_get_user_data(e);
 	save_current();
 	lv_timer_pause(switch_timer);
 	message[0] = '\0';
@@ -466,43 +516,123 @@ static void list_row_cb(lv_event_t *e)
 	lv_async_call(list_close_async, NULL);	/* not from inside its own event */
 }
 
-static void list_open(void)
+static void cat_tile_cb(lv_event_t *e)
 {
-	lv_obj_t *row, *l;
-	int i;
+	lv_async_call(list_show_async, lv_event_get_user_data(e));
+}
 
+static void back_cb(lv_event_t *e)
+{
+	(void)e;
+	lv_async_call(list_show_async, (void *)(intptr_t)-1);
+}
+
+static void close_cb(lv_event_t *e)
+{
+	(void)e;
+	lv_async_call(list_close_async, NULL);
+}
+
+static lv_obj_t *tile(lv_obj_t *parent, const char *text, const char *sub, bool on)
+{
+	lv_obj_t *b = lv_button_create(parent), *l;
+
+	lv_obj_set_size(b, (CHUMBY_APP_W - 3 * 8) / 2, TILE_H);
+	lv_obj_set_style_radius(b, 8, 0);
+	lv_obj_set_style_shadow_width(b, 0, 0);
+	lv_obj_set_style_pad_hor(b, 8, 0);
+	lv_obj_set_style_bg_color(b, chumby_color(on ? CHUMBY_COLOR_ACCENT : CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_text_color(b, chumby_color(on ? CHUMBY_COLOR_BG : CHUMBY_COLOR_TEXT), 0);
+	l = lv_label_create(b);
+	lv_label_set_text(l, text);
+	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_width(l, (CHUMBY_APP_W - 3 * 8) / 2 - 16 - (sub ? 24 : 0));
+	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
+	/* Up to two lines (a tile has room), the rest cut with dots. */
+	lv_obj_update_layout(l);
+	if (lv_obj_get_height(l) > 2 * lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE))) {
+		lv_obj_set_height(l, 2 * lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE)));
+		lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
+	}
+	lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
+	if (sub) {
+		l = lv_label_create(b);
+		lv_label_set_text(l, sub);
+		lv_obj_set_style_text_color(l, chumby_color(on ? CHUMBY_COLOR_BG : CHUMBY_COLOR_TEXT_DIM), 0);
+		lv_obj_align(l, LV_ALIGN_RIGHT_MID, 0, 0);
+	}
+	return b;
+}
+
+/* cat < 0: the categories; else that category's stations. */
+static void list_show(int cat)
+{
+	lv_obj_t *head, *grid, *l, *b;
+	char sub[8];
+	int i, n;
+
+	list_close();
 	list_panel = lv_obj_create(scr);
 	lv_obj_remove_style_all(list_panel);
 	lv_obj_set_size(list_panel, CHUMBY_APP_W, CHUMBY_APP_H);
 	lv_obj_set_style_bg_opa(list_panel, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(list_panel, chumby_color(CHUMBY_COLOR_BG), 0);
-	lv_obj_set_flex_flow(list_panel, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_all(list_panel, 8, 0);
-	lv_obj_set_style_pad_right(list_panel, 8 + CHUMBY_TOUCH_MIN, 0);	/* the list button */
-	lv_obj_set_style_pad_row(list_panel, 4, 0);
-	lv_obj_set_scroll_dir(list_panel, LV_DIR_VER);
-	/* The list button stays on top, to close it. */
-	lv_obj_move_foreground(btn_list);
+	lv_obj_set_scrollable(list_panel, false);
 
-	for (i = 0; i < n_stations; i++) {
-		row = lv_button_create(list_panel);
-		lv_obj_set_size(row, LV_PCT(100), CHUMBY_TOUCH_MIN + 2);
-		lv_obj_set_style_radius(row, 8, 0);
-		lv_obj_set_style_shadow_width(row, 0, 0);
-		lv_obj_set_style_bg_color(row, chumby_color(i == cur ? CHUMBY_COLOR_ACCENT
-								  : CHUMBY_COLOR_SURFACE), 0);
-		lv_obj_set_style_text_color(row, chumby_color(i == cur ? CHUMBY_COLOR_BG
-								    : CHUMBY_COLOR_TEXT), 0);
-		lv_obj_add_event_cb(row, list_row_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-		l = lv_label_create(row);
-		lv_label_set_text(l, stations[i].name);
-		lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
-		lv_obj_set_width(l, LV_PCT(100));
-		lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
-		lv_obj_align(l, LV_ALIGN_LEFT_MID, 4, 0);
+	/* Header: where we are (tap it to go back up), and close. */
+	head = lv_button_create(list_panel);
+	lv_obj_remove_style_all(head);
+	lv_obj_set_size(head, CHUMBY_APP_W - 8 - CHUMBY_TOUCH_MIN, LIST_HEAD_H + 4);
+	lv_obj_set_pos(head, 8, 0);
+	l = lv_label_create(head);
+	lv_label_set_text_fmt(l, "%s%s", cat < 0 ? "" : LV_SYMBOL_LEFT "  ",
+			      cat < 0 ? "Stations" : cats[cat]);
+	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
+	if (cat >= 0)
+		lv_obj_add_event_cb(head, back_cb, LV_EVENT_CLICKED, NULL);
+	b = lv_button_create(list_panel);
+	lv_obj_remove_style_all(b);
+	lv_obj_set_size(b, CHUMBY_TOUCH_MIN, LIST_HEAD_H + 4);
+	lv_obj_align(b, LV_ALIGN_TOP_RIGHT, 0, 0);
+	l = lv_label_create(b);
+	lv_label_set_text(l, LV_SYMBOL_CLOSE);
+	lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_center(l);
+	lv_obj_add_event_cb(b, close_cb, LV_EVENT_CLICKED, NULL);
+
+	grid = lv_obj_create(list_panel);
+	lv_obj_remove_style_all(grid);
+	lv_obj_set_size(grid, CHUMBY_APP_W, CHUMBY_APP_H - LIST_HEAD_H - 4);
+	lv_obj_set_pos(grid, 0, LIST_HEAD_H + 4);
+	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+	lv_obj_set_style_pad_hor(grid, 8, 0);
+	lv_obj_set_style_pad_bottom(grid, 8, 0);
+	lv_obj_set_style_pad_gap(grid, TILE_GAP, 0);
+	lv_obj_set_style_pad_column(grid, 8, 0);
+	lv_obj_set_scroll_dir(grid, LV_DIR_VER);
+
+	if (cat < 0) {
+		for (i = 0; i < n_cats; i++) {
+			int j;
+
+			for (j = n = 0; j < n_stations; j++)
+				n += stations[j].cat == i;
+			snprintf(sub, sizeof(sub), "%d", n);
+			b = tile(grid, cats[i], sub, n_stations && stations[cur].cat == i);
+			lv_obj_add_event_cb(b, cat_tile_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+		}
+		return;
 	}
-	if (cur < n_stations && cur > 2)
-		lv_obj_scroll_to_view(lv_obj_get_child(list_panel, cur), LV_ANIM_OFF);
+	for (i = 0; i < n_stations; i++) {
+		if (stations[i].cat != cat)
+			continue;
+		b = tile(grid, stations[i].name, NULL, i == cur);
+		lv_obj_add_event_cb(b, station_tile_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+		if (i == cur)
+			lv_obj_scroll_to_view(b, LV_ANIM_OFF);
+	}
 }
 
 static void list_cb(lv_event_t *e)
@@ -510,8 +640,8 @@ static void list_cb(lv_event_t *e)
 	(void)e;
 	if (list_panel)
 		list_close();
-	else
-		list_open();
+	else	/* straight into the playing station's category */
+		list_show(n_cats > 1 && n_stations ? stations[cur].cat : -1);
 }
 
 /* ------------------------------------------------------------------ */
@@ -537,7 +667,9 @@ static void on_mode(chumby_mode_t mode, void *user)
 
 	(void)user;
 	lv_obj_set_style_text_color(lbl_name, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_style_text_color(lbl_title, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(lbl_cat, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(lbl_info, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(lbl_song, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 	lv_obj_set_style_text_color(art_note, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	/* A white logo tile would glare at night. */
 	lv_obj_set_style_opa(art_tile, mode == CHUMBY_MODE_NIGHT ? LV_OPA_50 : LV_OPA_COVER, 0);
@@ -547,36 +679,58 @@ static void on_mode(chumby_mode_t mode, void *user)
 	lv_obj_set_style_bg_color(btn_play, chumby_color(CHUMBY_COLOR_ACCENT), LV_STATE_CHECKED);
 	lv_obj_set_style_bg_color(btn_list, surface, LV_STATE_PRESSED);
 	lv_obj_set_style_text_color(btn_list, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_border_color(btn_list, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	if (!lv_obj_is_hidden(art_note))
 		art_show_note();	/* gradient in the new palette */
-	if (list_panel) {
+	if (list_panel)
 		list_close();
-		list_open();
-	}
+}
+
+/* Put a label's text baseline at y (in its parent). */
+static void baseline_at(lv_obj_t *l, int32_t y)
+{
+	const lv_font_t *f = lv_obj_get_style_text_font(l, 0);
+
+	lv_obj_set_y(l, y - (f->line_height - f->base_line));
 }
 
 int main(void)
 {
-	lv_obj_t *content, *middle;
+	lv_obj_t *row;
+	int32_t art_y;
 
 	scr = chumby_app_init("Internet Radio");
 	lv_obj_set_scrollable(scr, false);
 
-	/* Top right: the station list. */
-	btn_list = round_button(scr, LV_SYMBOL_LIST, CHUMBY_TOUCH_MIN, &lv_font_montserrat_14);
+	/* Bottom: the station list (small), previous, play/stop, next. */
+	row = lv_obj_create(scr);
+	lv_obj_remove_style_all(row);
+	lv_obj_set_scrollable(row, false);
+	lv_obj_set_size(row, CHUMBY_APP_W, 56);
+	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -8);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	btn_list = round_button(row, LV_SYMBOL_LIST, SMALL_BTN, &lv_font_montserrat_14);
 	lv_obj_set_style_bg_opa(btn_list, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_bg_opa(btn_list, LV_OPA_COVER, LV_STATE_PRESSED);
-	lv_obj_align(btn_list, LV_ALIGN_TOP_RIGHT, -4, 0);
+	lv_obj_set_style_border_width(btn_list, 1, 0);
+	lv_obj_set_style_border_opa(btn_list, LV_OPA_40, 0);
+	lv_obj_set_ext_click_area(btn_list, (CHUMBY_TOUCH_MIN - SMALL_BTN) / 2);
 	lv_obj_add_event_cb(btn_list, list_cb, LV_EVENT_CLICKED, NULL);
+	btn_prev = round_button(row, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
+	lv_obj_add_event_cb(btn_prev, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
+	btn_play = round_button(row, LV_SYMBOL_PLAY, 56, &lv_font_montserrat_28);
+	lv_obj_add_event_cb(btn_play, play_cb, LV_EVENT_CLICKED, NULL);
+	btn_next = round_button(row, LV_SYMBOL_NEXT, 52, &lv_font_montserrat_28);
+	lv_obj_add_event_cb(btn_next, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
+	lv_obj_update_layout(scr);
 
-	/* Content: logo on the left, the station's name on the right; what's
-	 * playing under both. */
-	content = chumby_group(scr, LV_FLEX_FLOW_COLUMN, 8);
-	middle = chumby_group(content, LV_FLEX_FLOW_ROW, 16);
-	lv_obj_set_width(middle, CHUMBY_APP_W - 24);
-	lv_obj_set_style_pad_left(middle, 2, 0);
-	art_tile = lv_obj_create(middle);
+	/* The logo, centred in the space above the buttons. */
+	art_y = (lv_obj_get_y(row) - ART_SIZE) / 2;
+	art_tile = lv_obj_create(scr);
 	lv_obj_remove_style_all(art_tile);
+	lv_obj_set_pos(art_tile, ART_X, art_y);
 	lv_obj_set_size(art_tile, ART_SIZE, ART_SIZE);
 	lv_obj_set_style_radius(art_tile, 10, 0);
 	lv_obj_set_style_bg_opa(art_tile, LV_OPA_COVER, 0);
@@ -590,50 +744,50 @@ int main(void)
 	lv_obj_set_style_text_font(art_note, &lv_font_montserrat_48, 0);
 	lv_obj_center(art_note);
 
-	lbl_name = lv_label_create(middle);
+	/* Right column, top: the station's name, level with the logo's top
+	 * (where FM's < frequency > row is). */
+	lbl_name = lv_label_create(scr);
 	lv_obj_set_style_text_font(lbl_name, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_flex_grow(lbl_name, 1);
-	lv_obj_set_style_pad_right(lbl_name, CHUMBY_TOUCH_MIN - 16, 0);
-	lv_label_set_long_mode(lbl_name, LV_LABEL_LONG_MODE_WRAP);
-	lv_obj_set_style_text_align(lbl_name, LV_TEXT_ALIGN_CENTER, 0);
-	lv_label_set_text(lbl_name, "");
+	lv_obj_set_width(lbl_name, COL_W);
+	lv_obj_set_x(lbl_name, COL_X);
+	chumby_scroll_label_init(lbl_name);
+	lv_obj_set_y(lbl_name, art_y + (SMALL_BTN - lv_obj_get_height(lbl_name)) / 2);
 
-	lbl_title = lv_label_create(content);
-	lv_obj_set_style_text_font(lbl_title, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_width(lbl_title, CHUMBY_APP_W - 24);
-	lv_label_set_long_mode(lbl_title, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
-	lv_obj_set_style_text_align(lbl_title, LV_TEXT_ALIGN_CENTER, 0);
-	lv_label_set_text(lbl_title, "");
-	lv_obj_align(content, LV_ALIGN_TOP_MID, 0, 0);
+	/* Bottom: what's playing, its baseline on the logo's bottom edge. */
+	lbl_song = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_song, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_width(lbl_song, COL_W);
+	lv_obj_set_x(lbl_song, COL_X);
+	chumby_scroll_label_init(lbl_song);
+	baseline_at(lbl_song, art_y + ART_SIZE);
 
-	/* Bottom: previous station, play/stop, next station. */
-	btn_play = round_button(scr, LV_SYMBOL_PLAY, 56, &lv_font_montserrat_28);
-	lbl_play = lv_obj_get_child(btn_play, 0);
-	lv_obj_align(btn_play, LV_ALIGN_BOTTOM_MID, 0, -8);
-	lv_obj_add_event_cb(btn_play, play_cb, LV_EVENT_CLICKED, NULL);
-
-	btn_prev = round_button(scr, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
-	lv_obj_align(btn_prev, LV_ALIGN_BOTTOM_LEFT, 22, 0);
-	chumby_center_y_on(btn_prev, btn_play);
-	lv_obj_add_event_cb(btn_prev, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
-
-	btn_next = round_button(scr, LV_SYMBOL_NEXT, 52, &lv_font_montserrat_28);
-	lv_obj_align(btn_next, LV_ALIGN_BOTTOM_RIGHT, -22, 0);
-	chumby_center_y_on(btn_next, btn_play);
-	lv_obj_add_event_cb(btn_next, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
-
-	lv_obj_update_layout(scr);
-	chumby_center_y_at(content, lv_obj_get_y(btn_play) / 2);
+	/* Between: the category, and the codec and bitrate at the right
+	 * (FM's signal bars), sharing a baseline. */
+	lbl_cat = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_cat, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_width(lbl_cat, COL_W - INFO_W - 6);
+	lv_obj_set_height(lbl_cat, lv_font_get_line_height(chumby_font(CHUMBY_FONT_BODY)));
+	lv_label_set_long_mode(lbl_cat, LV_LABEL_LONG_MODE_DOTS);
+	lv_obj_set_x(lbl_cat, COL_X);
+	lv_label_set_text(lbl_cat, "");
+	chumby_center_y_between(lbl_cat, lbl_name, lbl_song);
+	lbl_info = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_info, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_width(lbl_info, INFO_W);
+	lv_obj_set_style_text_align(lbl_info, LV_TEXT_ALIGN_RIGHT, 0);
+	lv_label_set_text(lbl_info, "");
+	lv_obj_set_x(lbl_info, COL_X + COL_W - INFO_W);
+	chumby_center_y_between(lbl_info, lbl_name, lbl_song);
 
 	switch_timer = lv_timer_create(switch_timer_cb, 600, NULL);
 	lv_timer_pause(switch_timer);
 
 	load_stations();
 	load_current();
+	chumby_on_mode_change(on_mode, NULL);
 	status_read();		/* already playing? which station? */
 	if (playing && station_by_url(st_url) >= 0)
 		cur = station_by_url(st_url);
-	chumby_on_mode_change(on_mode, NULL);
 	art_update();
 	ui_update();
 	lv_timer_create(poll_cb, 500, NULL);

@@ -503,6 +503,46 @@ void chumby_label_scroll_speed(lv_obj_t *label, const char *text, int px_per_s)
 				       LV_PART_MAIN);
 }
 
+/* LVGL's circular scroll with an animation template (2 repeats, a pause
+ * first), switched to dots once done. */
+static lv_anim_t scroll_twice;
+
+static void scroll_done_async(void *label)
+{
+	lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+}
+
+static void scroll_done(lv_anim_t *a)
+{
+	/* Not from inside the label's own animation. */
+	lv_async_call(scroll_done_async, a->var);
+}
+
+void chumby_scroll_label_init(lv_obj_t *l)
+{
+	if (!scroll_twice.completed_cb) {
+		lv_anim_init(&scroll_twice);
+		lv_anim_set_repeat_count(&scroll_twice, 2);
+		lv_anim_set_delay(&scroll_twice, 1500);		/* read the start first */
+		lv_anim_set_completed_cb(&scroll_twice, scroll_done);
+	}
+	/* One line, always: dots need a fixed height (else it wraps). */
+	lv_obj_set_height(l, lv_font_get_line_height(lv_obj_get_style_text_font(l, 0)));
+	lv_obj_set_style_anim(l, &scroll_twice, 0);
+	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+	lv_label_set_text(l, "");
+}
+
+void chumby_scroll_label_set(lv_obj_t *l, const char *text)
+{
+	if (!strcmp(lv_label_get_text(l), text))
+		return;
+	lv_anim_delete(l, NULL);	/* start over, from the beginning */
+	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+	chumby_label_scroll_speed(l, text, CHUMBY_SCROLL_SPEED);
+	lv_label_set_text(l, text);
+}
+
 static struct {
 	chumby_mode_cb_t cb;
 	void *user;

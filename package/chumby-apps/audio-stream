@@ -1,0 +1,6 @@
+#!/bin/sh
+# chumby-audio source: internet radio (see chumby-audio, chumby-stream).
+case "$1" in
+	stop | pause | resume | active) exec chumby-stream "$1" ;;
+	*) exit 2 ;;
+esac

@@ -154,6 +154,14 @@ bool chumby_logo_set(lv_obj_t *img, const char *path, int32_t box);
 #define CHUMBY_SCROLL_SPEED	20
 void chumby_label_scroll_speed(lv_obj_t *label, const char *text, int px_per_s);
 
+/*
+ * One-line labels that, given new text too long for them, scroll through
+ * it twice (after a pause, at CHUMBY_SCROLL_SPEED) and then stop, cut with
+ * dots. _init once (after setting the font), then _set the text.
+ */
+void chumby_scroll_label_init(lv_obj_t *label);
+void chumby_scroll_label_set(lv_obj_t *label, const char *text);
+
 /* Policy */
 const struct chumby_policy *chumby_policy(void);
 /* Is the local time now in [start, end) (minutes, may wrap midnight)? */

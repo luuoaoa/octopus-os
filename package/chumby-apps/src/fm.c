@@ -7,7 +7,7 @@
  *               station name (RDS, else call sign and city from the FCC
  *               lookup), signal bars (1-5, like a phone) on its baseline
  *               what's playing, its baseline on the art's bottom edge
- *   bottom      scan (hold), previous station, on/off, next station
+ *   bottom      scan (hold), previous station, play/stop, next station
  *
  * The name and what's playing scroll twice when they change and too long,
  * then stop, cut with dots.
@@ -195,49 +195,12 @@ static void signal_update(void)
 /* ------------------------------------------------------------------ */
 /* Title line and art                                                 */
 
-/*
- * A label that, given new text too long for it, scrolls through it twice
- * and then stops, cut with dots: LVGL's circular scroll with an animation
- * template (2 repeats, a pause first), switched to dots once done.
- */
-static lv_anim_t scroll_twice;
-
-static void scroll_done_async(void *label)
-{
-	lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
-}
-
-static void scroll_done(lv_anim_t *a)
-{
-	/* Not from inside the label's own animation. */
-	lv_async_call(scroll_done_async, a->var);
-}
-
-static void scroll_label_init(lv_obj_t *l)
-{
-	/* One line, always: dots need a fixed height (else it wraps). */
-	lv_obj_set_height(l, lv_font_get_line_height(lv_obj_get_style_text_font(l, 0)));
-	lv_obj_set_style_anim(l, &scroll_twice, 0);
-	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
-	lv_label_set_text(l, "");
-}
-
-static void scroll_label_set(lv_obj_t *l, const char *text)
-{
-	if (!strcmp(lv_label_get_text(l), text))
-		return;
-	lv_anim_delete(l, NULL);	/* start over, from the beginning */
-	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
-	chumby_label_scroll_speed(l, text, CHUMBY_SCROLL_SPEED);
-	lv_label_set_text(l, text);
-}
-
 /* Station name (RDS, else call sign); what's playing, or a transient
  * message. */
 static void title_update(void)
 {
-	scroll_label_set(lbl_name, rds_name[0] ? rds_name : call_name);
-	scroll_label_set(lbl_song, message[0] ? message : rds_now);
+	chumby_scroll_label_set(lbl_name, rds_name[0] ? rds_name : call_name);
+	chumby_scroll_label_set(lbl_song, message[0] ? message : rds_now);
 }
 
 static void art_show_note(void)
@@ -319,6 +282,8 @@ static void update_ui(const char *msg)
 	lv_label_set_text_fmt(lbl_freq, "%d.%d", freq / 10, freq % 10);
 	snprintf(message, sizeof(message), "%s", msg ? msg : "");
 	title_update();
+	/* Play / stop, like the internet radio. */
+	lv_label_set_text(lv_obj_get_child(btn_power, 0), radio_on ? LV_SYMBOL_STOP : LV_SYMBOL_PLAY);
 	if (radio_on)
 		lv_obj_add_state(btn_power, LV_STATE_CHECKED);
 	else
@@ -527,6 +492,11 @@ static void rds_show(void)
 static void rds_timer_cb(lv_timer_t *t)
 {
 	(void)t;
+	/* Stopped or paused elsewhere (a stream started, an alarm rings)? */
+	if (child <= 0 && radio_running() != radio_on) {
+		radio_on = !radio_on;
+		update_ui(NULL);
+	}
 	rds_show();
 }
 
@@ -602,10 +572,6 @@ int main(void)
 	int i;
 
 	lv_obj_set_scrollable(scr, false);
-	lv_anim_init(&scroll_twice);
-	lv_anim_set_repeat_count(&scroll_twice, 2);
-	lv_anim_set_delay(&scroll_twice, 1500);		/* read the start first */
-	lv_anim_set_completed_cb(&scroll_twice, scroll_done);
 
 	/* Bottom: scan (small, hold to scan), previous, power, next. */
 	row = lv_obj_create(scr);
@@ -626,7 +592,7 @@ int main(void)
 	lv_obj_add_event_cb(btn_scan, scan_cb, LV_EVENT_LONG_PRESSED, NULL);
 	btn_prev = round_button(row, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
 	lv_obj_add_event_cb(btn_prev, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
-	btn_power = round_button(row, LV_SYMBOL_POWER, 56, &lv_font_montserrat_28);
+	btn_power = round_button(row, LV_SYMBOL_PLAY, 56, &lv_font_montserrat_28);
 	lv_obj_set_checkable(btn_power, true);
 	lv_obj_add_event_cb(btn_power, power_cb, LV_EVENT_CLICKED, NULL);
 	btn_next = round_button(row, LV_SYMBOL_NEXT, 52, &lv_font_montserrat_28);
@@ -675,7 +641,7 @@ int main(void)
 	lv_obj_set_style_text_font(lbl_song, chumby_font(CHUMBY_FONT_LARGE), 0);
 	lv_obj_set_width(lbl_song, COL_W);
 	lv_obj_set_x(lbl_song, COL_X);
-	scroll_label_init(lbl_song);
+	chumby_scroll_label_init(lbl_song);
 	baseline_at(lbl_song, art_y + ART_SIZE);
 
 	/* Between them: the station's name, the signal bars on its baseline. */
@@ -683,7 +649,7 @@ int main(void)
 	lv_obj_set_style_text_font(lbl_name, chumby_font(CHUMBY_FONT_LARGE), 0);
 	lv_obj_set_width(lbl_name, COL_W - BARS_W - 6);
 	lv_obj_set_x(lbl_name, COL_X);
-	scroll_label_init(lbl_name);
+	chumby_scroll_label_init(lbl_name);
 	chumby_center_y_between(lbl_name, btn_down, lbl_song);
 
 	bars = lv_obj_create(scr);

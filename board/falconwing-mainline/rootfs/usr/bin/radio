@@ -8,9 +8,13 @@
 #     amp through the codec's HP Mux (no CPU, headphones only).
 #
 # Usage:
-#   radio on [MHz] [--bypass]   init tuner, route audio (default: last station)
+#   radio on [MHz] [--bypass]   init tuner, route audio (default: last station);
+#                               takes the sound from other sources (chumby-audio)
 #   radio tune <MHz>
-#   radio off
+#   radio off                   audio off, the tuner to standby
+#   radio pause | resume        for chumby-audio: off for a while, tuner kept
+#                               tuned (quick to resume), then back on
+#   radio active                exit status: playing?
 #   radio scan [us|eu|jp]       find stations, save them for prev/next
 #   radio vol <0-100>           DAC / HP volume
 #   radio status
@@ -26,6 +30,7 @@ STATION_FILE=/var/lib/chumby/radio.station
 # From the last scan: "#floor <rssi>", then "<MHz> <rssi>" per station.
 STATIONS_FILE=/var/lib/chumby/radio.stations
 PIDFILE=/var/run/radio-loop.pid
+PAUSED=/run/chumby/radio.paused	# paused by chumby-audio: resume to this
 PCM=plughw:0,0
 RDS_PIDFILE=/var/run/radio-rds.pid
 RDS_FILE=/run/chumby/rds
@@ -82,8 +87,9 @@ case "$1" in
 				*) freq=$a ;;
 			esac
 		done
-		# An internet radio stream holds the sound card.
-		[ -x /usr/bin/chumby-stream ] && chumby-stream stop
+		# Whatever else plays (an internet stream) stops: one at a time.
+		rm -f "$PAUSED"
+		[ -x /usr/bin/chumby-audio ] && chumby-audio play fm
 		modprobe i2c-dev 2>/dev/null
 		xclk=; [ -e /boot/fmradio_xclk ] && xclk=--xclk
 		qn8005 init $xclk || die "tuner init failed (is /dev/i2c-0 there?)"
@@ -107,10 +113,32 @@ case "$1" in
 		[ -n "$2" ] || die "usage: radio tune <MHz>"
 		tune "$2"
 		;;
-	off)
+	pause)
+		loop_running || exit 0
 		stop_loop
 		stop_rds
 		qn8005 mute 2>/dev/null
+		mkdir -p "${PAUSED%/*}"
+		cat "$STATION_FILE" > "$PAUSED" 2>/dev/null || : > "$PAUSED"
+		echo "radio: paused"
+		;;
+	resume)
+		[ -f "$PAUSED" ] || exit 0
+		rm -f "$PAUSED"
+		qn8005 unmute
+		start_rds
+		start_loop
+		echo "radio: resumed"
+		;;
+	active)
+		loop_running
+		;;
+	off)
+		rm -f "$PAUSED"
+		stop_loop
+		stop_rds
+		qn8005 mute 2>/dev/null
+		qn8005 sleep 2>/dev/null
 		amixer -q sset 'HP Mux' 'DAC'
 		amixer -q sset 'Left ADC Mux' 'Mic'
 		amixer -q sset 'Right ADC Mux' 'Mic'
@@ -135,6 +163,7 @@ case "$1" in
 			tune "$(cat "$STATION_FILE" 2>/dev/null || echo 100.3)"
 		else
 			qn8005 mute
+			qn8005 sleep
 		fi
 		;;
 	vol)

@@ -2,9 +2,13 @@
 /*
  * chumby-stream: play an internet radio stream.
  *
- *   chumby-stream <url> [name]   start playing (replacing any stream, and
- *                                stopping the FM radio), in the background
+ *   chumby-stream <url> [name]   start playing (replacing any stream), in
+ *                                the background; takes the sound from
+ *                                other sources (chumby-audio play stream)
  *   chumby-stream stop
+ *   chumby-stream pause | resume   for chumby-audio: stop for a while,
+ *                                remembering what played; play it again
+ *   chumby-stream active         exit status: playing?
  *
  * Over http or https (libcurl), to the codec (ALSA, as the FM loop uses
  * it):
@@ -21,7 +25,8 @@
  * the UI's priority, so redraws can't make the decoder late.
  *
  * State goes to $run_dir/stream for the app ("state=", "url=", "name=",
- * "title=" lines), gone once stopped; our pid to $run_dir/stream.pid.
+ * "title=", "codec=" MP3/AAC, "bitrate=" kbit/s as measured over a few
+ * seconds) lines, gone once stopped; our pid to $run_dir/stream.pid.
  */
 
 #define _GNU_SOURCE
@@ -47,17 +52,15 @@
 
 #define PCM		"plughw:0,0"
 #define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"	/* mbed TLS: no dirs */
-#define RADIO		"/usr/bin/radio"
-#define RADIO_PIDFILE	"/var/run/radio-loop.pid"
+#define AUDIO		"/usr/bin/chumby-audio"
 #define USER_AGENT	"chumby-stream/1.0"
 #define BACKOFF_MAX_S	30
 
 static volatile sig_atomic_t stop;
-static char status_path[256], pid_path[256];
+static char status_path[256], pid_path[256], paused_path[256];
+static int bitrate;			/* kbit/s, measured */
 static char url[1024], name[128], title[256], state[16];
 
-enum codec { CODEC_UNKNOWN, CODEC_MP3, CODEC_AAC };
-static enum codec codec;	/* of the stream: by Content-Type, else sniffed */
 
 static void sleep_s(int s);
 
@@ -82,6 +85,9 @@ static void on_signal(int sig)
 	stop = 1;
 }
 
+enum codec { CODEC_UNKNOWN, CODEC_MP3, CODEC_AAC };
+static enum codec codec;	/* of the stream: by Content-Type, else sniffed */
+
 static pthread_mutex_t status_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Called with status_lock held. */
@@ -94,7 +100,8 @@ static void status_write_locked(void)
 	f = fopen(tmp, "w");
 	if (!f)
 		return;
-	fprintf(f, "state=%s\nurl=%s\nname=%s\ntitle=%s\n", state, url, name, title);
+	fprintf(f, "state=%s\nurl=%s\nname=%s\ntitle=%s\ncodec=%s\nbitrate=%d\n", state, url,
+		name, title, codec == CODEC_AAC ? "AAC" : codec == CODEC_MP3 ? "MP3" : "", bitrate);
 	fclose(f);
 	rename(tmp, status_path);
 }
@@ -135,17 +142,26 @@ static void stop_running(void)
 		usleep(100 * 1000);
 }
 
-static bool fm_running(void)
-{
-	FILE *f = fopen(RADIO_PIDFILE, "r");
-	int pid = 0;
+/* Bitrate: compressed bytes in against seconds of sound out, over
+ * windows of ~4 s. */
+static unsigned long long br_bytes, br_frames;
 
-	if (!f)
-		return false;
-	if (fscanf(f, "%d", &pid) != 1)
-		pid = 0;
-	fclose(f);
-	return pid > 0 && kill(pid, 0) == 0;
+static void bitrate_count(size_t bytes, unsigned long frames)
+{
+	int kbps;
+
+	br_bytes += bytes;
+	br_frames += frames;
+	if (pcm_rate <= 0 || br_frames < (unsigned long long)pcm_rate * 4)
+		return;
+	kbps = (int)(br_bytes * 8 * pcm_rate / br_frames / 1000);
+	br_bytes = br_frames = 0;
+	if (kbps != bitrate) {
+		pthread_mutex_lock(&status_lock);
+		bitrate = kbps;
+		status_write_locked();
+		pthread_mutex_unlock(&status_lock);
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -205,6 +221,7 @@ static void pcm_write(const unsigned char *buf, size_t bytes)
 		}
 		buf += n * 2 * pcm_channels;
 		frames -= n;
+		bitrate_count(0, n);
 	}
 }
 
@@ -332,6 +349,7 @@ static void es_out(const unsigned char *d, size_t n)
 {
 	size_t i;
 
+	bitrate_count(n, 0);
 	if (codec == CODEC_UNKNOWN) {
 		for (i = 0; i + 1 < n; i++)
 			if (d[i] == 0xff && (d[i + 1] & 0xe0) == 0xe0) {
@@ -1030,26 +1048,84 @@ failed:
 int main(int argc, char **argv)
 {
 	const char *dir = chumby_run_dir();
-	char *radio_argv[] = { "radio", "off", NULL };
+	char *audio_argv[] = { "chumby-audio", "play", "stream", NULL };
+	bool resuming = false;
 	struct sigaction sa;
 	pid_t pid;
 	FILE *f;
 
 	snprintf(status_path, sizeof(status_path), "%s/stream", dir);
 	snprintf(pid_path, sizeof(pid_path), "%s/stream.pid", dir);
+	snprintf(paused_path, sizeof(paused_path), "%s/stream.paused", dir);
 	if (argc < 2) {
-		fprintf(stderr, "usage: chumby-stream <url> [name] | stop\n");
+		fprintf(stderr, "usage: chumby-stream <url> [name] | stop | pause | resume | active\n");
 		return 2;
+	}
+	if (!strcmp(argv[1], "active"))
+		return running_pid() ? 0 : 1;
+	if (!strcmp(argv[1], "pause")) {
+		char line[1200];
+		FILE *st;
+
+		if (!running_pid())
+			return 0;
+		/* What plays, to come back to: its URL and name. */
+		st = fopen(status_path, "r");
+		f = fopen(paused_path, "w");
+		while (st && f && fgets(line, sizeof(line), st))
+			if (!strncmp(line, "url=", 4) || !strncmp(line, "name=", 5))
+				fputs(line, f);
+		if (st)
+			fclose(st);
+		if (f)
+			fclose(f);
+		stop_running();
+		unlink(status_path);
+		return 0;
+	}
+	if (!strcmp(argv[1], "resume")) {
+		char line[1200];
+
+		f = fopen(paused_path, "r");
+		if (!f)
+			return 0;
+		while (fgets(line, sizeof(line), f)) {
+			line[strcspn(line, "\n")] = '\0';
+			if (!strncmp(line, "url=", 4))
+				snprintf(url, sizeof(url), "%.1023s", line + 4);
+			else if (!strncmp(line, "name=", 5) && line[5]) {
+				snprintf(name, sizeof(name), "%.127s", line + 5);
+				got_name = true;
+			}
+		}
+		fclose(f);
+		unlink(paused_path);
+		if (!url[0])
+			return 0;
+		resuming = true;
 	}
 	stop_running();
 	if (!strcmp(argv[1], "stop")) {
 		unlink(status_path);
+		unlink(paused_path);
 		return 0;
 	}
-	snprintf(url, sizeof(url), "%s", argv[1]);
-	if (argc > 2 && argv[2][0]) {
-		snprintf(name, sizeof(name), "%s", argv[2]);
-		got_name = true;
+	if (!resuming) {
+		snprintf(url, sizeof(url), "%s", argv[1]);
+		if (argc > 2 && argv[2][0]) {
+			snprintf(name, sizeof(name), "%s", argv[2]);
+			got_name = true;
+		}
+		unlink(paused_path);
+		/* Whatever else plays (the FM radio) stops: one at a time. A
+		 * resume comes from chumby-audio itself (it holds the lock). */
+		pid = fork();
+		if (pid == 0) {
+			execv(AUDIO, audio_argv);
+			_exit(127);
+		}
+		if (pid > 0)
+			waitpid(pid, NULL, 0);
 	}
 
 	/* Into the background, on our own (closing the app leaves us on). */
@@ -1071,17 +1147,6 @@ int main(int argc, char **argv)
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
 	signal(SIGPIPE, SIG_IGN);
-
-	/* The FM loop holds the sound card. */
-	if (fm_running()) {
-		pid = fork();
-		if (pid == 0) {
-			execv(RADIO, radio_argv);
-			_exit(127);
-		}
-		if (pid > 0)
-			waitpid(pid, NULL, 0);
-	}
 
 	curl_global_init(CURL_GLOBAL_DEFAULT);
 	mpg123_init();
