@@ -26,9 +26,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <chumby.h>
+/* Decoding JPEG logos by hand (art_decode_tiles) */
+#include <lvgl/src/image/lv_image_decoder_private.h>
+#include <lvgl/src/misc/cache/instance/lv_image_cache.h>
 
 #define STATION_FILE	"/var/lib/chumby/radio.station"
 #define STATIONS_FILE	"/var/lib/chumby/radio.stations"	/* from "radio scan" */
@@ -218,22 +222,77 @@ static void art_show_note(void)
 	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_VER, 0);
 }
 
+/* LVGL decodes JPEGs (TJPGD) one MCU at a time and can't scale images
+ * decoded that way, so decode the whole logo into a buffer once. */
+static lv_draw_buf_t *art_decode_tiles(const char *src)
+{
+	lv_image_decoder_dsc_t dsc;
+	lv_area_t full, part;
+	lv_draw_buf_t *buf = NULL;
+	int32_t w, h, y;
+
+	if (lv_image_decoder_open(&dsc, src, NULL) != LV_RESULT_OK)
+		return NULL;
+	w = dsc.header.w;
+	h = dsc.header.h;
+	if (dsc.decoded || dsc.header.cf != LV_COLOR_FORMAT_RGB888 ||
+	    !(buf = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO)))
+		goto out;
+	lv_area_set(&full, 0, 0, w - 1, h - 1);
+	part.x1 = part.y1 = part.x2 = part.y2 = LV_COORD_MIN;
+	do {
+		if (lv_image_decoder_get_area(&dsc, &full, &part) != LV_RESULT_OK) {
+			lv_draw_buf_destroy(buf);
+			buf = NULL;
+			goto out;
+		}
+		for (y = part.y1; y <= part.y2; y++)
+			memcpy(buf->data + y * buf->header.stride + part.x1 * 3,
+			       dsc.decoded->data + (y - part.y1) * dsc.decoded->header.stride,
+			       lv_area_get_width(&part) * 3);
+	} while (part.x2 < w - 1 || part.y2 < h - 1);
+out:
+	lv_image_decoder_close(&dsc);
+	return buf;
+}
+
 static void art_show_logo(const char *path)
 {
 	static char src[160];
+	static lv_draw_buf_t *jpeg;	/* the decoded JPEG art_img shows */
+	static time_t jpeg_mtime;
+	lv_draw_buf_t *old = NULL;
 	lv_image_header_t h;
+	struct stat st;
 	int scale, sw, sh;
+	const char *ext = strrchr(path, '.');
 
-	snprintf(src, sizeof(src), "A:%s", path);
-	if (lv_image_decoder_get_info(src, &h) != LV_RESULT_OK || !h.w || !h.h) {
-		art_show_note();
-		return;
+	if (ext && !strcmp(ext, ".jpg")) {
+		/* Decode again only when it's another file, or got replaced. */
+		if (stat(path, &st) || !jpeg || strcmp(src + 2, path) || st.st_mtime != jpeg_mtime) {
+			old = jpeg;
+			snprintf(src, sizeof(src), "A:%s", path);
+			jpeg = art_decode_tiles(src);
+			jpeg_mtime = st.st_mtime;
+		}
+		if (!jpeg) {
+			art_show_note();
+			goto out;
+		}
+		h = jpeg->header;
+		lv_image_set_src(art_img, jpeg);
+	} else {
+		snprintf(src, sizeof(src), "A:%s", path);
+		if (lv_image_decoder_get_info(src, &h) != LV_RESULT_OK || !h.w || !h.h) {
+			art_show_note();
+			goto out;
+		}
+		lv_image_set_src(art_img, src);
 	}
 	/* Fit inside the tile, keep the aspect ratio. */
 	sw = (ART_SIZE - 2 * ART_PAD) * 256 / h.w;
 	sh = (ART_SIZE - 2 * ART_PAD) * 256 / h.h;
 	scale = sw < sh ? sw : sh;
-	lv_image_set_src(art_img, src);
 	lv_image_set_scale(art_img, scale);
 	lv_obj_center(art_img);
 	lv_obj_set_hidden(art_img, false);
@@ -241,6 +300,14 @@ static void art_show_logo(const char *path)
 	/* Logos are made for a white background, like album art. */
 	lv_obj_set_style_bg_color(art_tile, lv_color_white(), 0);
 	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_NONE, 0);
+out:
+	/* A JPEG replaced (or gone): drop the old buffer once unused. */
+	if (old && old != jpeg) {
+		if (lv_image_get_src(art_img) == old)
+			lv_image_set_src(art_img, NULL);
+		lv_image_cache_drop(old);
+		lv_draw_buf_destroy(old);
+	}
 }
 
 /* The lookup result for the current frequency: show it, and say whether
