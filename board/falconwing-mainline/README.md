@@ -42,6 +42,14 @@ timesyncd's clock. Everything in `/etc` that is configurable (WiFi,
 hostname, timezone, password, SSH keys) is re-applied every boot from the
 FAT partition by `chumby-config.service`. The journal is in RAM (2 MB).
 
+**Updating without reflashing**: since nothing runs from the card,
+`bin/update-chumby.sh <host>` replaces it live over SSH: rootfs.squashfs
+(streamed to a temp name, SHA-256 checked, renamed), the early-boot
+files, the kernel slot (only if changed, read back and compared), and
+optionally `customize-chumby/{network-config,user-data,authorized_keys}`
+into the FAT partition; then reboots. ~3 minutes, mostly dropbear's
+crypto on this CPU.
+
 RAM cost: the squashfs (see the post-image log line "carrier:") plus
 whatever is written to the overlay; pages of it decompress on demand.
 
