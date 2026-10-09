@@ -1130,12 +1130,15 @@ static void build_panel(lv_obj_t *scr)
 			      LV_FLEX_ALIGN_END);
 	lv_obj_set_style_pad_column(tray, TAB_GAP, 0);
 
-	btn_vol = tray_button(tray, LV_SYMBOL_VOLUME_MAX);
-	lv_obj_add_event_cb(btn_vol, quick_btn_cb, LV_EVENT_CLICKED,
-			    (void *)(intptr_t)POPUP_VOLUME);
+	/* Brightness, then volume: the volume popup is the wider one (its
+	 * stop button) and hangs from its button's right edge, so that is
+	 * the one further right. */
 	btn_bri = tray_button(tray, CHUMBY_ICON_SUN);
 	lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_BRIGHTNESS);
+	btn_vol = tray_button(tray, LV_SYMBOL_VOLUME_MAX);
+	lv_obj_add_event_cb(btn_vol, quick_btn_cb, LV_EVENT_CLICKED,
+			    (void *)(intptr_t)POPUP_VOLUME);
 	box = bar_box(tray);
 	bar_clock_tab = box;
 	lv_obj_set_clickable(box, true);

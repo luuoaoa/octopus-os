@@ -176,11 +176,18 @@ static void view_configure(struct view *v)
 		wlr_scene_node_set_position(&v->tree->node, 0, 0);
 		wlr_xdg_toplevel_set_size(v->xdg, s->width, BAR_H);
 		break;
-	case VIEW_POPUP:
-		wlr_scene_node_set_position(&v->tree->node,
-					    (v->right > 0 ? v->right : s->width) - POPUP_W, BAR_H);
+	case VIEW_POPUP: {
+		/* Under its button, but on screen whatever it asks. */
+		int x = (v->right > 0 ? v->right : s->width) - POPUP_W;
+
+		if (x > s->width - POPUP_W)
+			x = s->width - POPUP_W;
+		if (x < 0)
+			x = 0;
+		wlr_scene_node_set_position(&v->tree->node, x, BAR_H);
 		wlr_xdg_toplevel_set_size(v->xdg, POPUP_W, POPUP_H);
 		break;
+	}
 	case VIEW_CAL:
 		wlr_scene_node_set_position(&v->tree->node, 0, 0);
 		wlr_xdg_toplevel_set_size(v->xdg, s->width, s->height);
