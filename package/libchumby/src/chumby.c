@@ -519,8 +519,8 @@ void chumby_window_close(lv_display_t *disp)
 
 lv_obj_t *chumby_app_init(const char *app_id)
 {
-	/* chumby-wm resizes app windows to the area right of the panel. */
-	lv_display_t *disp = chumby_window_create(app_id, CHUMBY_APP_W, CHUMBY_SCREEN_H);
+	/* chumby-wm sizes app windows to the area under the tab bar. */
+	lv_display_t *disp = chumby_window_create(app_id, CHUMBY_APP_W, CHUMBY_APP_H);
 
 	if (!disp) {
 		fprintf(stderr, "%s: cannot open a Wayland window "

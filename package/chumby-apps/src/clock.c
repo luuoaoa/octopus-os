@@ -165,7 +165,7 @@ static void build_clock(void)
 	lv_obj_align_to(lbl_next, ic_next, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 
 	/* The face is centred in the space above the bar. */
-	chumby_center_y_at(face, (CHUMBY_SCREEN_H - 16 - 52) / 2);
+	chumby_center_y_at(face, (CHUMBY_APP_H - 16 - 52) / 2);
 }
 
 /* ------------------------------------------------------------------ */
@@ -431,7 +431,7 @@ static void build_list(void)
 
 	list = lv_obj_create(view_list);
 	lv_obj_remove_style_all(list);
-	lv_obj_set_size(list, LV_PCT(100), CHUMBY_SCREEN_H - 52);
+	lv_obj_set_size(list, LV_PCT(100), CHUMBY_APP_H - 52);
 	lv_obj_set_pos(list, 0, 52);
 	lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
@@ -484,7 +484,7 @@ static void build_ring(void)
 	hint = label(view_ring, CHUMBY_FONT_SMALL, CHUMBY_COLOR_TEXT_DIM);
 	lv_label_set_text(hint, "The top button snoozes too");
 	lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 0);
-	chumby_center_y_at(hint, CHUMBY_SCREEN_H - 28 / 2);
+	chumby_center_y_at(hint, CHUMBY_APP_H - 28 / 2);
 }
 
 /* ------------------------------------------------------------------ */

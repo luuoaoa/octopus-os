@@ -2,11 +2,11 @@
 /*
  * chumby-shell: the Chumby One's system UI on chumby-wm.
  *
- *   panel (app_id "chumby-panel", left edge, CHUMBY_PANEL_W):
- *     home button, an icon per running app (tap: switch, long press:
- *     close), volume and brightness buttons
- *   popup (app_id "chumby-popup", over the app area, transient): the
- *     volume or brightness control, opened from the panel or the knob
+ *   tab bar (app_id "chumby-panel", across the top, CHUMBY_BAR_H):
+ *     Home, the app in front and the one before it as tabs (tap:
+ *     switch, hold: close), volume and brightness buttons, the time
+ *   popup (app_id "chumby-popup", under the bar, transient): the volume
+ *     or brightness slider, opened from the bar or the knob
  *   home (app_id "chumby-home", behind all apps): the list of installed
  *     apps, one ".app" descriptor each in /usr/share/chumby/apps
  *
@@ -150,7 +150,7 @@ struct toplevel {
 	struct zwlr_foreign_toplevel_handle_v1 *handle;
 	char app_id[32];
 	bool activated, minimized;
-	lv_obj_t *button;	/* in the panel */
+	unsigned long seen;	/* when last in front (0: never) */
 	struct toplevel *next;
 };
 
@@ -159,9 +159,9 @@ static struct wl_seat *seat;
 static struct zwlr_foreign_toplevel_manager_v1 *ftl_manager;
 static struct toplevel *toplevels;
 
-static lv_obj_t *panel_apps;	/* column of running-app buttons */
+static unsigned long seen_seq;
 
-static void panel_rebuild(void);
+static void tabs_rebuild(void);
 
 static void tl_title(void *d, struct zwlr_foreign_toplevel_handle_v1 *h, const char *t)
 {
@@ -204,7 +204,9 @@ static void tl_done(void *d, struct zwlr_foreign_toplevel_handle_v1 *h)
 	(void)h;
 	if (a)
 		a->starting_pid = 0;	/* its window is up */
-	panel_rebuild();
+	if (t->activated && !t->minimized)
+		t->seen = ++seen_seq;
+	tabs_rebuild();
 }
 
 static void tl_closed(void *d, struct zwlr_foreign_toplevel_handle_v1 *h)
@@ -219,7 +221,7 @@ static void tl_closed(void *d, struct zwlr_foreign_toplevel_handle_v1 *h)
 	}
 	zwlr_foreign_toplevel_handle_v1_destroy(h);
 	free(t);
-	panel_rebuild();
+	tabs_rebuild();
 }
 
 static void tl_parent(void *d, struct zwlr_foreign_toplevel_handle_v1 *h,
@@ -358,25 +360,33 @@ static void launch(struct app_info *a)
 }
 
 /* ------------------------------------------------------------------ */
-/* Panel                                                              */
+/* Tab bar ("chumby-panel", across the top)                           */
 
 /*
- * Everything here is sized for a resistive touchscreen: panel buttons are
- * the panel's full usable width and at least CHUMBY_TOUCH_MIN tall, and
- * values are changed in a big popup (tap-to-set bar, - / + buttons)
- * rather than with small sliders.
+ * Apps are tabs, Palm OS style: Home (icon only), the app in front
+ * (filled, icon and name) and the one before it (icon only), standing on
+ * a line that runs the width of the screen and sets the shell apart from
+ * the app. With Home in front, Home takes the filled tab and the last
+ * app follows it; other running apps are a Home tap away. Tap a tab to
+ * switch, hold one to close its app.
+ *
+ * At the right end: volume, brightness and the time. Volume and
+ * brightness drop their slider down from the bar, under them, in the
+ * accent color; their button fills like a tab while it's open, so it's
+ * plain which one is being set.
+ *
+ * Tabs are drawn taller than the bar: the window clips their bottom
+ * (rounded) corners, leaving square feet on the line.
  */
-#define BTN_W		(CHUMBY_PANEL_W - 8)
-#define BTN_H		CHUMBY_TOUCH_MIN
-#define TRAY_BTN_H	38	/* a little under BTN_H: the tray is one plate */
+#define TAB_Y		6	/* an inactive tab's top */
+#define TAB_ON_Y	3	/* the filled one stands a little taller */
+#define TAB_FOOT	10	/* drawn below the bar, clipped */
+#define LINE_H		2
+#define TAB_GAP		3
 #define POPUP_IDLE_MS	4000
-#define PANEL_DIM_OPA	LV_OPA_30	/* at rest: barely there */
-#define PANEL_IDLE_MS	4000
-#define PANEL_FADE_IN_MS	80
-#define PANEL_FADE_OUT_MS	600
 
 static lv_obj_t *panel_scr, *home_scr;
-static lv_obj_t *btn_home, *btn_vol, *btn_bri, *tray;
+static lv_obj_t *btn_vol, *btn_bri, *bar_clock;
 static int volume_pct = 50;	/* cached: the mixer may not exist yet */
 
 enum popup_kind { POPUP_NONE, POPUP_VOLUME, POPUP_BRIGHTNESS };
@@ -385,14 +395,113 @@ static lv_display_t *popup_disp;
 static lv_obj_t *popup_bar;
 static lv_timer_t *popup_timer;
 
-static void app_btn_cb(lv_event_t *e)
+/* The app in front: activated and not minimized (none: Home is). */
+static struct toplevel *tl_current(void)
 {
-	struct toplevel *t = lv_event_get_user_data(e), *i;
+	struct toplevel *t;
 
-	/* The toplevel may have closed since the button was built. */
+	for (t = toplevels; t; t = t->next)
+		if (t->activated && !t->minimized)
+			return t;
+	return NULL;
+}
+
+/* The app that was in front before `cur` (any other, if none was). */
+static struct toplevel *tl_previous(struct toplevel *cur)
+{
+	struct toplevel *t, *best = NULL;
+
+	for (t = toplevels; t; t = t->next)
+		if (t != cur && (!best || t->seen > best->seen))
+			best = t;
+	return best;
+}
+
+static bool tl_alive(struct toplevel *t)
+{
+	struct toplevel *i;
+
 	for (i = toplevels; i && i != t; i = i->next)
 		;
-	if (!i)
+	return i != NULL;
+}
+
+static void tab_style(lv_obj_t *b, bool on)
+{
+	int y = on ? TAB_ON_Y : TAB_Y;
+
+	lv_obj_set_height(b, CHUMBY_BAR_H - y + TAB_FOOT);
+	lv_obj_set_style_radius(b, 7, 0);
+	lv_obj_set_style_bg_color(b, chumby_color(on ? CHUMBY_COLOR_ACCENT
+						     : CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_bg_opa(b, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+	lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_PRESSED);
+	lv_obj_set_style_border_width(b, on ? 0 : 1, 0);
+	lv_obj_set_style_border_color(b, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_border_opa(b, LV_OPA_40, 0);
+	lv_obj_set_style_text_color(b, chumby_color(on ? CHUMBY_COLOR_BG
+						       : CHUMBY_COLOR_TEXT_DIM), 0);
+}
+
+/* A box standing on the line (bottom-aligned in its row), its content
+ * centred in the part above the line. */
+static lv_obj_t *bar_box(lv_obj_t *parent)
+{
+	lv_obj_t *b = lv_obj_create(parent);
+
+	lv_obj_remove_style_all(b);
+	lv_obj_set_scrollable(b, false);
+	lv_obj_set_size(b, LV_SIZE_CONTENT, CHUMBY_BAR_H - TAB_Y + TAB_FOOT);
+	lv_obj_set_flex_flow(b, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(b, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_bottom(b, TAB_FOOT + LINE_H, 0);
+	return b;
+}
+
+static lv_obj_t *tab_create(lv_obj_t *parent, const char *sym, const char *name, bool on)
+{
+	lv_obj_t *b = bar_box(parent), *l;
+
+	lv_obj_set_clickable(b, true);
+	lv_obj_set_style_min_width(b, 36, 0);
+	lv_obj_set_style_pad_hor(b, name ? 9 : 10, 0);
+	lv_obj_set_style_pad_column(b, 5, 0);
+	/* Up to the screen's top edge, and the gaps between tabs. */
+	lv_obj_set_ext_click_area(b, TAB_Y);
+	tab_style(b, on);
+
+	l = lv_label_create(b);
+	lv_label_set_text(l, sym);
+	lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+	if (name) {
+		l = lv_label_create(b);
+		lv_label_set_text(l, name);
+		lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_BODY), 0);
+	}
+	return b;
+}
+
+static void tray_style(lv_obj_t *b, bool on)
+{
+	tab_style(b, on);
+	if (!on)
+		lv_obj_set_style_border_width(b, 0, 0);	/* plain icon at rest */
+}
+
+static lv_obj_t *bar_tabs;	/* the tab row */
+
+static void home_tab_cb(lv_event_t *e)
+{
+	(void)e;
+	show_home();
+}
+
+static void app_tab_cb(lv_event_t *e)
+{
+	struct toplevel *t = lv_event_get_user_data(e);
+
+	if (!tl_alive(t))	/* closed since the tab was built */
 		return;
 	if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED)
 		zwlr_foreign_toplevel_handle_v1_close(t->handle);
@@ -401,148 +510,65 @@ static void app_btn_cb(lv_event_t *e)
 	wl_display_flush(wl);
 }
 
-/*
- * The panel stays out of the way: no button plates and icons at
- * PANEL_DIM_OPA at rest. Touching it brings it to full contrast, and it
- * fades back PANEL_IDLE_MS after the last touch (once any popup closes).
- */
-static lv_opa_t panel_opa = LV_OPA_COVER;
-static lv_timer_t *panel_timer;
-
-static void panel_opa_cb(void *var, int32_t v)
+static void tabs_rebuild(void)
 {
-	uint32_t i;
+	struct toplevel *cur, *prev;
+	struct app_info *a;
+	lv_obj_t *b;
 
-	(void)var;
-	panel_opa = v;
-	for (i = 0; i < lv_obj_get_child_count(panel_scr); i++)
-		if (lv_obj_get_child(panel_scr, i) != tray)
-			lv_obj_set_style_opa(lv_obj_get_child(panel_scr, i), v, 0);
-	/* The tray's plate stays: only its icons fade. */
-	for (i = 0; tray && i < lv_obj_get_child_count(tray); i++)
-		lv_obj_set_style_opa(lv_obj_get_child(tray, i), v, 0);
-}
-
-static void panel_fade(lv_opa_t to, uint32_t ms)
-{
-	lv_anim_t a;
-
-	lv_anim_delete(panel_scr, panel_opa_cb);
-	if (to == panel_opa)
+	if (!bar_tabs)
 		return;
-	lv_anim_init(&a);
-	lv_anim_set_var(&a, panel_scr);
-	lv_anim_set_exec_cb(&a, panel_opa_cb);
-	lv_anim_set_values(&a, panel_opa, to);
-	lv_anim_set_duration(&a, ms);
-	lv_anim_start(&a);
-}
+	lv_obj_clean(bar_tabs);
+	cur = tl_current();
+	prev = tl_previous(cur);
 
-static void panel_wake(void)
-{
-	panel_fade(LV_OPA_COVER, PANEL_FADE_IN_MS);
-	lv_timer_reset(panel_timer);
-	lv_timer_resume(panel_timer);
-}
-
-static void panel_timer_cb(lv_timer_t *t)
-{
-	if (popup_disp)
-		return;		/* stay lit while a popup is up */
-	panel_fade(PANEL_DIM_OPA, PANEL_FADE_OUT_MS);
-	lv_timer_pause(t);
-}
-
-/* Presses anywhere in the panel bubble up to its screen. */
-static void panel_press_cb(lv_event_t *e)
-{
-	(void)e;
-	panel_wake();
-}
-
-/* The open popup's button: its icon in the accent color. */
-static void set_active(lv_obj_t *b, bool active)
-{
-	if (active)
-		lv_obj_set_style_text_color(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-	else
-		lv_obj_remove_local_style_prop(b, LV_STYLE_TEXT_COLOR, 0);
-}
-
-static lv_obj_t *icon_button(lv_obj_t *parent, const char *sym)
-{
-	lv_obj_t *b = lv_button_create(parent);
-	lv_obj_t *l = lv_label_create(b);
-
-	lv_obj_set_size(b, BTN_W, BTN_H);
-	lv_obj_set_style_radius(b, 10, 0);
-	lv_obj_set_style_pad_all(b, 0, 0);
-	/* A plate only while pressed. */
-	lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
-	lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_PRESSED);
-	lv_obj_set_event_bubble(b, true);
-	lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
-	lv_label_set_text(l, sym);
-	lv_obj_center(l);
-	return b;
-}
-
-/* A tray button: a smaller icon, still a full-size touch target. */
-static lv_obj_t *tray_button(lv_obj_t *parent, const char *sym)
-{
-	lv_obj_t *b = icon_button(parent, sym);
-
-	lv_obj_set_height(b, TRAY_BTN_H);
-	lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_BG), LV_STATE_PRESSED);
-	lv_obj_set_style_text_font(lv_obj_get_child(b, 0), &lv_font_montserrat_20, 0);
-	return b;
-}
-
-/* The app in front gets a dot at its left, like the macOS dock. */
-static void running_dot(lv_obj_t *b)
-{
-	lv_obj_t *dot = lv_obj_create(b);
-
-	lv_obj_remove_style_all(dot);
-	lv_obj_set_size(dot, 6, 6);
-	lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(dot, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_clickable(dot, false);
-	lv_obj_align(dot, LV_ALIGN_LEFT_MID, 1, 0);
-}
-
-static void panel_rebuild(void)
-{
-	struct toplevel *t;
-
-	if (!panel_apps)
-		return;
-	lv_obj_clean(panel_apps);
-	for (t = toplevels; t; t = t->next) {
-		struct app_info *a = app_by_id(t->app_id);
-		lv_obj_t *b = icon_button(panel_apps, a ? a->icon : LV_SYMBOL_FILE);
-
-		if (t->activated && !t->minimized)
-			running_dot(b);
-		lv_obj_add_event_cb(b, app_btn_cb, LV_EVENT_SHORT_CLICKED, t);
-		lv_obj_add_event_cb(b, app_btn_cb, LV_EVENT_LONG_PRESSED, t);
+	b = tab_create(bar_tabs, LV_SYMBOL_HOME, cur ? NULL : "Home", !cur);
+	lv_obj_add_event_cb(b, home_tab_cb, LV_EVENT_CLICKED, NULL);
+	if (cur) {
+		a = app_by_id(cur->app_id);
+		b = tab_create(bar_tabs, a ? a->icon : LV_SYMBOL_FILE,
+			       a ? a->name : cur->app_id, true);
+		lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_LONG_PRESSED, cur);
+	}
+	if (prev) {
+		a = app_by_id(prev->app_id);
+		b = tab_create(bar_tabs, a ? a->icon : LV_SYMBOL_FILE, NULL, false);
+		lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_SHORT_CLICKED, prev);
+		lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_LONG_PRESSED, prev);
 	}
 }
 
-static void home_btn_cb(lv_event_t *e)
+static void bar_clock_update(void)
 {
-	(void)e;
-	show_home();
+	char buf[8] = "";
+	time_t now = time(NULL);
+	struct tm tm;
+
+	if (!bar_clock)
+		return;
+	if (chumby_time_valid()) {
+		localtime_r(&now, &tm);
+		strftime(buf, sizeof(buf), "%H:%M", &tm);
+	}
+	if (strcmp(lv_label_get_text(bar_clock), buf))
+		lv_label_set_text(bar_clock, buf);
+}
+
+static void bar_clock_cb(lv_timer_t *t)
+{
+	(void)t;
+	bar_clock_update();
 }
 
 /* ------------------------------------------------------------------ */
-/* Volume / brightness bar ("chumby-popup", bottom of the app area)  */
+/* Volume / brightness slider ("chumby-popup", under the bar)        */
 
 static void quick_buttons_update(void)
 {
-	set_active(btn_vol, popup_kind == POPUP_VOLUME);
-	set_active(btn_bri, popup_kind == POPUP_BRIGHTNESS);
+	if (btn_vol)
+		tray_style(btn_vol, popup_kind == POPUP_VOLUME);
+	if (btn_bri)
+		tray_style(btn_bri, popup_kind == POPUP_BRIGHTNESS);
 }
 
 static int popup_get(void)
@@ -603,22 +629,21 @@ static void popup_bar_cb(lv_event_t *e)
 }
 
 /*
- * The control is just a thick bar along the bottom of the app area
- * (chumby-wm places "chumby-popup" there, CHUMBY_POPUP_H tall): tap or drag
- * anywhere on it. Which one it is shows in the panel, where its button is
- * lit. It closes after POPUP_IDLE_MS or on that button.
+ * The slider hangs from the bar under its button (chumby-wm places
+ * "chumby-popup" there): an accent plate the same color as the filled
+ * button, the bar dark on it. Tap or drag anywhere on it. It closes
+ * after POPUP_IDLE_MS or on its button.
  */
 static void popup_open(enum popup_kind kind)
 {
 	lv_obj_t *scr;
 
-	panel_wake();
 	if (popup_kind == kind && popup_disp) {
 		popup_keepalive();
 		return;
 	}
 	if (!popup_disp) {
-		popup_disp = chumby_window_create("chumby-popup", CHUMBY_APP_W, CHUMBY_POPUP_H);
+		popup_disp = chumby_window_create("chumby-popup", CHUMBY_POPUP_W, CHUMBY_POPUP_H);
 		if (!popup_disp)
 			return;
 	}
@@ -626,18 +651,22 @@ static void popup_open(enum popup_kind kind)
 	scr = lv_display_get_screen_active(popup_disp);
 	lv_obj_clean(scr);
 	lv_obj_set_scrollable(scr, false);
-	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 
 	popup_bar = lv_slider_create(scr);
-	lv_obj_set_size(popup_bar, CHUMBY_APP_W - 2 * 16, CHUMBY_POPUP_H - 2 * 12);
+	lv_obj_set_size(popup_bar, CHUMBY_POPUP_W - 2 * 16, CHUMBY_POPUP_H - 2 * 14);
 	lv_obj_center(popup_bar);
 	lv_slider_set_range(popup_bar, kind == POPUP_VOLUME ? 0 : 5, 100);
 	lv_obj_set_style_radius(popup_bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
 	lv_obj_set_style_radius(popup_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_color(popup_bar, chumby_color(CHUMBY_COLOR_BG), LV_PART_MAIN);
+	lv_obj_set_style_bg_opa(popup_bar, LV_OPA_30, LV_PART_MAIN);
+	lv_obj_set_style_bg_color(popup_bar, chumby_color(CHUMBY_COLOR_BG), LV_PART_INDICATOR);
+	lv_obj_set_style_bg_opa(popup_bar, LV_OPA_COVER, LV_PART_INDICATOR);
 	lv_obj_set_style_bg_opa(popup_bar, LV_OPA_TRANSP, LV_PART_KNOB);
 	lv_obj_set_style_pad_all(popup_bar, 0, LV_PART_KNOB);
 	/* The whole popup height is the touch target. */
-	lv_obj_set_ext_click_area(popup_bar, 12);
+	lv_obj_set_ext_click_area(popup_bar, 14);
 	lv_obj_add_event_cb(popup_bar, popup_bar_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(popup_bar, popup_bar_cb, LV_EVENT_PRESSING, NULL);
 
@@ -645,7 +674,7 @@ static void popup_open(enum popup_kind kind)
 	quick_buttons_update();
 }
 
-/* Panel button: open its popup, or close it if it's already showing. */
+/* Tray button: open its slider, or close it if it's already showing. */
 static void quick_btn_cb(lv_event_t *e)
 {
 	enum popup_kind kind = (enum popup_kind)(intptr_t)lv_event_get_user_data(e);
@@ -656,64 +685,66 @@ static void quick_btn_cb(lv_event_t *e)
 		popup_open(kind);
 }
 
+/* The bar's widgets (again on a day/night switch: colors are per mode). */
 static void build_panel(lv_obj_t *scr)
 {
-	lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(scr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-			      LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_all(scr, 4, 0);
-	lv_obj_set_style_pad_row(scr, 4, 0);
+	lv_obj_t *tray, *line, *box;
+
+	lv_obj_clean(scr);
 	lv_obj_set_scrollable(scr, false);
 
-	btn_home = icon_button(scr, LV_SYMBOL_HOME);
-	lv_obj_add_event_cb(btn_home, home_btn_cb, LV_EVENT_CLICKED, NULL);
+	/* Rows as tall as the tabs, standing on the bar's bottom edge (the
+	 * part below it is clipped). */
+	bar_tabs = lv_obj_create(scr);
+	lv_obj_remove_style_all(bar_tabs);
+	lv_obj_set_scrollable(bar_tabs, false);
+	lv_obj_set_size(bar_tabs, LV_SIZE_CONTENT, CHUMBY_BAR_H + TAB_FOOT);
+	lv_obj_set_pos(bar_tabs, 4, 0);
+	lv_obj_set_flex_flow(bar_tabs, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(bar_tabs, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
+			      LV_FLEX_ALIGN_END);
+	lv_obj_set_style_pad_column(bar_tabs, TAB_GAP, 0);
 
-	/* Running apps: two fit; more scroll. */
-	panel_apps = lv_obj_create(scr);
-	lv_obj_remove_style_all(panel_apps);
-	lv_obj_set_width(panel_apps, LV_PCT(100));
-	lv_obj_set_flex_grow(panel_apps, 1);
-	lv_obj_set_flex_flow(panel_apps, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(panel_apps, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-			      LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_row(panel_apps, 4, 0);
-	lv_obj_set_scroll_dir(panel_apps, LV_DIR_VER);
-	lv_obj_set_event_bubble(panel_apps, true);
-
-	/* Volume and brightness sit apart in a tray, like the clock area of
-	 * the Windows taskbar: their own plate, smaller icons. */
 	tray = lv_obj_create(scr);
 	lv_obj_remove_style_all(tray);
-	lv_obj_set_size(tray, BTN_W, LV_SIZE_CONTENT);
-	lv_obj_set_flex_flow(tray, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(tray, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-			      LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_radius(tray, 10, 0);
-	lv_obj_set_style_bg_opa(tray, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(tray, chumby_color(CHUMBY_COLOR_SURFACE), 0);
 	lv_obj_set_scrollable(tray, false);
-	lv_obj_set_event_bubble(tray, true);
+	lv_obj_set_size(tray, LV_SIZE_CONTENT, CHUMBY_BAR_H + TAB_FOOT);
+	lv_obj_align(tray, LV_ALIGN_TOP_RIGHT, -4, 0);
+	lv_obj_set_flex_flow(tray, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(tray, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END,
+			      LV_FLEX_ALIGN_END);
+	lv_obj_set_style_pad_column(tray, TAB_GAP, 0);
 
-	btn_vol = tray_button(tray, LV_SYMBOL_VOLUME_MAX);
+	btn_vol = tab_create(tray, LV_SYMBOL_VOLUME_MAX, NULL, false);
 	lv_obj_add_event_cb(btn_vol, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_VOLUME);
-	btn_bri = tray_button(tray, LV_SYMBOL_EYE_OPEN);
+	btn_bri = tab_create(tray, LV_SYMBOL_EYE_OPEN, NULL, false);
 	lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_BRIGHTNESS);
+	box = bar_box(tray);
+	lv_obj_set_style_pad_left(box, 6, 0);
+	bar_clock = lv_label_create(box);
+	lv_label_set_text(bar_clock, "");
+	lv_obj_set_style_text_font(bar_clock, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_style_text_color(bar_clock, chumby_color(CHUMBY_COLOR_TEXT), 0);
 
-	popup_timer = lv_timer_create(popup_timer_cb, POPUP_IDLE_MS, NULL);
-	lv_timer_pause(popup_timer);
+	/* The line, over the tabs' feet: it joins the filled tab and button. */
+	line = lv_obj_create(scr);
+	lv_obj_remove_style_all(line);
+	lv_obj_set_size(line, CHUMBY_SCREEN_W, LINE_H);
+	lv_obj_set_pos(line, 0, CHUMBY_BAR_H - LINE_H);
+	lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(line, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 
-	lv_obj_add_event_cb(scr, panel_press_cb, LV_EVENT_PRESSED, NULL);
-	panel_timer = lv_timer_create(panel_timer_cb, PANEL_IDLE_MS, NULL);
-	lv_timer_pause(panel_timer);
-	panel_opa_cb(NULL, PANEL_DIM_OPA);
+	tabs_rebuild();
+	quick_buttons_update();
+	bar_clock_update();
 }
 
 /* ------------------------------------------------------------------ */
 /* Home: installed apps                                               */
 
-static lv_obj_t *home_title;
+#define HOME_GAP	10
 
 static void tile_cb(lv_event_t *e)
 {
@@ -726,28 +757,19 @@ static void build_home(lv_obj_t *scr)
 	int i;
 
 	lv_obj_set_scrollable(scr, false);
-	home_title = lv_label_create(scr);
-	lv_label_set_text(home_title, "Apps");
-	lv_obj_set_style_text_font(home_title, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_align(home_title, LV_ALIGN_TOP_LEFT, 12, 0);
-	/* Centred in the band above the first row of tiles (grid top 44 +
-	 * its 8 px padding). */
-	chumby_center_y_at(home_title, (CHUMBY_SCREEN_H - 196 + 8) / 2);
-
 	grid = lv_obj_create(scr);
 	lv_obj_remove_style_all(grid);
-	lv_obj_set_size(grid, LV_PCT(100), 196);
-	lv_obj_align(grid, LV_ALIGN_BOTTOM_MID, 0, 0);
+	lv_obj_set_size(grid, LV_PCT(100), LV_PCT(100));
 	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_style_pad_all(grid, 8, 0);
-	lv_obj_set_style_pad_gap(grid, 8, 0);
+	lv_obj_set_style_pad_all(grid, HOME_GAP, 0);
+	lv_obj_set_style_pad_gap(grid, HOME_GAP, 0);
 	lv_obj_set_scroll_dir(grid, LV_DIR_VER);
 
 	for (i = 0; i < n_apps; i++) {
 		lv_obj_t *tile = lv_button_create(grid), *pair, *ic, *nm;
 
 		/* Two big tiles per row. */
-		lv_obj_set_size(tile, (CHUMBY_APP_W - 3 * 8) / 2, 84);
+		lv_obj_set_size(tile, (CHUMBY_APP_W - 3 * HOME_GAP) / 2, 84);
 		lv_obj_set_style_radius(tile, 12, 0);
 		lv_obj_add_event_cb(tile, tile_cb, LV_EVENT_CLICKED, &apps[i]);
 		/* Icon over name, the pair centred in the tile. */
@@ -781,8 +803,8 @@ static void on_mode(chumby_mode_t mode, void *user)
 		lv_obj_clean(home_scr);
 		build_home(home_scr);
 	}
-	panel_rebuild();
-	quick_buttons_update();
+	if (panel_scr)
+		build_panel(panel_scr);
 	/* Apply the policy brightness on each switch (and at start); the
 	 * brightness popup can override it until the next switch. */
 	chumby_brightness_set(mode == CHUMBY_MODE_NIGHT ? p->night_brightness
@@ -1201,8 +1223,8 @@ int main(void)
 	load_apps();
 	ftl_init();
 
-	home = chumby_window_create("chumby-home", CHUMBY_APP_W, CHUMBY_SCREEN_H);
-	panel = chumby_window_create("chumby-panel", CHUMBY_PANEL_W, CHUMBY_SCREEN_H);
+	home = chumby_window_create("chumby-home", CHUMBY_APP_W, CHUMBY_APP_H);
+	panel = chumby_window_create("chumby-panel", CHUMBY_SCREEN_W, CHUMBY_BAR_H);
 	if (!home || !panel) {
 		fprintf(stderr, "chumby-shell: cannot create windows\n");
 		return 1;
@@ -1210,8 +1232,11 @@ int main(void)
 	home_scr = lv_display_get_screen_active(home);
 	panel_scr = lv_display_get_screen_active(panel);
 
-	build_panel(panel_scr);
-	chumby_on_mode_change(on_mode, NULL);	/* builds home, sets brightness */
+	popup_timer = lv_timer_create(popup_timer_cb, POPUP_IDLE_MS, NULL);
+	lv_timer_pause(popup_timer);
+	/* Builds the bar and home, sets the brightness. */
+	chumby_on_mode_change(on_mode, NULL);
+	lv_timer_create(bar_clock_cb, 1000, NULL);
 
 	chumby_watch_fd(find_input("rotary"), knob_readable, NULL);
 	chumby_watch_fd(find_input("snooze"), snooze_readable, NULL);

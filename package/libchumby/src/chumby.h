@@ -34,13 +34,16 @@
 extern "C" {
 #endif
 
-/* Screen geometry: chumby-wm's left panel and the app area beside it. */
+/* Screen geometry: chumby-wm's tab bar along the top, the app area below. */
 #define CHUMBY_SCREEN_W	320
 #define CHUMBY_SCREEN_H	240
-#define CHUMBY_PANEL_W	64
-#define CHUMBY_APP_W	(CHUMBY_SCREEN_W - CHUMBY_PANEL_W)
-/* The shell's volume/brightness bar, along the bottom of the app area. */
-#define CHUMBY_POPUP_H	56
+#define CHUMBY_BAR_H	32
+#define CHUMBY_APP_W	CHUMBY_SCREEN_W
+#define CHUMBY_APP_H	(CHUMBY_SCREEN_H - CHUMBY_BAR_H)
+/* The shell's volume/brightness slider: drops down from the bar's right
+ * end, under their buttons. */
+#define CHUMBY_POPUP_W	216
+#define CHUMBY_POPUP_H	52
 
 /*
  * Minimum touch target on the resistive panel (~9 mm). Anything a finger

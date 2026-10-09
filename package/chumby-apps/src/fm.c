@@ -2,7 +2,8 @@
 /*
  * chumby-fm: FM radio, laid out like an iPod's "now playing":
  *
- *   header      "FM Radio", signal bars (1-5, like a phone), scan
+ *   top right   signal bars (1-5, like a phone), scan (the shell's tab
+ *               bar names the app)
  *   middle      station art | frequency, with < > (0.1 MHz) under it
  *   title       station name (RDS, else call sign and city from the FCC
  *               lookup) and what's playing; scrolls when too long
@@ -65,7 +66,7 @@ static char rds_name[16], rds_now[170];		/* from the RDS reader */
 static char call_name[48];			/* from the art lookup */
 static char message[64];			/* transient: scanning, errors */
 static lv_obj_t *signal_bars[SIGNAL_BARS];
-static lv_obj_t *lbl_app, *lbl_freq, *lbl_title;
+static lv_obj_t *lbl_freq, *lbl_title;
 static lv_obj_t *art_tile, *art_img, *art_note;
 static lv_obj_t *btn_power, *btn_prev, *btn_next, *btn_down, *btn_up, *btn_scan;
 static lv_timer_t *tune_timer;
@@ -588,7 +589,6 @@ static void on_mode(chumby_mode_t mode, void *user)
 	lv_color_t surface = chumby_color(CHUMBY_COLOR_SURFACE);
 
 	(void)user;
-	lv_obj_set_style_text_color(lbl_app, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_style_text_color(lbl_freq, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_text_color(lbl_title, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 	lv_obj_set_style_text_color(art_note, chumby_color(CHUMBY_COLOR_TEXT), 0);
@@ -615,20 +615,15 @@ int main(void)
 
 	lv_obj_set_scrollable(scr, false);
 
-	/* Header: "FM Radio", signal bars, a small scan button (hold to scan)
-	 * with a full-size touch area. */
+	/* Top right: a small scan button (hold to scan) with a full-size
+	 * touch area, the signal bars under it. */
 	btn_scan = round_button(scr, LV_SYMBOL_REFRESH, CHUMBY_TOUCH_MIN,
 				&lv_font_montserrat_14);
 	lv_obj_set_style_bg_opa(btn_scan, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_bg_opa(btn_scan, LV_OPA_COVER, LV_STATE_PRESSED);
-	lv_obj_align(btn_scan, LV_ALIGN_TOP_RIGHT, -4, 2);
+	lv_obj_align(btn_scan, LV_ALIGN_TOP_RIGHT, -4, 0);
 	lv_obj_add_event_cb(btn_scan, scan_cb, LV_EVENT_SHORT_CLICKED, NULL);
 	lv_obj_add_event_cb(btn_scan, scan_cb, LV_EVENT_LONG_PRESSED, NULL);
-	lbl_app = lv_label_create(scr);
-	lv_label_set_text(lbl_app, "FM Radio");
-	lv_obj_set_style_text_font(lbl_app, chumby_font(CHUMBY_FONT_SMALL), 0);
-	lv_obj_align(lbl_app, LV_ALIGN_TOP_LEFT, 12, 0);
-	chumby_center_y_on(lbl_app, btn_scan);
 
 	bars = lv_obj_create(scr);
 	lv_obj_remove_style_all(bars);
@@ -643,12 +638,16 @@ int main(void)
 		lv_obj_set_size(signal_bars[i], 3, 4 + i * 10 / (SIGNAL_BARS - 1));
 		lv_obj_set_style_radius(signal_bars[i], 1, 0);
 	}
-	lv_obj_align_to(bars, btn_scan, LV_ALIGN_OUT_LEFT_MID, -4, 0);
+	lv_obj_align_to(bars, btn_scan, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
 
 	/* Content: art on the left, frequency and < > on the right; the
 	 * title under both. */
 	content = chumby_group(scr, LV_FLEX_FLOW_COLUMN, 8);
 	middle = chumby_group(content, LV_FLEX_FLOW_ROW, 16);
+	/* Art at the left edge, the frequency centred in the rest (clear of
+	 * the scan button). */
+	lv_obj_set_width(middle, CHUMBY_APP_W - 24);
+	lv_obj_set_style_pad_left(middle, 2, 0);
 	art_tile = lv_obj_create(middle);
 	lv_obj_remove_style_all(art_tile);
 	lv_obj_set_size(art_tile, ART_SIZE, ART_SIZE);
@@ -665,6 +664,8 @@ int main(void)
 	lv_obj_center(art_note);
 
 	right = chumby_group(middle, LV_FLEX_FLOW_COLUMN, 8);
+	lv_obj_set_flex_grow(right, 1);
+	lv_obj_set_style_pad_right(right, CHUMBY_TOUCH_MIN - 16, 0);
 	lbl_freq = lv_label_create(right);
 	lv_obj_set_style_text_font(lbl_freq, xl, 0);
 	/* Room for "108.0", so the layout doesn't move as it changes. */
@@ -704,7 +705,9 @@ int main(void)
 	chumby_center_y_on(btn_next, btn_power);
 	lv_obj_add_event_cb(btn_next, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
 
-	chumby_center_y_between(content, btn_scan, btn_power);
+	/* Centred in the space above the buttons. */
+	lv_obj_update_layout(scr);
+	chumby_center_y_at(content, lv_obj_get_y(btn_power) / 2);
 
 	load_station();
 	load_stations();
