@@ -185,7 +185,7 @@ chumby_mode_t chumby_mode(void)
 }
 
 /* Rockbox's Nimbus bitmap fonts, generated from the BDFs in fonts/ at build time. */
-extern lv_font_t nimbus_14, nimbus_19, nimbus_35, nimbus_35x2;
+extern lv_font_t nimbus_14, nimbus_19, nimbus_35, nimbus_35x2, nimbus_14x2;
 
 static const lv_font_t *fonts[CHUMBY_FONT_COUNT];
 
@@ -203,6 +203,7 @@ static void fonts_load(void)
 	fonts[CHUMBY_FONT_LARGE] = nimbus(&nimbus_19, &lv_font_montserrat_20);
 	fonts[CHUMBY_FONT_XL] = nimbus(&nimbus_35, &lv_font_montserrat_28);
 	fonts[CHUMBY_FONT_HUGE] = nimbus(&nimbus_35x2, &lv_font_montserrat_28);
+	fonts[CHUMBY_FONT_MEDIUM] = nimbus(&nimbus_14x2, &lv_font_montserrat_28);
 }
 
 const lv_font_t *chumby_font(chumby_font_t f)

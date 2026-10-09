@@ -2,12 +2,15 @@
 /*
  * chumby-fm: FM radio, laid out like an iPod's "now playing":
  *
- *   top right   signal bars (1-5, like a phone), scan (the shell's tab
- *               bar names the app)
- *   middle      station art | frequency, with < > (0.1 MHz) under it
- *   title       station name (RDS, else call sign and city from the FCC
- *               lookup) and what's playing; scrolls when too long
- *   bottom      previous station, on/off, next station
+ *   left        station art
+ *   right       < frequency > (0.1 MHz steps)
+ *               station name (RDS, else call sign and city from the FCC
+ *               lookup), signal bars (1-5, like a phone) on its baseline
+ *               what's playing, its baseline on the art's bottom edge
+ *   bottom      scan (hold), previous station, on/off, next station
+ *
+ * The name and what's playing scroll twice when they change and too long,
+ * then stop, cut with dots.
  *
  * Art: chumby-station-art finds the station (FCC, nearest transmitter)
  * and its logo (Wikipedia), cached in /var/lib/chumby/art per frequency;
@@ -63,7 +66,7 @@ static char rds_name[16], rds_now[170];		/* from the RDS reader */
 static char call_name[48];			/* from the art lookup */
 static char message[64];			/* transient: scanning, errors */
 static lv_obj_t *signal_bars[SIGNAL_BARS];
-static lv_obj_t *lbl_freq, *lbl_title;
+static lv_obj_t *lbl_freq, *lbl_name, *lbl_song;
 static lv_obj_t *art_tile, *art_img, *art_note;
 static lv_obj_t *btn_power, *btn_prev, *btn_next, *btn_down, *btn_up, *btn_scan;
 static lv_timer_t *tune_timer;
@@ -192,23 +195,48 @@ static void signal_update(void)
 /* ------------------------------------------------------------------ */
 /* Title line and art                                                 */
 
-/* Station name (RDS, else call sign) and what's playing; or a transient
- * message. Scrolls (label long mode) when it doesn't fit. */
+/*
+ * A label that, given new text too long for it, scrolls through it twice
+ * and then stops, cut with dots: LVGL's circular scroll with an animation
+ * template (2 repeats, a pause first), switched to dots once done.
+ */
+static lv_anim_t scroll_twice;
+
+static void scroll_done_async(void *label)
+{
+	lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+}
+
+static void scroll_done(lv_anim_t *a)
+{
+	/* Not from inside the label's own animation. */
+	lv_async_call(scroll_done_async, a->var);
+}
+
+static void scroll_label_init(lv_obj_t *l)
+{
+	/* One line, always: dots need a fixed height (else it wraps). */
+	lv_obj_set_height(l, lv_font_get_line_height(lv_obj_get_style_text_font(l, 0)));
+	lv_obj_set_style_anim(l, &scroll_twice, 0);
+	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+	lv_label_set_text(l, "");
+}
+
+static void scroll_label_set(lv_obj_t *l, const char *text)
+{
+	if (!strcmp(lv_label_get_text(l), text))
+		return;
+	lv_anim_delete(l, NULL);	/* start over, from the beginning */
+	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+	lv_label_set_text(l, text);
+}
+
+/* Station name (RDS, else call sign); what's playing, or a transient
+ * message. */
 static void title_update(void)
 {
-	char text[256];
-	const char *name = rds_name[0] ? rds_name : call_name;
-
-	if (message[0])
-		snprintf(text, sizeof(text), "%s", message);
-	else if (name[0] && rds_now[0])
-		snprintf(text, sizeof(text), "%s  |  %s", name, rds_now);
-	else if (name[0] || rds_now[0])
-		snprintf(text, sizeof(text), "%s", name[0] ? name : rds_now);
-	else
-		snprintf(text, sizeof(text), "%d.%d FM", freq / 10, freq % 10);
-	if (strcmp(lv_label_get_text(lbl_title), text))
-		lv_label_set_text(lbl_title, text);
+	scroll_label_set(lbl_name, rds_name[0] ? rds_name : call_name);
+	scroll_label_set(lbl_song, message[0] ? message : rds_now);
 }
 
 static void art_show_note(void)
@@ -524,7 +552,8 @@ static void on_mode(chumby_mode_t mode, void *user)
 
 	(void)user;
 	lv_obj_set_style_text_color(lbl_freq, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_style_text_color(lbl_title, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(lbl_name, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_style_text_color(lbl_song, chumby_color(CHUMBY_COLOR_ACCENT), 0);
 	lv_obj_set_style_text_color(art_note, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	/* A white logo tile would glare at night. */
 	lv_obj_set_style_opa(art_tile, mode == CHUMBY_MODE_NIGHT ? LV_OPA_50 : LV_OPA_COVER, 0);
@@ -537,53 +566,77 @@ static void on_mode(chumby_mode_t mode, void *user)
 	lv_obj_set_style_bg_color(btn_power, chumby_color(CHUMBY_COLOR_ACCENT), LV_STATE_CHECKED);
 	lv_obj_set_style_bg_color(btn_scan, surface, LV_STATE_PRESSED);
 	lv_obj_set_style_text_color(btn_scan, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_border_color(btn_scan, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	if (!lv_obj_is_hidden(art_note))
 		art_show_note();	/* gradient in the new palette */
 }
 
+/* Put a label's text baseline at y (in its parent). */
+static void baseline_at(lv_obj_t *l, int32_t y)
+{
+	const lv_font_t *f = lv_obj_get_style_text_font(l, 0);
+
+	lv_obj_set_y(l, y - (f->line_height - f->base_line));
+}
+
+static int32_t baseline_of(lv_obj_t *l)
+{
+	const lv_font_t *f = lv_obj_get_style_text_font(l, 0);
+
+	lv_obj_update_layout(l);
+	return lv_obj_get_y(l) + f->line_height - f->base_line;
+}
+
+#define COL_X		(ART_X + ART_SIZE + 12)	/* the right column */
+#define COL_W		(CHUMBY_APP_W - 10 - COL_X)
+#define ART_X		14
+#define STEP_SIZE	38			/* the < > buttons */
+#define BARS_W		(SIGNAL_BARS * 3 + (SIGNAL_BARS - 1) * 2)
+
 int main(void)
 {
-	lv_obj_t *scr = chumby_app_init("FM Radio"), *bars, *content, *middle, *right, *steps;
-	const lv_font_t *xl = chumby_font(CHUMBY_FONT_XL);
+	lv_obj_t *scr = chumby_app_init("FM Radio"), *bars, *row;
+	const lv_font_t *mid = chumby_font(CHUMBY_FONT_MEDIUM);
+	int32_t art_y;
 	int i;
 
 	lv_obj_set_scrollable(scr, false);
+	lv_anim_init(&scroll_twice);
+	lv_anim_set_repeat_count(&scroll_twice, 2);
+	lv_anim_set_delay(&scroll_twice, 1500);		/* read the start first */
+	lv_anim_set_completed_cb(&scroll_twice, scroll_done);
 
-	/* Top right: a small scan button (hold to scan) with a full-size
-	 * touch area, the signal bars under it. */
-	btn_scan = round_button(scr, LV_SYMBOL_REFRESH, CHUMBY_TOUCH_MIN,
-				&lv_font_montserrat_14);
+	/* Bottom: scan (small, hold to scan), previous, power, next. */
+	row = lv_obj_create(scr);
+	lv_obj_remove_style_all(row);
+	lv_obj_set_scrollable(row, false);
+	lv_obj_set_size(row, CHUMBY_APP_W, 56);
+	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -8);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	btn_scan = round_button(row, LV_SYMBOL_REFRESH, STEP_SIZE, &lv_font_montserrat_14);
 	lv_obj_set_style_bg_opa(btn_scan, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_bg_opa(btn_scan, LV_OPA_COVER, LV_STATE_PRESSED);
-	lv_obj_align(btn_scan, LV_ALIGN_TOP_RIGHT, -4, 0);
+	lv_obj_set_style_border_width(btn_scan, 1, 0);
+	lv_obj_set_style_border_opa(btn_scan, LV_OPA_40, 0);
+	lv_obj_set_ext_click_area(btn_scan, (CHUMBY_TOUCH_MIN - STEP_SIZE) / 2);
 	lv_obj_add_event_cb(btn_scan, scan_cb, LV_EVENT_SHORT_CLICKED, NULL);
 	lv_obj_add_event_cb(btn_scan, scan_cb, LV_EVENT_LONG_PRESSED, NULL);
+	btn_prev = round_button(row, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
+	lv_obj_add_event_cb(btn_prev, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
+	btn_power = round_button(row, LV_SYMBOL_POWER, 56, &lv_font_montserrat_28);
+	lv_obj_set_checkable(btn_power, true);
+	lv_obj_add_event_cb(btn_power, power_cb, LV_EVENT_CLICKED, NULL);
+	btn_next = round_button(row, LV_SYMBOL_NEXT, 52, &lv_font_montserrat_28);
+	lv_obj_add_event_cb(btn_next, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
+	lv_obj_update_layout(scr);
 
-	bars = lv_obj_create(scr);
-	lv_obj_remove_style_all(bars);
-	lv_obj_set_size(bars, SIGNAL_BARS * 3 + (SIGNAL_BARS - 1) * 2, 14);
-	lv_obj_set_flex_flow(bars, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(bars, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-	lv_obj_set_style_pad_column(bars, 2, 0);
-	lv_obj_set_clickable(bars, false);
-	for (i = 0; i < SIGNAL_BARS; i++) {
-		signal_bars[i] = lv_obj_create(bars);
-		lv_obj_remove_style_all(signal_bars[i]);
-		lv_obj_set_size(signal_bars[i], 3, 4 + i * 10 / (SIGNAL_BARS - 1));
-		lv_obj_set_style_radius(signal_bars[i], 1, 0);
-	}
-	lv_obj_align_to(bars, btn_scan, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
-
-	/* Content: art on the left, frequency and < > on the right; the
-	 * title under both. */
-	content = chumby_group(scr, LV_FLEX_FLOW_COLUMN, 8);
-	middle = chumby_group(content, LV_FLEX_FLOW_ROW, 16);
-	/* Art at the left edge, the frequency centred in the rest (clear of
-	 * the scan button). */
-	lv_obj_set_width(middle, CHUMBY_APP_W - 24);
-	lv_obj_set_style_pad_left(middle, 2, 0);
-	art_tile = lv_obj_create(middle);
+	/* The art, centred in the space above the buttons. */
+	art_y = (lv_obj_get_y(row) - ART_SIZE) / 2;
+	art_tile = lv_obj_create(scr);
 	lv_obj_remove_style_all(art_tile);
+	lv_obj_set_pos(art_tile, ART_X, art_y);
 	lv_obj_set_size(art_tile, ART_SIZE, ART_SIZE);
 	lv_obj_set_style_radius(art_tile, 10, 0);
 	lv_obj_set_style_bg_opa(art_tile, LV_OPA_COVER, 0);
@@ -597,51 +650,55 @@ int main(void)
 	lv_obj_set_style_text_font(art_note, &lv_font_montserrat_48, 0);
 	lv_obj_center(art_note);
 
-	right = chumby_group(middle, LV_FLEX_FLOW_COLUMN, 8);
-	lv_obj_set_flex_grow(right, 1);
-	lv_obj_set_style_pad_right(right, CHUMBY_TOUCH_MIN - 16, 0);
-	lbl_freq = lv_label_create(right);
-	lv_obj_set_style_text_font(lbl_freq, xl, 0);
-	/* Room for "108.0", so the layout doesn't move as it changes. */
-	lv_obj_set_width(lbl_freq, 4 * lv_font_get_glyph_width(xl, '0', 0) +
-			 lv_font_get_glyph_width(xl, '.', 0));
-	lv_obj_set_style_text_align(lbl_freq, LV_TEXT_ALIGN_CENTER, 0);
-	steps = chumby_group(right, LV_FLEX_FLOW_ROW, 12);
-	btn_down = round_button(steps, "<", CHUMBY_TOUCH_MIN, chumby_font(CHUMBY_FONT_LARGE));
+	/* Right column, top: < frequency >, level with the art's top. */
+	btn_down = round_button(scr, "<", STEP_SIZE, chumby_font(CHUMBY_FONT_LARGE));
+	lv_obj_set_pos(btn_down, COL_X, art_y);
+	lv_obj_set_ext_click_area(btn_down, (CHUMBY_TOUCH_MIN - STEP_SIZE) / 2);
 	lv_obj_add_event_cb(btn_down, step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
 	lv_obj_add_event_cb(btn_down, step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)-1);
-	btn_up = round_button(steps, ">", CHUMBY_TOUCH_MIN, chumby_font(CHUMBY_FONT_LARGE));
+	btn_up = round_button(scr, ">", STEP_SIZE, chumby_font(CHUMBY_FONT_LARGE));
+	lv_obj_set_pos(btn_up, COL_X + COL_W - STEP_SIZE, art_y);
+	lv_obj_set_ext_click_area(btn_up, (CHUMBY_TOUCH_MIN - STEP_SIZE) / 2);
 	lv_obj_add_event_cb(btn_up, step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
 	lv_obj_add_event_cb(btn_up, step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)1);
+	lbl_freq = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_freq, mid, 0);
+	lv_obj_set_width(lbl_freq, COL_W - 2 * STEP_SIZE);
+	lv_obj_set_x(lbl_freq, COL_X + STEP_SIZE);
+	lv_obj_set_style_text_align(lbl_freq, LV_TEXT_ALIGN_CENTER, 0);
+	lv_label_set_text(lbl_freq, "108.0");
+	chumby_center_y_on(lbl_freq, btn_down);
 
-	/* Title: the full width, scrolling smoothly when too long. */
-	lbl_title = lv_label_create(content);
-	lv_obj_set_style_text_font(lbl_title, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_width(lbl_title, CHUMBY_APP_W - 24);
-	lv_label_set_long_mode(lbl_title, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
-	lv_obj_set_style_text_align(lbl_title, LV_TEXT_ALIGN_CENTER, 0);
-	lv_label_set_text(lbl_title, "");
-	lv_obj_align(content, LV_ALIGN_TOP_MID, 0, 0);
+	/* Bottom: what's playing, its baseline on the art's bottom edge. */
+	lbl_song = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_song, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_width(lbl_song, COL_W);
+	lv_obj_set_x(lbl_song, COL_X);
+	scroll_label_init(lbl_song);
+	baseline_at(lbl_song, art_y + ART_SIZE);
 
-	/* Bottom: previous station, power, next station. */
-	btn_power = round_button(scr, LV_SYMBOL_POWER, 56, &lv_font_montserrat_28);
-	lv_obj_set_checkable(btn_power, true);
-	lv_obj_align(btn_power, LV_ALIGN_BOTTOM_MID, 0, -8);
-	lv_obj_add_event_cb(btn_power, power_cb, LV_EVENT_CLICKED, NULL);
+	/* Between them: the station's name, the signal bars on its baseline. */
+	lbl_name = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_name, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_width(lbl_name, COL_W - BARS_W - 6);
+	lv_obj_set_x(lbl_name, COL_X);
+	scroll_label_init(lbl_name);
+	chumby_center_y_between(lbl_name, btn_down, lbl_song);
 
-	btn_prev = round_button(scr, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
-	lv_obj_align(btn_prev, LV_ALIGN_BOTTOM_LEFT, 22, 0);
-	chumby_center_y_on(btn_prev, btn_power);
-	lv_obj_add_event_cb(btn_prev, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
-
-	btn_next = round_button(scr, LV_SYMBOL_NEXT, 52, &lv_font_montserrat_28);
-	lv_obj_align(btn_next, LV_ALIGN_BOTTOM_RIGHT, -22, 0);
-	chumby_center_y_on(btn_next, btn_power);
-	lv_obj_add_event_cb(btn_next, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
-
-	/* Centred in the space above the buttons. */
-	lv_obj_update_layout(scr);
-	chumby_center_y_at(content, lv_obj_get_y(btn_power) / 2);
+	bars = lv_obj_create(scr);
+	lv_obj_remove_style_all(bars);
+	lv_obj_set_size(bars, BARS_W, 14);
+	lv_obj_set_flex_flow(bars, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(bars, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+	lv_obj_set_style_pad_column(bars, 2, 0);
+	lv_obj_set_clickable(bars, false);
+	for (i = 0; i < SIGNAL_BARS; i++) {
+		signal_bars[i] = lv_obj_create(bars);
+		lv_obj_remove_style_all(signal_bars[i]);
+		lv_obj_set_size(signal_bars[i], 3, 4 + i * 10 / (SIGNAL_BARS - 1));
+		lv_obj_set_style_radius(signal_bars[i], 1, 0);
+	}
+	lv_obj_set_pos(bars, COL_X + COL_W - BARS_W, baseline_of(lbl_name) - 14);
 
 	load_station();
 	load_stations();

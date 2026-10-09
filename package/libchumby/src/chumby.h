@@ -62,6 +62,7 @@ typedef enum {
 	CHUMBY_FONT_LARGE,	/* Nimbus 19: headings */
 	CHUMBY_FONT_XL,		/* Nimbus 35: big values */
 	CHUMBY_FONT_HUGE,	/* Nimbus 35 at 2x: clock */
+	CHUMBY_FONT_MEDIUM,	/* Nimbus 14 at 2x (28 px): mid-size values */
 	CHUMBY_FONT_COUNT
 } chumby_font_t;
 

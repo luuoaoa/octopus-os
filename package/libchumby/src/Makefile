@@ -9,8 +9,9 @@ LVGL_PATH := lvgl
 PROTO_SRCS := wayland_xdg_shell.c wayland_xdg_output.c
 PROTO_HDRS := $(PROTO_SRCS:.c=.h)
 # Nimbus bitmap fonts (BDF from Rockbox), converted at build time:
-# name = file, scale. The clock face is the 35 px font doubled.
-FONTS := nimbus_14 nimbus_19 nimbus_35 nimbus_35x2
+# name = file, scale. The clock face is the 35 px font doubled; the FM
+# frequency the 14 px one (Rockbox has nothing between 19 and 35).
+FONTS := nimbus_14 nimbus_19 nimbus_35 nimbus_35x2 nimbus_14x2
 FONT_SRCS := $(FONTS:=.c)
 CSRCS := $(shell find $(LVGL_PATH)/src -type f -name '*.c') chumby.c $(PROTO_SRCS) \
 	$(FONT_SRCS)
