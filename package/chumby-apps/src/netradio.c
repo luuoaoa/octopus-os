@@ -3,9 +3,9 @@
  * chumby-netradio: internet radio, laid out like the FM app:
  *
  *   left        station logo
- *   right       station name
- *               its category, and the stream's codec and bitrate where FM
- *               has its signal bars
+ *   right       its category, and the stream's codec and bitrate at the
+ *               right (where FM has its signal bars), small
+ *               station name
  *               what's playing (the stream's ICY title) or how it's going,
  *               its baseline on the logo's bottom edge
  *   bottom      station list, previous station, play/stop, next station
@@ -744,14 +744,22 @@ int main(void)
 	lv_obj_set_style_text_font(art_note, &lv_font_montserrat_48, 0);
 	lv_obj_center(art_note);
 
-	/* Right column, top: the station's name, level with the logo's top
-	 * (where FM's < frequency > row is). */
-	lbl_name = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_name, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_width(lbl_name, COL_W);
-	lv_obj_set_x(lbl_name, COL_X);
-	chumby_scroll_label_init(lbl_name);
-	lv_obj_set_y(lbl_name, art_y + (SMALL_BTN - lv_obj_get_height(lbl_name)) / 2);
+	/* Right column, top, level with the logo's top: the category, and
+	 * the codec and bitrate at the right (where FM has its signal bars),
+	 * small. */
+	lbl_cat = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_cat, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_width(lbl_cat, COL_W - INFO_W - 6);
+	lv_obj_set_height(lbl_cat, lv_font_get_line_height(chumby_font(CHUMBY_FONT_BODY)));
+	lv_label_set_long_mode(lbl_cat, LV_LABEL_LONG_MODE_DOTS);
+	lv_obj_set_pos(lbl_cat, COL_X, art_y);
+	lv_label_set_text(lbl_cat, "");
+	lbl_info = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_info, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_width(lbl_info, INFO_W);
+	lv_obj_set_style_text_align(lbl_info, LV_TEXT_ALIGN_RIGHT, 0);
+	lv_label_set_text(lbl_info, "");
+	lv_obj_set_pos(lbl_info, COL_X + COL_W - INFO_W, art_y);
 
 	/* Bottom: what's playing, its baseline on the logo's bottom edge. */
 	lbl_song = lv_label_create(scr);
@@ -761,23 +769,13 @@ int main(void)
 	chumby_scroll_label_init(lbl_song);
 	baseline_at(lbl_song, art_y + ART_SIZE);
 
-	/* Between: the category, and the codec and bitrate at the right
-	 * (FM's signal bars), sharing a baseline. */
-	lbl_cat = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_cat, chumby_font(CHUMBY_FONT_BODY), 0);
-	lv_obj_set_width(lbl_cat, COL_W - INFO_W - 6);
-	lv_obj_set_height(lbl_cat, lv_font_get_line_height(chumby_font(CHUMBY_FONT_BODY)));
-	lv_label_set_long_mode(lbl_cat, LV_LABEL_LONG_MODE_DOTS);
-	lv_obj_set_x(lbl_cat, COL_X);
-	lv_label_set_text(lbl_cat, "");
-	chumby_center_y_between(lbl_cat, lbl_name, lbl_song);
-	lbl_info = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_info, chumby_font(CHUMBY_FONT_BODY), 0);
-	lv_obj_set_width(lbl_info, INFO_W);
-	lv_obj_set_style_text_align(lbl_info, LV_TEXT_ALIGN_RIGHT, 0);
-	lv_label_set_text(lbl_info, "");
-	lv_obj_set_x(lbl_info, COL_X + COL_W - INFO_W);
-	chumby_center_y_between(lbl_info, lbl_name, lbl_song);
+	/* Between them: the station's name. */
+	lbl_name = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_name, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_width(lbl_name, COL_W);
+	lv_obj_set_x(lbl_name, COL_X);
+	chumby_scroll_label_init(lbl_name);
+	chumby_center_y_between(lbl_name, lbl_cat, lbl_song);
 
 	switch_timer = lv_timer_create(switch_timer_cb, 600, NULL);
 	lv_timer_pause(switch_timer);

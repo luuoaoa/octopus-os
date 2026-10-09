@@ -15,8 +15,8 @@
  *   - Shoutcast/Icecast streams, MP3 (libmpg123) or AAC (faad2, fixed
  *     point: no FPU here); their "ICY" metadata gives what's playing.
  *     A thread downloads into a buffer of a few seconds, and playing
- *     starts (again, after running dry) once ~2 s are in: Wi-Fi hiccups
- *     don't reach the speaker
+ *     starts (again, after running dry) once ~2 s are in (by the
+ *     server's icy-br, else 128k): Wi-Fi hiccups don't reach the speaker
  *   - HLS (.m3u8): MPEG-TS or packed-audio segments of either, fetched
  *     by a thread on one kept-alive connection (a TLS handshake per 2 s
  *     segment would be too slow on this CPU) and queued for playing
@@ -78,6 +78,7 @@ static long metaint, audio_left;
 static int meta_len = -1, meta_got;
 static char meta[255 * 16 + 1];
 static bool got_name;
+static int icy_br;			/* the server's stated bitrate, kbit/s */
 
 static void on_signal(int sig)
 {
@@ -193,9 +194,35 @@ static bool pcm_setup(long rate, int channels)
 		pcm = NULL;
 		return false;
 	}
-	/* Half a second of buffer rides out network hiccups. */
-	err = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16, SND_PCM_ACCESS_RW_INTERLEAVED,
-				 channels, rate, 1, 500000);
+	/* Half a second of buffer rides out hiccups. Step by step with the
+	 * "near" calls: snd_pcm_set_params() gives up on rates the codec
+	 * must resample, like 24 kHz (BBC World Service) - no period size
+	 * fits exactly. */
+	{
+		snd_pcm_hw_params_t *hw;
+		unsigned int r = rate, bt = 500000, pt = bt / 4;
+
+		snd_pcm_hw_params_alloca(&hw);
+		err = snd_pcm_hw_params_any(pcm, hw);
+		if (err >= 0)
+			err = snd_pcm_hw_params_set_rate_resample(pcm, hw, 1);
+		if (err >= 0)
+			err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
+		if (err >= 0)
+			err = snd_pcm_hw_params_set_format(pcm, hw, SND_PCM_FORMAT_S16);
+		if (err >= 0)
+			err = snd_pcm_hw_params_set_channels(pcm, hw, channels);
+		if (err >= 0)
+			err = snd_pcm_hw_params_set_rate_near(pcm, hw, &r, NULL);
+		if (err >= 0)
+			err = snd_pcm_hw_params_set_buffer_time_near(pcm, hw, &bt, NULL);
+		if (err >= 0)
+			err = snd_pcm_hw_params_set_period_time_near(pcm, hw, &pt, NULL);
+		if (err >= 0)
+			err = snd_pcm_hw_params(pcm, hw);
+		if (err >= 0 && r != (unsigned int)rate)
+			err = -EINVAL;	/* would play at the wrong speed */
+	}
 	if (err < 0) {
 		fprintf(stderr, "chumby-stream: %ld Hz x%d: %s\n", rate, channels,
 			snd_strerror(err));
@@ -484,7 +511,9 @@ static size_t on_header(char *buf, size_t size, size_t n, void *user)
 	*v++ = '\0';
 	while (*v == ' ')
 		v++;
-	if (!strcasecmp(line, "content-type")) {
+	if (!strcasecmp(line, "icy-br")) {
+		icy_br = atoi(v);
+	} else if (!strcasecmp(line, "content-type")) {
 		if (!strncasecmp(v, "audio/aac", 9) || !strncasecmp(v, "audio/x-aac", 11))
 			codec = CODEC_AAC;
 		else if (!strncasecmp(v, "audio/mpeg", 10))
@@ -503,7 +532,9 @@ static size_t on_header(char *buf, size_t size, size_t n, void *user)
 
 /* Compressed audio between the network thread and the player. */
 #define RING_SIZE	(256 * 1024)	/* ~10 s at 192 kbit/s */
-#define PREBUFFER	(48 * 1024)	/* ~2 s at 192 kbit/s, 3 s at 128 */
+#define PREBUFFER	(32 * 1024)	/* ~2 s at 128 kbit/s, if it doesn't say */
+#define PREBUFFER_MIN	(8 * 1024)
+#define PREBUFFER_MAX	(48 * 1024)
 
 static unsigned char ring[RING_SIZE];
 static size_t ring_head, ring_len;	/* read position, bytes held */
@@ -946,17 +977,22 @@ static CURLcode stream_play(CURL *c)
 {
 	static unsigned char chunk[4096];
 	bool filled = false;
+	size_t prebuf;
 	struct timespec ts;
 	pthread_t t;
 	size_t n;
 
 	ring_head = ring_len = 0;
 	net_done = false;
+	icy_br = 0;
 	if (pthread_create(&t, NULL, net_thread, c))
 		return CURLE_FAILED_INIT;
 	while (!stop) {
+		/* ~2 s of it: a 56k station shouldn't wait 7 s. */
+		prebuf = icy_br > 0 ? (size_t)icy_br * 250 : PREBUFFER;
+		prebuf = prebuf < PREBUFFER_MIN ? PREBUFFER_MIN : prebuf > PREBUFFER_MAX ? PREBUFFER_MAX : prebuf;
 		pthread_mutex_lock(&ring_lock);
-		while (!stop && !net_done && ring_len < (filled ? 1 : PREBUFFER)) {
+		while (!stop && !net_done && ring_len < (filled ? 1 : prebuf)) {
 			clock_gettime(CLOCK_REALTIME, &ts);
 			ts.tv_nsec += 200 * 1000000L;
 			if (ts.tv_nsec >= 1000000000L) {
