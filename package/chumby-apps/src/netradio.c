@@ -203,6 +203,7 @@ static void art_show_note(void)
 	lv_obj_set_hidden(art_img, true);
 	lv_obj_set_hidden(art_note, false);
 	lv_obj_set_style_bg_color(art_tile, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(art_note, chumby_on_accent(), 0);
 	lv_obj_set_style_bg_grad_color(art_tile, chumby_color(CHUMBY_COLOR_SURFACE), 0);
 	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_VER, 0);
 }
@@ -541,8 +542,12 @@ static lv_obj_t *tile(lv_obj_t *parent, const char *text, const char *sub, bool 
 	lv_obj_set_style_radius(b, 8, 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
 	lv_obj_set_style_pad_hor(b, 8, 0);
-	lv_obj_set_style_bg_color(b, chumby_color(on ? CHUMBY_COLOR_ACCENT : CHUMBY_COLOR_SURFACE), 0);
-	lv_obj_set_style_text_color(b, chumby_color(on ? CHUMBY_COLOR_BG : CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_text_color(b, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	if (on) {	/* the selected one: the accent, glossy */
+		chumby_glossy(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+		lv_obj_set_style_text_color(b, chumby_on_accent(), 0);
+	}
 	l = lv_label_create(b);
 	lv_label_set_text(l, text);
 	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
@@ -558,7 +563,7 @@ static lv_obj_t *tile(lv_obj_t *parent, const char *text, const char *sub, bool 
 	if (sub) {
 		l = lv_label_create(b);
 		lv_label_set_text(l, sub);
-		lv_obj_set_style_text_color(l, chumby_color(on ? CHUMBY_COLOR_BG : CHUMBY_COLOR_TEXT_DIM), 0);
+		lv_obj_set_style_text_color(l, on ? chumby_on_accent() : chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 		lv_obj_align(l, LV_ALIGN_RIGHT_MID, 0, 0);
 	}
 	return b;
@@ -676,7 +681,6 @@ static void on_mode(chumby_mode_t mode, void *user)
 	lv_obj_set_style_bg_color(btn_prev, surface, 0);
 	lv_obj_set_style_bg_color(btn_next, surface, 0);
 	lv_obj_set_style_bg_color(btn_play, surface, 0);
-	lv_obj_set_style_bg_color(btn_play, chumby_color(CHUMBY_COLOR_ACCENT), LV_STATE_CHECKED);
 	lv_obj_set_style_bg_color(btn_list, surface, LV_STATE_PRESSED);
 	lv_obj_set_style_text_color(btn_list, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_style_border_color(btn_list, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);

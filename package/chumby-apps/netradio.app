@@ -4,3 +4,4 @@ Name = Internet Radio
 Exec = /usr/bin/chumby-netradio
 Icon = wifi
 Short = Net Radio
+Color = #2f80d8

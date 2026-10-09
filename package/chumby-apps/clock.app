@@ -3,3 +3,4 @@ Id = Clock
 Name = Clock
 Exec = /usr/bin/chumby-clock
 Icon = bell
+Color = #3a9a5c

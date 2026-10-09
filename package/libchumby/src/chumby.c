@@ -5,6 +5,7 @@
 
 #define _GNU_SOURCE
 #include <alsa/asoundlib.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -164,7 +165,7 @@ static const uint32_t palette[2][CHUMBY_COLOR_COUNT] = {
 		[CHUMBY_COLOR_SURFACE]	= 0xf5f5f5,
 		[CHUMBY_COLOR_TEXT]	= 0x1c1c1c,
 		[CHUMBY_COLOR_TEXT_DIM]	= 0x6e6e6e,
-		[CHUMBY_COLOR_ACCENT]	= 0x4a4a4a,
+		[CHUMBY_COLOR_ACCENT]	= 0x4a4a4a,	/* unused: see chumby_accent() */
 		[CHUMBY_COLOR_BAR]	= 0xd2d2d2,	/* a shade darker */
 	},
 	[CHUMBY_MODE_NIGHT] = {
@@ -172,14 +173,74 @@ static const uint32_t palette[2][CHUMBY_COLOR_COUNT] = {
 		[CHUMBY_COLOR_SURFACE]	= 0x1e1e1e,
 		[CHUMBY_COLOR_TEXT]	= 0xc8c8c8,
 		[CHUMBY_COLOR_TEXT_DIM]	= 0x6a6a6a,
-		[CHUMBY_COLOR_ACCENT]	= 0x7a7a7a,
+		[CHUMBY_COLOR_ACCENT]	= 0x7a7a7a,	/* unused: see chumby_accent() */
 		[CHUMBY_COLOR_BAR]	= 0x141414,	/* nothing's darker than black */
 	},
 };
 
+static uint32_t accent_day = CHUMBY_ACCENT_DEFAULT;
+
+lv_color_t chumby_accent(uint32_t day_rgb)
+{
+	return lv_color_hex(mode == CHUMBY_MODE_NIGHT ? CHUMBY_ACCENT_NIGHT : day_rgb);
+}
+
+lv_color_t chumby_on_accent(void)
+{
+	return mode == CHUMBY_MODE_NIGHT ? lv_color_black() : lv_color_white();
+}
+
+void chumby_set_accent(uint32_t rgb)
+{
+	accent_day = rgb;
+}
+
 lv_color_t chumby_color(chumby_color_t c)
 {
+	if (c == CHUMBY_COLOR_ACCENT)
+		return chumby_accent(accent_day);
 	return lv_color_hex(palette[mode][c < CHUMBY_COLOR_COUNT ? c : 0]);
+}
+
+void chumby_glossy(lv_obj_t *obj, lv_color_t c, lv_style_selector_t sel)
+{
+	lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, sel);
+	lv_obj_set_style_bg_color(obj, lv_color_lighten(c, mode == CHUMBY_MODE_NIGHT ? 25 : 55), sel);
+	lv_obj_set_style_bg_grad_color(obj, c, sel);
+	lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, sel);
+}
+
+/* The app's hue: "Color = #rrggbb" in the .app whose Id is ours. */
+static void accent_from_app(const char *app_id)
+{
+	DIR *d = opendir("/usr/share/chumby/apps");
+	struct dirent *e;
+
+	while (d && (e = readdir(d))) {
+		char path[300], line[256], id[64] = "";
+		unsigned int rgb = 0;
+		bool has = false;
+		FILE *f;
+
+		if (!strstr(e->d_name, ".app"))
+			continue;
+		snprintf(path, sizeof(path), "/usr/share/chumby/apps/%s", e->d_name);
+		f = fopen(path, "r");
+		while (f && fgets(line, sizeof(line), f)) {
+			if (sscanf(line, " Id = %63[^\n]", id) == 1)
+				continue;
+			if (sscanf(line, " Color = #%x", &rgb) == 1)
+				has = true;
+		}
+		if (f)
+			fclose(f);
+		if (has && !strcmp(id, app_id)) {
+			accent_day = rgb;
+			break;
+		}
+	}
+	if (d)
+		closedir(d);
 }
 
 chumby_mode_t chumby_mode(void)
@@ -575,9 +636,13 @@ static void theme_styles_init(void)
 	lv_style_set_bg_opa(&st_btn, LV_OPA_COVER);
 	lv_style_set_text_color(&st_btn, chumby_color(CHUMBY_COLOR_TEXT));
 	lv_style_set_shadow_width(&st_btn, 0);
-	lv_style_set_bg_color(&st_btn_checked, chumby_color(CHUMBY_COLOR_ACCENT));
+	/* Checked (playing, on): the accent, glossy. */
+	lv_style_set_bg_color(&st_btn_checked, lv_color_lighten(chumby_color(CHUMBY_COLOR_ACCENT),
+				mode == CHUMBY_MODE_NIGHT ? 25 : 55));
+	lv_style_set_bg_grad_color(&st_btn_checked, chumby_color(CHUMBY_COLOR_ACCENT));
+	lv_style_set_bg_grad_dir(&st_btn_checked, LV_GRAD_DIR_VER);
 	/* On the accent: the background's shade (light by day, black at night). */
-	lv_style_set_text_color(&st_btn_checked, chumby_color(CHUMBY_COLOR_BG));
+	lv_style_set_text_color(&st_btn_checked, chumby_on_accent());
 	/* Tracks must stay visible on the night palette's black. */
 	lv_style_set_bg_color(&st_track, chumby_color(CHUMBY_COLOR_TEXT_DIM));
 	lv_style_set_bg_opa(&st_track, LV_OPA_40);
@@ -699,7 +764,10 @@ void chumby_window_close(lv_display_t *disp)
 lv_obj_t *chumby_app_init(const char *app_id)
 {
 	/* chumby-wm sizes app windows to the area under the tab bar. */
-	lv_display_t *disp = chumby_window_create(app_id, CHUMBY_APP_W, CHUMBY_APP_H);
+	lv_display_t *disp;
+
+	accent_from_app(app_id);	/* before the theme takes its colours */
+	disp = chumby_window_create(app_id, CHUMBY_APP_W, CHUMBY_APP_H);
 
 	if (!disp) {
 		fprintf(stderr, "%s: cannot open a Wayland window "

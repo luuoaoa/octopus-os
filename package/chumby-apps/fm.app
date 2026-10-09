@@ -3,3 +3,4 @@ Id = FM Radio
 Name = FM Radio
 Exec = /usr/bin/chumby-fm
 Icon = audio
+Color = #e0782a

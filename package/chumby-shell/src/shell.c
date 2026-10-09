@@ -63,6 +63,7 @@ struct app_info {
 	char id[32];		/* xdg app_id the app uses (= its window title) */
 	char name[32];
 	char short_name[16];	/* for its tab, if the name is long */
+	uint32_t color;		/* its hue (Color = #rrggbb), by day */
 	char exec[128];
 	const char *icon;	/* LV_SYMBOL_* */
 	int starting_pid;	/* launched, no window yet (0 = none) */
@@ -97,8 +98,9 @@ static const char *icon_symbol(const char *name)
 	return LV_SYMBOL_FILE;
 }
 
-/* .app files: "key = value" lines with Id, Name, Exec, Icon, and Short
- * (a name for its tab, when Name is too long for one). */
+/* .app files: "key = value" lines with Id, Name, Exec, Icon, Short (a
+ * name for its tab, when Name is too long for one) and Color (#rrggbb,
+ * its hue: its tab, its active things). */
 static void load_apps(void)
 {
 	DIR *d = opendir(APPS_DIR);
@@ -120,6 +122,7 @@ static void load_apps(void)
 			continue;
 		memset(a, 0, sizeof(*a));
 		a->icon = LV_SYMBOL_FILE;
+		a->color = CHUMBY_ACCENT_DEFAULT;
 		while (fgets(line, sizeof(line), f)) {
 			if (sscanf(line, " %31[^= ] = %199[^\n]", key, val) != 2)
 				continue;
@@ -129,6 +132,8 @@ static void load_apps(void)
 				snprintf(a->name, sizeof(a->name), "%.31s", val);
 			else if (!strcmp(key, "Short"))
 				snprintf(a->short_name, sizeof(a->short_name), "%.15s", val);
+			else if (!strcmp(key, "Color") && val[0] == '#')
+				a->color = (uint32_t)strtoul(val + 1, NULL, 16);
 			else if (!strcmp(key, "Exec"))
 				snprintf(a->exec, sizeof(a->exec), "%.127s", val);
 			else if (!strcmp(key, "Icon"))
@@ -515,6 +520,7 @@ static lv_obj_t *tray_button(lv_obj_t *parent, const char *sym)
 }
 
 static lv_obj_t *bar_tabs;	/* the tab row */
+static lv_obj_t *bar_line;	/* the line under them */
 static void popup_close(void);
 
 /* The app menu ("chumby-menu"): a row per installed app. */
@@ -684,6 +690,7 @@ static void menu_open(void)
 		l = lv_label_create(row);
 		lv_label_set_text(l, apps[i].icon);
 		lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
+		lv_obj_set_style_text_color(l, chumby_accent(apps[i].color), 0);
 		lv_obj_set_width(l, 24);
 		lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
 		l = lv_label_create(row);
@@ -744,11 +751,19 @@ static void tabs_rebuild(void)
 		a = app_by_id(cur->app_id);
 		b = tab_create(bar_tabs, a ? a->icon : LV_SYMBOL_FILE,
 			       !a ? cur->app_id : a->short_name[0] ? a->short_name : a->name, true);
+		chumby_glossy(b, chumby_accent(a ? a->color : CHUMBY_ACCENT_DEFAULT), 0);
+		lv_obj_set_style_text_color(b, chumby_on_accent(), 0);
 		lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_LONG_PRESSED, cur);
 	}
+	/* The line the tabs stand on: the app in front's hue. */
+	if (bar_line)
+		lv_obj_set_style_bg_color(bar_line, chumby_accent(cur && app_by_id(cur->app_id) ?
+					  app_by_id(cur->app_id)->color : CHUMBY_ACCENT_DEFAULT), 0);
 	if (prev) {
 		a = app_by_id(prev->app_id);
 		b = tab_create(bar_tabs, a ? a->icon : LV_SYMBOL_FILE, NULL, false);
+		if (a && chumby_mode() == CHUMBY_MODE_DAY)	/* its hue; dim at night */
+			lv_obj_set_style_text_color(lv_obj_get_child(b, 0), chumby_accent(a->color), 0);
 		lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_SHORT_CLICKED, prev);
 		lv_obj_add_event_cb(b, app_tab_cb, LV_EVENT_LONG_PRESSED, prev);
 	}
@@ -888,8 +903,7 @@ static void popup_open(enum popup_kind kind)
 	lv_obj_set_style_radius(popup_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
 	lv_obj_set_style_bg_color(popup_bar, chumby_color(CHUMBY_COLOR_BG), LV_PART_MAIN);
 	lv_obj_set_style_bg_opa(popup_bar, LV_OPA_30, LV_PART_MAIN);
-	lv_obj_set_style_bg_color(popup_bar, chumby_color(CHUMBY_COLOR_BG), LV_PART_INDICATOR);
-	lv_obj_set_style_bg_opa(popup_bar, LV_OPA_COVER, LV_PART_INDICATOR);
+	chumby_glossy(popup_bar, chumby_color(CHUMBY_COLOR_ACCENT), LV_PART_INDICATOR);
 	lv_obj_set_style_bg_opa(popup_bar, LV_OPA_TRANSP, LV_PART_KNOB);
 	lv_obj_set_style_pad_all(popup_bar, 0, LV_PART_KNOB);
 	/* The whole popup height is the touch target. */
@@ -941,6 +955,7 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_set_pos(line, 0, CHUMBY_BAR_H - LINE_H);
 	lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(line, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	bar_line = line;
 
 	tray = lv_obj_create(scr);
 	lv_obj_remove_style_all(tray);
@@ -1018,7 +1033,7 @@ static void build_home(lv_obj_t *scr)
 		ic = lv_label_create(pair);
 		lv_label_set_text(ic, apps[i].icon);
 		lv_obj_set_style_text_font(ic, &lv_font_montserrat_28, 0);
-		lv_obj_set_style_text_color(ic, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+		lv_obj_set_style_text_color(ic, chumby_accent(apps[i].color), 0);
 
 		nm = lv_label_create(pair);
 		lv_label_set_text(nm, apps[i].name);

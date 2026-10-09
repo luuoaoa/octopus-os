@@ -110,6 +110,23 @@ void chumby_watch_fd(int fd, chumby_fd_cb_t cb, void *user);
 /* Theme */
 const lv_font_t *chumby_font(chumby_font_t font);
 lv_color_t chumby_color(chumby_color_t color);
+
+/*
+ * Colour is for what's active only (the app's tab, play while playing, a
+ * selected item, a slider's fill), in the app's own hue: CHUMBY_COLOR_ACCENT.
+ * An app's hue is the "Color = #rrggbb" of its .app (read by
+ * chumby_app_init()); the shell's is iPod blue. At night every accent is
+ * one warm, dim amber.
+ */
+#define CHUMBY_ACCENT_DEFAULT	0x2a7bd6	/* iPod blue */
+#define CHUMBY_ACCENT_NIGHT	0x8c5a1e	/* warm, dim amber */
+void chumby_set_accent(uint32_t rgb);
+/* Text and icons on an accent fill: white by day, black at night. */
+lv_color_t chumby_on_accent(void);
+/* Another app's accent (by its day colour), for the current mode. */
+lv_color_t chumby_accent(uint32_t day_rgb);
+/* Fill an object with a colour, glossy: a touch lighter at the top. */
+void chumby_glossy(lv_obj_t *obj, lv_color_t c, lv_style_selector_t sel);
 chumby_mode_t chumby_mode(void);
 /* Called once now and on every day/night switch: restyle custom objects. */
 void chumby_on_mode_change(chumby_mode_cb_t cb, void *user);

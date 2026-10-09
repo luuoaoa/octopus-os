@@ -69,6 +69,7 @@ Name = Hello
 Exec = /usr/bin/chumby-hello
 Icon = home
 Short = Hi
+Color = #3a9a5c
 ```
 
 - `Icon` is a name from the shell's table (`icons[]` in `shell.c`):
@@ -76,6 +77,8 @@ Short = Hi
   eye, file, charge, play, call, keyboard. Add to it for new ones.
 - `Short` (optional) is the name on the tab when `Name` is too long for
   one (tab titles are capped at 80 px and cut with dots).
+- `Color` (optional) is the app's hue: its tab, the tab line, its icon in
+  the Home menu, and its `CHUMBY_COLOR_ACCENT` (see Theme).
 - The shell starts the app from the Home menu and won't start a second
   copy while the first is coming up (`LAUNCH_TIMEOUT_S`). An app exits
   when its window is closed (holding its tab) or the compositor goes.
@@ -108,7 +111,9 @@ Everything below is declared in `chumby.h`, with comments.
 | | |
 |---|---|
 | `chumby_font(f)` | Nimbus bitmap fonts: `SMALL`/`BODY` 14 px, `LARGE` 19, `MEDIUM` 28 (14 at 2x), `XL` 35, `HUGE` 70 (35 at 2x). LVGL's `LV_SYMBOL_*` icons come through as fallback. |
-| `chumby_color(c)` | `BG`, `SURFACE`, `TEXT`, `TEXT_DIM`, `ACCENT`, for the current mode |
+| `chumby_color(c)` | `BG`, `SURFACE`, `TEXT`, `TEXT_DIM`, `BAR` (greys) and `ACCENT`, for the current mode |
+| `chumby_glossy(obj, c, sel)`, `chumby_on_accent()` | fill with a colour, a touch lighter at the top; the text colour on it |
+| `chumby_accent(rgb)` | another app's hue for the current mode (the shell) |
 | `chumby_mode()`, `chumby_on_mode_change(cb, user)` | day (dark, blue accent) / night (black, warm red, low glare) |
 
 - All text is Nimbus (Rockbox's BDFs, converted at build time). Coverage:
@@ -117,6 +122,13 @@ Everything below is declared in `chumby.h`, with comments.
   Montserrat (ASCII); no shaping, and no Vietnamese tone marks. Sizes:
   Rockbox has 10-14, 19 and 35; anything else is an integer scale
   (`nimbus_14x2` etc. in libchumby's Makefile).
+- **Colour is for what's active only**, like the colour iPods: the app's
+  tab, play while playing, a selected item, a slider's fill, the art
+  placeholder, the "now playing" line. Everything else is grey (day: dark
+  on light; night: soft grey on black). `CHUMBY_COLOR_ACCENT` is your
+  app's `Color`; at night every accent is one warm, dim amber. Fill
+  active things with `chumby_glossy()` and put `chumby_on_accent()` text
+  on them; checked buttons get that from the theme already.
 - Restyle in your mode callback: the palette changes at night. Night also
   dims things that glare (the FM/net radio art tile is drawn at 50 %).
 

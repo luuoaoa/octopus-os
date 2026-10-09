@@ -208,6 +208,7 @@ static void art_show_note(void)
 	lv_obj_set_hidden(art_img, true);
 	lv_obj_set_hidden(art_note, false);
 	lv_obj_set_style_bg_color(art_tile, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(art_note, chumby_on_accent(), 0);
 	lv_obj_set_style_bg_grad_color(art_tile, chumby_color(CHUMBY_COLOR_SURFACE), 0);
 	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_VER, 0);
 }
@@ -534,7 +535,6 @@ static void on_mode(chumby_mode_t mode, void *user)
 	lv_obj_set_style_bg_color(btn_down, surface, 0);
 	lv_obj_set_style_bg_color(btn_up, surface, 0);
 	lv_obj_set_style_bg_color(btn_power, surface, 0);
-	lv_obj_set_style_bg_color(btn_power, chumby_color(CHUMBY_COLOR_ACCENT), LV_STATE_CHECKED);
 	lv_obj_set_style_bg_color(btn_scan, surface, LV_STATE_PRESSED);
 	lv_obj_set_style_text_color(btn_scan, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_style_border_color(btn_scan, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
