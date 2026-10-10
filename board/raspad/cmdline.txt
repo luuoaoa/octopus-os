@@ -1,1 +1,1 @@
-root=/dev/mmcblk0p2 rootfstype=ext4 rootwait console=serial0,115200 quiet vt.global_cursor_default=0
+root=/dev/mmcblk0p2 rootfstype=ext4 rootwait console=tty1 console=ttyAMA0,115200 earlycon=pl011,mmio32,0xfe201000 loglevel=7 vt.global_cursor_default=0

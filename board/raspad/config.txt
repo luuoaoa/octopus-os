@@ -21,8 +21,14 @@ disable_overscan=1
 # The 3.5 mm jack (inside the case); HDMI audio comes with vc4-kms-v3d.
 dtparam=audio=on
 
-# Serial console on the GPIO header (ttyS0, mini UART).
+# Serial console on the GPIO header: pins 8 (TXD, GPIO14), 10 (RXD,
+# GPIO15), 6 (GND); 3.3 V levels, 115200 8N1. The full PL011 UART
+# (ttyAMA0, steady whatever the core clock does) rather than the mini UART:
+# Bluetooth, which would otherwise have it, isn't used.
 enable_uart=1
+dtoverlay=disable-bt
+# The firmware's own boot log on it too (before the kernel).
+uart_2ndstage=1
 
 disable_splash=1
 boot_delay=0
