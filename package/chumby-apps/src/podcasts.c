@@ -5,8 +5,9 @@
  *   left        the show's artwork
  *   right       the show's name, small, level with the art's top; under it
  *               the episode's title (scrolling twice when it changes, then
- *               cut with dots); its date (or how playing is going), and
- *               where in it / how long at the right; a progress bar
+ *               cut with dots); its date (or how playing is going)
+ *   under both  the progress bar, the screen's width (seek on it), with
+ *               where in it at its left end and how long at its right
  *   bottom      episode list, back 10 s, play/pause, ahead 30 s
  *
  * Shows: "name | RSS feed URL | artwork URL" lines in /boot/podcasts.conf
@@ -53,9 +54,10 @@
 #define COL_X		(ART_X + ART_SIZE + 12)
 #define COL_W		(CHUMBY_APP_W - 10 - COL_X)
 #define SMALL_BTN	38
-#define TIME_W		110			/* "1:02:05 / 1:02:05" */
 #define LINE_GAP	2
 #define BAR_H		4
+#define BAR_W		(CHUMBY_APP_W - 2 * ART_X)	/* the width: seeking precisely */
+#define BAR_GAP		8			/* between the art and the bar */
 #define BAR_TOUCH	12			/* the bar's touch area, above and below */
 #define STRIPE_W	28			/* the busy stripe on the bar */
 #define STRIPE_MS	1100			/* its trip across */
@@ -109,7 +111,7 @@ static char message[96];
 static int feed_child = -1, feed_show = -1, art_child = -1, art_show = -1, stream_child = -1;
 static char art_tmp[300];
 
-static lv_obj_t *scr, *lbl_show, *lbl_time, *lbl_title, *lbl_sub, *bar, *stripe;
+static lv_obj_t *scr, *lbl_show, *lbl_elapsed, *lbl_total, *lbl_title, *lbl_sub, *bar, *stripe;
 static bool seeking;			/* a finger on the bar */
 static lv_obj_t *art_tile, *art_img, *art_note;
 static lv_obj_t *btn_list, *btn_back, *btn_play, *btn_ahead;
@@ -546,7 +548,7 @@ static void busy_show(bool busy)
 	lv_anim_init(&a);
 	lv_anim_set_var(&a, stripe);
 	lv_anim_set_exec_cb(&a, stripe_anim_cb);
-	lv_anim_set_values(&a, -STRIPE_W, COL_W);
+	lv_anim_set_values(&a, -STRIPE_W, BAR_W);
 	lv_anim_set_duration(&a, STRIPE_MS);
 	lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
 	lv_anim_start(&a);
@@ -555,7 +557,7 @@ static void busy_show(bool busy)
 static void ui_update(void)
 {
 	struct episode *e = episode();
-	char sub[96] = "", date[16], now[16], total[16], tm[40] = "";
+	char sub[96] = "", date[16], now[16] = "", total[16] = "";
 	double bps = bytes_per_s(e);
 	long long byte = episode_byte(e);
 	long pos_s, dur_s;
@@ -568,7 +570,6 @@ static void ui_update(void)
 			pos_s = dur_s;
 		fmt_time(now, sizeof(now), pos_s);
 		fmt_time(total, sizeof(total), dur_s);
-		snprintf(tm, sizeof(tm), "%s / %s", now, total);
 		lv_bar_set_value(bar, dur_s > 0 ? (int)(pos_s * 1000 / dur_s) : 0, LV_ANIM_OFF);
 	} else {
 		lv_bar_set_value(bar, 0, LV_ANIM_OFF);
@@ -586,8 +587,10 @@ static void ui_update(void)
 	busy_show(playing && strcmp(st_state, "playing") && strcmp(st_state, "error") &&
 		  !skip_s);
 	lv_label_set_text(lbl_show, n_shows ? shows[cur_show].name : "No podcasts");
-	if (strcmp(lv_label_get_text(lbl_time), tm))
-		lv_label_set_text(lbl_time, tm);
+	if (strcmp(lv_label_get_text(lbl_elapsed), now))
+		lv_label_set_text(lbl_elapsed, now);
+	if (strcmp(lv_label_get_text(lbl_total), total))
+		lv_label_set_text(lbl_total, total);
 	chumby_scroll_label_set(lbl_title, e ? e->title : n_shows ? "Fetching episodes..." : "");
 	if (strcmp(lv_label_get_text(lbl_sub), sub))
 		lv_label_set_text(lbl_sub, sub);
@@ -1109,7 +1112,8 @@ static void on_mode(chumby_mode_t mode, void *user)
 	(void)user;
 	(void)mode;
 	lv_obj_set_style_text_color(lbl_show, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_text_color(lbl_time, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(lbl_elapsed, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(lbl_total, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_style_text_color(lbl_title, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_text_color(lbl_sub, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_style_bg_color(bar, chumby_color(CHUMBY_COLOR_SURFACE), LV_PART_MAIN);
@@ -1163,8 +1167,9 @@ int main(void)
 	lv_obj_add_event_cb(btn_ahead, skip_cb, LV_EVENT_CLICKED, (void *)(intptr_t)30);
 	lv_obj_update_layout(scr);
 
-	/* The artwork, centred in the space above the buttons. */
-	art_y = (lv_obj_get_y(row) - ART_SIZE) / 2;
+	/* The artwork, then the bar across the screen with the times under
+	 * it: together, centred in the space above the buttons. */
+	art_y = (lv_obj_get_y(row) - (ART_SIZE + BAR_GAP + BAR_H + LINE_GAP + line_body)) / 2;
 	art_tile = lv_obj_create(scr);
 	lv_obj_remove_style_all(art_tile);
 	lv_obj_set_pos(art_tile, ART_X, art_y);
@@ -1200,22 +1205,27 @@ int main(void)
 	lv_obj_set_pos(lbl_title, COL_X, title_y);
 	lbl_sub = lv_label_create(scr);
 	lv_obj_set_style_text_font(lbl_sub, chumby_font(CHUMBY_FONT_BODY), 0);
-	lv_obj_set_width(lbl_sub, COL_W - TIME_W - 6);
+	lv_obj_set_width(lbl_sub, COL_W);
 	lv_obj_set_height(lbl_sub, line_body);
 	lv_label_set_long_mode(lbl_sub, LV_LABEL_LONG_MODE_DOTS);
 	lv_label_set_text(lbl_sub, "");
 	lv_obj_set_pos(lbl_sub, COL_X, title_y + line_large + LINE_GAP);
-	lbl_time = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_time, chumby_font(CHUMBY_FONT_BODY), 0);
-	lv_obj_set_width(lbl_time, TIME_W);
-	lv_obj_set_style_text_align(lbl_time, LV_TEXT_ALIGN_RIGHT, 0);
-	lv_label_set_text(lbl_time, "");
-	lv_obj_set_pos(lbl_time, COL_X + COL_W - TIME_W, title_y + line_large + LINE_GAP);
-
-	/* The progress bar, on the art's bottom edge. */
+	/* The progress bar, the screen's width under the art (the wider, the
+	 * finer a seek); where it's at under its left end, how long under its
+	 * right. */
 	bar = lv_bar_create(scr);
-	lv_obj_set_size(bar, COL_W, BAR_H);
-	lv_obj_set_pos(bar, COL_X, art_y + ART_SIZE - BAR_H);
+	lv_obj_set_size(bar, BAR_W, BAR_H);
+	lv_obj_set_pos(bar, ART_X, art_y + ART_SIZE + BAR_GAP);
+	lbl_elapsed = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_elapsed, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_label_set_text(lbl_elapsed, "");
+	lv_obj_set_pos(lbl_elapsed, ART_X, art_y + ART_SIZE + BAR_GAP + BAR_H + LINE_GAP);
+	lbl_total = lv_label_create(scr);
+	lv_obj_set_style_text_font(lbl_total, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_width(lbl_total, BAR_W / 2);
+	lv_obj_set_style_text_align(lbl_total, LV_TEXT_ALIGN_RIGHT, 0);
+	lv_label_set_text(lbl_total, "");
+	lv_obj_set_pos(lbl_total, ART_X + BAR_W / 2, art_y + ART_SIZE + BAR_GAP + BAR_H + LINE_GAP);
 	lv_bar_set_range(bar, 0, 1000);
 	lv_obj_set_style_radius(bar, BAR_H / 2, LV_PART_MAIN);
 	lv_obj_set_style_radius(bar, BAR_H / 2, LV_PART_INDICATOR);
