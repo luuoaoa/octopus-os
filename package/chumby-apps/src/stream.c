@@ -33,6 +33,9 @@
  * State goes to $run_dir/stream for the app ("state=", "url=", "name=",
  * "title=", "codec=" MP3/AAC, "bitrate=" kbit/s as measured over a few
  * seconds) lines, gone once stopped; our pid to $run_dir/stream.pid.
+ * Starting, stopping, pausing and resuming hold $run_dir/stream.lock until
+ * the new player's pid is in place: two starts close together (seeks)
+ * would otherwise each find nothing to stop yet, and both play.
  *
  * A file rather than a live stream (a Content-Length and no ICY: a podcast
  * episode) also gets "byte=" (how far into it is played: resume from
@@ -55,6 +58,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/file.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -72,7 +76,7 @@
 #define BACKOFF_MAX_S	30
 
 static volatile sig_atomic_t stop;
-static char status_path[256], pid_path[256], paused_path[256];
+static char status_path[256], pid_path[256], paused_path[256], lock_path[256];
 static int bitrate;			/* kbit/s, measured */
 static char url[1024], name[128], title[256], state[16];
 
@@ -158,7 +162,8 @@ static pid_t running_pid(void)
 	return pid > 0 && kill(pid, 0) == 0 ? pid : 0;
 }
 
-/* Stop a running instance and wait for it to let go of the sound card. */
+/* Stop a running instance and wait for it to let go of the sound card
+ * (killed if it won't, in 5 s: it mustn't play on beside the next). */
 static void stop_running(void)
 {
 	pid_t pid = running_pid();
@@ -169,6 +174,25 @@ static void stop_running(void)
 	kill(pid, SIGTERM);
 	for (i = 0; i < 50 && kill(pid, 0) == 0; i++)
 		usleep(100 * 1000);
+	if (kill(pid, 0) == 0) {
+		kill(pid, SIGKILL);
+		for (i = 0; i < 10 && kill(pid, 0) == 0; i++)
+			usleep(100 * 1000);
+	}
+}
+
+/* Is the pid file (still) ours? Not once we're replaced. */
+static bool pid_is_ours(void)
+{
+	FILE *f = fopen(pid_path, "r");
+	int pid = 0;
+
+	if (!f)
+		return false;
+	if (fscanf(f, "%d", &pid) != 1)
+		pid = 0;
+	fclose(f);
+	return pid == getpid();
 }
 
 /* Bitrate: compressed bytes in against seconds of sound out, over
@@ -1645,12 +1669,22 @@ int main(int argc, char **argv)
 	snprintf(status_path, sizeof(status_path), "%s/stream", dir);
 	snprintf(pid_path, sizeof(pid_path), "%s/stream.pid", dir);
 	snprintf(paused_path, sizeof(paused_path), "%s/stream.paused", dir);
+	snprintf(lock_path, sizeof(lock_path), "%s/stream.lock", dir);
 	if (argc < 2) {
 		fprintf(stderr, "usage: chumby-stream <url> [name] | stop | pause | resume | active\n");
 		return 2;
 	}
 	if (!strcmp(argv[1], "active"))
 		return running_pid() ? 0 : 1;
+	/* One at a time from here to the new player's pid in place (it
+	 * inherits the lock, and lets go once it's written: see below). */
+	mkdir(dir, 0755);
+	{
+		int lock = open(lock_path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+
+		if (lock >= 0)
+			flock(lock, LOCK_EX);
+	}
 	if (!strcmp(argv[1], "pause")) {
 		char line[1200];
 		FILE *st;
@@ -1730,9 +1764,16 @@ int main(int argc, char **argv)
 		return 0;
 	setsid();
 	setpriority(PRIO_PROCESS, 0, -10);
+	/* We're the player now: the next start (or stop) finds us. */
+	f = fopen(pid_path, "w");
+	if (f) {
+		fprintf(f, "%d\n", getpid());
+		fclose(f);
+	}
 	/* Let go of what we were started with: a terminal, chumby-audio's
-	 * lock (it would stay held as long as we play). stderr stays (the
-	 * journal, from the apps). */
+	 * lock (it would stay held as long as we play), our own lock (the
+	 * next start may go ahead). stderr stays (the journal, from the
+	 * apps). */
 	{
 		int fd = open("/dev/null", O_RDWR);
 
@@ -1742,12 +1783,6 @@ int main(int argc, char **argv)
 		}
 		for (fd = 3; fd < 256; fd++)
 			close(fd);
-	}
-	mkdir(dir, 0755);
-	f = fopen(pid_path, "w");
-	if (f) {
-		fprintf(f, "%d\n", getpid());
-		fclose(f);
 	}
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = on_signal;
@@ -1764,6 +1799,10 @@ int main(int argc, char **argv)
 		mpg123_delete(mh);
 	if (aac)
 		NeAACDecClose(aac);
+	/* Replaced (killed after the 5 s, our pid file another's): the files
+	 * and chumby-audio's "playing" are the new player's now. */
+	if (!pid_is_ours())
+		return 0;
 	if (strcmp(state, "ended"))	/* that one stays, for the app */
 		unlink(status_path);
 	/* Not playing any more (stopped, paused, replaced): chumby-audio's
