@@ -56,6 +56,9 @@
 #define TIME_W		110			/* "1:02:05 / 1:02:05" */
 #define LINE_GAP	2
 #define BAR_H		4
+#define BAR_TOUCH	12			/* the bar's touch area, above and below */
+#define STRIPE_W	28			/* the busy stripe on the bar */
+#define STRIPE_MS	1100			/* its trip across */
 #define START_GRACE_MS	5000
 #define SAVE_EVERY_S	10
 #define SKIP_SETTLE_MS	500
@@ -106,7 +109,8 @@ static char message[96];
 static int feed_child = -1, feed_show = -1, art_child = -1, art_show = -1, stream_child = -1;
 static char art_tmp[300];
 
-static lv_obj_t *scr, *lbl_show, *lbl_time, *lbl_title, *lbl_sub, *bar;
+static lv_obj_t *scr, *lbl_show, *lbl_time, *lbl_title, *lbl_sub, *bar, *stripe;
+static bool seeking;			/* a finger on the bar */
 static lv_obj_t *art_tile, *art_img, *art_note;
 static lv_obj_t *btn_list, *btn_back, *btn_play, *btn_ahead;
 static lv_obj_t *list_panel;
@@ -516,18 +520,50 @@ static bool stream_is_ours(const char *url)
 	return e && url[0] && !strcmp(url, e->url);
 }
 
+/* How long it is: the feed's word, else its size at its bitrate. */
+static long episode_duration(const struct episode *e)
+{
+	return e->duration > 0 ? e->duration : (long)(episode_length(e) / bytes_per_s(e));
+}
+
+/* Busy (loading, or again after a seek): a stripe runs along the bar,
+ * rather than words that don't fit. */
+static void stripe_anim_cb(void *obj, int32_t x)
+{
+	lv_obj_set_x(obj, x);
+}
+
+static void busy_show(bool busy)
+{
+	lv_anim_t a;
+
+	if (busy == !lv_obj_is_hidden(stripe))
+		return;
+	lv_obj_set_hidden(stripe, !busy);
+	lv_anim_delete(stripe, stripe_anim_cb);
+	if (!busy)
+		return;
+	lv_anim_init(&a);
+	lv_anim_set_var(&a, stripe);
+	lv_anim_set_exec_cb(&a, stripe_anim_cb);
+	lv_anim_set_values(&a, -STRIPE_W, COL_W);
+	lv_anim_set_duration(&a, STRIPE_MS);
+	lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+	lv_anim_start(&a);
+}
+
 static void ui_update(void)
 {
 	struct episode *e = episode();
 	char sub[96] = "", date[16], now[16], total[16], tm[40] = "";
 	double bps = bytes_per_s(e);
-	long long len = episode_length(e), byte = episode_byte(e);
+	long long byte = episode_byte(e);
 	long pos_s, dur_s;
 	struct position *p = e ? position_of(e->url, false) : NULL;
 
 	if (e) {
 		pos_s = (long)(byte / bps) + skip_s;
-		dur_s = e->duration > 0 ? e->duration : (long)(len / bps);
+		dur_s = episode_duration(e);
 		if (pos_s > dur_s && dur_s > 0)
 			pos_s = dur_s;
 		fmt_time(now, sizeof(now), pos_s);
@@ -542,13 +578,13 @@ static void ui_update(void)
 		snprintf(sub, sizeof(sub), "%s", message);
 	else if (playing && !strcmp(st_state, "error"))
 		snprintf(sub, sizeof(sub), "can't reach it, retrying...");
-	else if (playing && strcmp(st_state, "playing"))
-		snprintf(sub, sizeof(sub), "%s%sloading...", date, date[0] ? "  " : "");
 	else if (e && p && p->done && !playing)
 		snprintf(sub, sizeof(sub), "%s%splayed", date, date[0] ? "  " : "");
 	else
 		snprintf(sub, sizeof(sub), "%s", date);
 
+	busy_show(playing && strcmp(st_state, "playing") && strcmp(st_state, "error") &&
+		  !skip_s);
 	lv_label_set_text(lbl_show, n_shows ? shows[cur_show].name : "No podcasts");
 	if (strcmp(lv_label_get_text(lbl_time), tm))
 		lv_label_set_text(lbl_time, tm);
@@ -773,6 +809,41 @@ static void skip_cb(lv_event_t *ev)
 	ui_update();
 	lv_timer_reset(skip_timer);
 	lv_timer_resume(skip_timer);
+}
+
+/* The bar: a finger on it picks where (the time follows it), letting go
+ * goes there, as the skips do. */
+static void bar_cb(lv_event_t *ev)
+{
+	lv_event_code_t code = lv_event_get_code(ev);
+	struct episode *e = episode();
+	lv_area_t a;
+	lv_point_t pt;
+	long dur_s, to_s;
+
+	if (!e)
+		return;
+	if (code == LV_EVENT_PRESS_LOST) {	/* slid off: never mind */
+		seeking = false;
+		skip_s = 0;
+		ui_update();
+		return;
+	}
+	dur_s = episode_duration(e);
+	if (dur_s <= 0)
+		return;
+	lv_obj_get_coords(bar, &a);
+	lv_indev_get_point(lv_indev_active(), &pt);
+	pt.x = LV_CLAMP(a.x1, pt.x, a.x2);
+	to_s = (long)((long long)(pt.x - a.x1) * dur_s / lv_area_get_width(&a));
+	/* As a skip from where it is (ui_update() shows that). */
+	skip_s = to_s - (long)(episode_byte(e) / bytes_per_s(e));
+	seeking = code != LV_EVENT_RELEASED;
+	lv_timer_pause(skip_timer);
+	if (seeking)
+		ui_update();
+	else
+		skip_timer_cb(NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1043,6 +1114,8 @@ static void on_mode(chumby_mode_t mode, void *user)
 	lv_obj_set_style_text_color(lbl_sub, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_style_bg_color(bar, chumby_color(CHUMBY_COLOR_SURFACE), LV_PART_MAIN);
 	lv_obj_set_style_bg_color(bar, chumby_color(CHUMBY_COLOR_ACCENT), LV_PART_INDICATOR);
+	/* Shows on the track and on the filled part alike. */
+	lv_obj_set_style_bg_color(stripe, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_bg_color(btn_back, surface, 0);
 	lv_obj_set_style_bg_color(btn_ahead, surface, 0);
 	lv_obj_set_style_bg_color(btn_play, surface, 0);
@@ -1147,6 +1220,20 @@ int main(void)
 	lv_obj_set_style_radius(bar, BAR_H / 2, LV_PART_MAIN);
 	lv_obj_set_style_radius(bar, BAR_H / 2, LV_PART_INDICATOR);
 	lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+	/* Seekable: a finger's worth above and below the thin bar. */
+	lv_obj_set_clickable(bar, true);
+	lv_obj_set_ext_click_area(bar, BAR_TOUCH);
+	lv_obj_add_event_cb(bar, bar_cb, LV_EVENT_PRESSED, NULL);
+	lv_obj_add_event_cb(bar, bar_cb, LV_EVENT_PRESSING, NULL);
+	lv_obj_add_event_cb(bar, bar_cb, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(bar, bar_cb, LV_EVENT_PRESS_LOST, NULL);
+	stripe = lv_obj_create(bar);
+	lv_obj_remove_style_all(stripe);
+	lv_obj_set_size(stripe, STRIPE_W, BAR_H);
+	lv_obj_set_style_radius(stripe, BAR_H / 2, 0);
+	lv_obj_set_style_bg_opa(stripe, LV_OPA_50, 0);
+	lv_obj_set_clickable(stripe, false);
+	lv_obj_set_hidden(stripe, true);
 
 	skip_timer = lv_timer_create(skip_timer_cb, SKIP_SETTLE_MS, NULL);
 	lv_timer_pause(skip_timer);
