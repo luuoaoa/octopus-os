@@ -1,0 +1,26 @@
+#!/bin/sh
+# chumby-audio source: AirPlay (shairport-sync, see chumby-airplay-hook).
+#
+# A receiver can't pause or resume what a phone sends: stop and pause both
+# end the session (restarting shairport-sync drops the connection; the
+# phone stops). So pause says it didn't (exit 1): nothing to resume after
+# an alarm.
+MARK=/run/shairport-sync/playing
+
+case "$1" in
+	active)
+		[ -f "$MARK" ]
+		;;
+	stop | pause)
+		[ -f "$MARK" ] || exit 0
+		rm -f "$MARK"
+		systemctl restart shairport-sync
+		[ "$1" = stop ]
+		;;
+	resume)
+		exit 1
+		;;
+	*)
+		exit 2
+		;;
+esac

@@ -12,4 +12,5 @@ config BR2_PACKAGE_CHUMBY_APPS
 	  falconwing-mainline board) and Internet Radio (MP3 and AAC
 	  streams, HLS too, played by chumby-stream) and Podcasts (RSS
 	  feeds read by chumby-podcast-feed, episodes played by
-	  chumby-stream).
+	  chumby-stream) and AirPlay (what shairport-sync receives; the
+	  board selects shairport-sync).

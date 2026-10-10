@@ -1,0 +1,21 @@
+[Unit]
+Description=AirPlay speaker (shairport-sync)
+Wants=network-online.target chumby-airplay-meta.service
+After=network.target sound.target
+# On a Pi, its ALSA "default" is PipeWire.
+After=wireplumber.service
+
+[Service]
+# As root: its hooks call chumby-audio and the shell, both root's.
+RuntimeDirectory=shairport-sync
+RuntimeDirectoryPreserve=yes
+Environment=PIPEWIRE_RUNTIME_DIR=/run/pipewire
+# Its mDNS (tinysvcmdns) can't join the multicast group without a route:
+# wait for DHCP's (up to a minute) rather than fail and retry.
+ExecStartPre=/bin/sh -c 'i=0; until ip route | grep -q "^default" || [ $i -ge 60 ]; do sleep 1; i=$((i + 1)); done'
+ExecStart=/usr/bin/shairport-sync
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -90,7 +90,7 @@ static const struct { const char *name, *sym; } icons[] = {
 	{ "call", LV_SYMBOL_CALL }, { "keyboard", LV_SYMBOL_KEYBOARD },
 	/* libchumby's own (Material Icons): see CHUMBY_ICON_* */
 	{ "radio", CHUMBY_ICON_RADIO }, { "clock", CHUMBY_ICON_CLOCK },
-	{ "podcast", CHUMBY_ICON_PODCAST },
+	{ "podcast", CHUMBY_ICON_PODCAST }, { "airplay", CHUMBY_ICON_AIRPLAY },
 	{ "globe", CHUMBY_ICON_GLOBE }, { "sun", CHUMBY_ICON_SUN },
 };
 
@@ -1645,7 +1645,15 @@ static void command(const char *cmd)
 		menu_open();
 	else if (!strcmp(cmd, "calibrate"))
 		calibrate_start();
-	else if (!strcmp(cmd, "dismiss")) {	/* chumby-wm: a tap outside them */
+	else if (!strncmp(cmd, "launch ", 7)) {	/* an app to the front (AirPlay starting) */
+		struct app_info *a = app_by_id(cmd + 7);
+
+		if (a) {
+			popup_close();
+			menu_close();
+			launch(a);
+		}
+	} else if (!strcmp(cmd, "dismiss")) {	/* chumby-wm: a tap outside them */
 		popup_close();
 		menu_close();
 	}

@@ -88,6 +88,8 @@ BR2_PACKAGE_LIBCURL_CURL=y
 BR2_PACKAGE_LIBCURL_MBEDTLS=y
 BR2_PACKAGE_CA_CERTIFICATES=y
 BR2_PACKAGE_JQ=y
+# AirPlay 1 speaker (the AirPlay app): its own mDNS (tinysvcmdns), mbed TLS.
+BR2_PACKAGE_SHAIRPORT_SYNC=y
 BR2_PACKAGE_MPG123=y
 BR2_PACKAGE_FAAD2=y
 # Sound through PipeWire (system-wide, WirePlumber): the players' ALSA

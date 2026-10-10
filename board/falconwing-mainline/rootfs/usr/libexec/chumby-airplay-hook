@@ -1,0 +1,28 @@
+#!/bin/sh
+# chumby-airplay-hook begin|end: shairport-sync's session hooks
+# (/etc/shairport-sync.conf).
+#
+#   begin   before the sound card opens: whatever else plays stops
+#           (chumby-audio play airplay), and the shell brings up the
+#           AirPlay app
+#   end     the phone stopped: chumby-audio's "playing" goes
+#
+# /run/shairport-sync/playing marks a session for audio.d/airplay.
+
+RUN=${CHUMBY_RUN_DIR:-/run/chumby}
+MARK=/run/shairport-sync/playing
+
+case "$1" in
+	begin)
+		touch "$MARK"
+		chumby-audio play airplay
+		# In the background: with no shell reading the FIFO, a write
+		# would wait, and shairport-sync with it.
+		[ -p "$RUN/shell.cmd" ] && (echo "launch AirPlay" > "$RUN/shell.cmd") &
+		;;
+	end)
+		rm -f "$MARK"
+		chumby-audio stopped airplay
+		;;
+esac
+exit 0
