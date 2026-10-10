@@ -12,11 +12,17 @@
  *
  * type and code are four characters in hex ("core"/"minm": the title),
  * the data base64. We keep what matters in $run_dir/airplay (written whole,
- * renamed into place): "state=" playing / paused / stopped, "title=",
+ * renamed into place): "state=" playing / paused / ended / stopped,
+ * "title=",
  * "artist=", "album=", "client=" (the sending device's name), "cover="
  * (the cover art, a file next to the pipe), "cover_id=" (changes with it),
  * and for remote control of the sender (chumby-airplay-remote) its
  * "dacp_id=", "active_remote=" (token) and "client_ip=".
+ * "ended" is the phone ending the session (it does, a few seconds after
+ * it pauses): what played and who sent it stay, so the app can offer to
+ * play on (the phone takes "play" and comes back). "stopped" is nothing:
+ * at the start, which is also whenever shairport-sync restarts (our
+ * service is part of it), as when another player takes over.
  * Started with shairport-sync (chumby-airplay-meta.service); it reads the
  * pipe whether the app runs or not, so the app sees the current track
  * even when opened late.
@@ -166,9 +172,7 @@ static void item(unsigned type, unsigned code, char *data, size_t n)
 		} else if (code == CODE('p', 'f', 'l', 's') || code == CODE('p', 'p', 'a', 'u')) {
 			snprintf(state, sizeof(state), "paused");
 		} else if (code == CODE('p', 'e', 'n', 'd')) {
-			snprintf(state, sizeof(state), "stopped");
-			title[0] = artist[0] = album[0] = client[0] = cover[0] = '\0';
-			dacp_id[0] = active_remote[0] = client_ip[0] = '\0';
+			snprintf(state, sizeof(state), "ended");
 		} else {
 			return;
 		}

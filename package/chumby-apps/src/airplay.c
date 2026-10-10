@@ -84,6 +84,13 @@ static bool active(void)
 	return strcmp(st_state, "stopped") != 0;
 }
 
+/* Paused, by the phone or by us: the phone ends the session soon after
+ * ("ended"), but takes "play" and comes back. */
+static bool paused(void)
+{
+	return !strcmp(st_state, "paused") || !strcmp(st_state, "ended");
+}
+
 static void art_show_note(void)
 {
 	lv_obj_set_hidden(art_img, true);
@@ -135,7 +142,7 @@ static void ui_update(void)
 			snprintf(sub, sizeof(sub), "%s - %s", st_artist, st_album);
 		else
 			snprintf(sub, sizeof(sub), "%s%s", st_artist, st_album);
-		if (!strcmp(st_state, "paused"))
+		if (paused())
 			snprintf(sub, sizeof(sub), "paused");
 		if (message[0])
 			snprintf(sub, sizeof(sub), "%s", message);
@@ -154,7 +161,7 @@ static void ui_update(void)
 	lv_obj_set_hidden(row, !active());
 	lv_obj_set_hidden(lbl_hint, active());
 	label_set(lv_obj_get_child(btn_play, 0),
-		  !strcmp(st_state, "paused") ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE);
+		  paused() ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE);
 	art_update();
 }
 
@@ -187,7 +194,13 @@ static void poll_cb(lv_timer_t *t)
 static void remote_cb(lv_event_t *e)
 {
 	const char *cmd = lv_event_get_user_data(e);
-	char *argv[] = { "chumby-airplay-remote", (char *)cmd, NULL };
+	char *argv[] = { "chumby-airplay-remote", NULL, NULL };
+
+	/* Play/pause: say which (once the session has ended, "play" is what
+	 * brings the phone back). */
+	if (!strcmp(cmd, "playpause"))
+		cmd = paused() ? "play" : "pause";
+	argv[1] = (char *)cmd;
 
 	if (remote_child > 0)
 		return;
