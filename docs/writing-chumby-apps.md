@@ -221,7 +221,8 @@ players just play.
 - **`chumby-stream <url> [name]`**: internet radio, in the background.
   MP3 (libmpg123) or AAC (faad2's fixed-point build: the ARM926 has no
   FPU), Shoutcast/Icecast with ICY titles, HLS (`.m3u8`, TS or packed
-  audio), `.pls`/`.m3u`. Reconnects with backoff, buffers ~2 s ahead,
+  audio), `.pls`/`.m3u`, and MP4 audio files (`.m4a`: AAC, index first or
+  last). Reconnects with backoff, buffers ~2 s ahead,
   resamples through ALSA. Its state is in `$run_dir/stream` (`state=`,
   `url=`, `name=`, `title=`, `codec=`, `bitrate=`), gone when stopped.
   **`chumby-stream <url> <name> <byte>`** plays a file (a podcast episode)
