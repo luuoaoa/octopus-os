@@ -1,0 +1,3 @@
+# The Pi's WiFi (brcmfmac) saves power by default, and then misses multicast:
+# mDNS, AirPlay's discovery. Off, as wlan0 appears.
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="wlan0", RUN+="/usr/sbin/iw dev wlan0 set power_save off"
