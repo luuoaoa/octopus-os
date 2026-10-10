@@ -1,0 +1,6 @@
+# Locally computed. The hash is on the post-vendored tarball that
+# buildroot's cargo download post-process produces (filename suffix
+# -cargoN), not the raw github archive — buildroot fetches the github
+# tarball, runs `cargo vendor` against the locked deps, and re-tarballs
+# the result with a deterministic timestamp + sorted layout.
+sha256  56c89674a7d5885d6ef08efb96e1dc322a9ab6ea436e20dec8a3fc0cf2238015  bankstown-e9829c9bccf5ed73768135c0ddd506f5a6690f9e-cargo4.tar.gz

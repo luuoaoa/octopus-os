@@ -1,0 +1,38 @@
+#!/bin/sh
+# At boot (raspad-audio-setup.service), after WirePlumber: the hardware
+# sink the EQ chain feeds goes to full volume, unmuted. The UI's volume
+# (ALSA "Master") is the default sink's - the EQ chain's - so that's the
+# only volume anyone turns; WirePlumber starts a new sink at 40 % and
+# remembers whatever it was last, which would quietly cap everything.
+# (After pi-radio's pifansrf-pin-speaker.sh.)
+#
+# The default sink itself is left to WirePlumber: the EQ chain's priority
+# makes it the default, until eq-toggle says otherwise (remembered).
+set -u
+
+CONF=/etc/pipewire/pipewire.conf.d/30-raspad-eq.conf
+HW_NAME=$(sed -n 's/^[[:space:]]*target\.object[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$CONF" | head -1)
+
+node_id() {
+    pw-cli ls Node 2>/dev/null | awk -v target="node.name = \"$1\"" '
+        /^	id [0-9]+/          { id = $2; gsub(",", "", id) }
+        index($0, target) > 0   { print id; exit }
+    '
+}
+
+# The sinks appear a moment after WirePlumber starts.
+i=0
+while [ $i -lt 10 ]; do
+    HW_ID=$(node_id "$HW_NAME")
+    EQ_ID=$(node_id raspad-eq)
+    [ -n "$HW_ID" ] && [ -n "$EQ_ID" ] && break
+    i=$((i + 1))
+    sleep 1
+done
+if [ -z "${HW_ID:-}" ]; then
+    echo "raspad-audio-setup: no sink $HW_NAME (wpctl status lists them)" >&2
+    exit 0
+fi
+wpctl set-volume "$HW_ID" 1.0
+wpctl set-mute "$HW_ID" 0
+echo "raspad-audio-setup: $HW_NAME at 100 %, EQ chain ${EQ_ID:+id $EQ_ID}${EQ_ID:-missing}"

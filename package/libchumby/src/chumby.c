@@ -889,17 +889,35 @@ static snd_mixer_elem_t *dac_elem(void)
 	return dac;
 }
 
-/* 0 % = muted, 1..100 % = -50 dB .. 0 dB on the codec's DAC. */
+/* A control without a dB scale: PipeWire's ALSA "Master" (the RasPad),
+ * whose raw range is already perceptual (cube-root) - used linearly. */
+static bool has_db(snd_mixer_elem_t *e)
+{
+	long min, max;
+
+	return snd_mixer_selem_get_playback_dB_range(e, &min, &max) == 0 && min < max;
+}
+
+/* 0 % = muted, 1..100 % = -50 dB .. 0 dB on the codec's DAC (or the
+ * control's raw range, without dB). */
 int chumby_volume_get(void)
 {
 	snd_mixer_elem_t *e = dac_elem();
-	long db;
+	long db, v, min, max;
 	int sw = 1;
 
-	if (!e || snd_mixer_selem_get_playback_dB(e, SND_MIXER_SCHN_FRONT_LEFT, &db) < 0)
+	if (!e)
 		return -1;
 	if (snd_mixer_selem_has_playback_switch(e))
 		snd_mixer_selem_get_playback_switch(e, SND_MIXER_SCHN_FRONT_LEFT, &sw);
+	if (!has_db(e)) {
+		if (snd_mixer_selem_get_playback_volume_range(e, &min, &max) < 0 || min >= max ||
+		    snd_mixer_selem_get_playback_volume(e, SND_MIXER_SCHN_FRONT_LEFT, &v) < 0)
+			return -1;
+		return sw ? (int)(((v - min) * 100 + (max - min) / 2) / (max - min)) : 0;
+	}
+	if (snd_mixer_selem_get_playback_dB(e, SND_MIXER_SCHN_FRONT_LEFT, &db) < 0)
+		return -1;
 	if (!sw || db <= -5000)
 		return 0;
 	return (int)((db + 5000) / 50);
@@ -915,7 +933,14 @@ void chumby_volume_set(int percent)
 		percent = 0;
 	if (percent > 100)
 		percent = 100;
-	snd_mixer_selem_set_playback_dB_all(e, percent ? -5000 + percent * 50 : -12700, 0);
+	if (!has_db(e)) {
+		long min, max;
+
+		if (snd_mixer_selem_get_playback_volume_range(e, &min, &max) == 0 && min < max)
+			snd_mixer_selem_set_playback_volume_all(e, min + (max - min) * percent / 100);
+	} else {
+		snd_mixer_selem_set_playback_dB_all(e, percent ? -5000 + percent * 50 : -12700, 0);
+	}
 	if (snd_mixer_selem_has_playback_switch(e))
 		snd_mixer_selem_set_playback_switch_all(e, percent > 0);
 }

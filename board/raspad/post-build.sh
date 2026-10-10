@@ -17,7 +17,8 @@ rm -f "${TARGET_DIR}/etc/udev/rules.d/90-chumby-touch.rules"
 rmdir "${TARGET_DIR}/media/sd" 2>/dev/null || true
 
 GIT_DIR="${BR2_EXTERNAL_PIFANSRF_PATH:-.}"
-COMMIT=$(git -C "${GIT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)
+# (In a container a worktree has no usable .git: the caller may pass it.)
+COMMIT=${PIFANSRF_COMMIT:-$(git -C "${GIT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)}
 cat > "${TARGET_DIR}/etc/motd" <<MOTD
 
   raspad (Raspberry Pi 4B, Chumby UI) — buildroot

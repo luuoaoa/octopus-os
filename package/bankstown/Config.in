@@ -1,0 +1,18 @@
+config BR2_PACKAGE_BANKSTOWN
+	bool "bankstown"
+	depends on BR2_PACKAGE_HOST_RUSTC
+	depends on BR2_PACKAGE_LILV
+	select BR2_PACKAGE_HOST_CARGO
+	help
+	  Bankstown — a lightweight psychoacoustic bass enhancement
+	  LV2 plugin. Generates 2nd / 3rd harmonics of low-frequency
+	  content so small speakers (like the AIY voice bonnet's tiny
+	  driver) sound like they have bass response below their
+	  physical roll-off.
+
+	  Loaded by PipeWire's filter-chain in
+	  /etc/pipewire/pipewire.conf.d/30-rt5645-eq.conf as a node
+	  in front of the parametric EQ cascade. Plugin URI:
+	  https://chadmed.au/bankstown
+
+	  Source: https://github.com/chadmed/bankstown

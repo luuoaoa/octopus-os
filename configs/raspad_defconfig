@@ -80,6 +80,19 @@ BR2_PACKAGE_CA_CERTIFICATES=y
 BR2_PACKAGE_JQ=y
 BR2_PACKAGE_MPG123=y
 BR2_PACKAGE_FAAD2=y
+# Sound through PipeWire (system-wide, WirePlumber): the players' ALSA
+# output goes there (asound.conf), into a filter-chain sink that improves
+# the small speakers - bankstown's psychoacoustic bass, then a parametric
+# EQ - before HDMI (board/raspad/README.md). Not for the Chumby: its
+# 454 MHz ARM9 can't spare it.
+BR2_PACKAGE_DBUS=y
+BR2_PACKAGE_PIPEWIRE=y
+BR2_PACKAGE_LUA=y
+BR2_PACKAGE_LUA_5_4=y
+BR2_PACKAGE_WIREPLUMBER=y
+BR2_PACKAGE_LILV=y
+BR2_PACKAGE_HOST_RUSTC=y
+BR2_PACKAGE_BANKSTOWN=y
 BR2_PACKAGE_ALSA_UTILS=y
 BR2_PACKAGE_ALSA_UTILS_AMIXER=y
 BR2_PACKAGE_ALSA_UTILS_APLAY=y

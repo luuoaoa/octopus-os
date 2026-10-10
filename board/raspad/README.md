@@ -38,13 +38,35 @@ the Chumby's resistive screen.
 
 ## Sound
 
-The RasPad's board takes sound from HDMI to its speakers (its Volume
-buttons set its amplifier). `/etc/asound.conf` sends `default` and `chumby`
-(what chumby-stream opens) to HDMI through a soft volume control named
-`Master`, which the shell's volume slider and knob logic drive
-(`chumby-softvol.service` opens it once at boot so the control exists).
-For the Pi's 3.5 mm jack instead, change the slave there to
-`plughw:CARD=Headphones`.
+Unlike the Chumby (straight to its codec), the RasPad plays through
+PipeWire: the Pi 4 has the CPU for it, and it lets the small speakers be
+improved on the way. The setup comes from pifansrf's pi-radio branch.
+
+    chumby-stream, alarm tone  (ALSA "chumby" / "default", asound.conf)
+      -> PipeWire (system-wide; WirePlumber)
+      -> "raspad-eq" sink: bankstown bass enhancer -> parametric EQ
+      -> HDMI sink -> the RasPad's board, amplifier and speakers
+
+- `/etc/asound.conf`: ALSA's `default` and `chumby` (what chumby-stream
+  opens) are PipeWire; so is the `Master` control, the default sink's
+  volume, which the shell's volume slider drives. Players mix (an alarm
+  over the radio).
+- `/etc/pipewire/pipewire.conf.d/30-raspad-eq.conf`: the filter chain.
+  [bankstown](https://github.com/chadmed/bankstown) (package/bankstown, an
+  LV2 plugin) synthesises the harmonics of the bass the speakers can't
+  reproduce, at its reference strength (the Pi 0W on pi-radio had to
+  run it cut down). The parametric EQ slot is empty until the RasPad's
+  speakers are measured: export Room EQ Wizard's filters as text and run
+  `bin/rew-to-pipewire.py --bass export.txt`, whose output replaces the
+  file's `filter.graph` block.
+- `eq-toggle [on|off|toggle|status]` switches the default sink between the
+  chain and the bare HDMI sink (bypass). WirePlumber remembers the choice.
+- `raspad-audio-setup.service` puts the HDMI sink at full volume at boot,
+  so the UI's volume is the only one that matters.
+
+The chain's target is the first HDMI port's sink; `wpctl status` lists
+the sinks if the RasPad's turns out to be another (the 3.5 mm jack is
+"Headphones").
 
 ## What differs from the Chumby
 
@@ -58,4 +80,7 @@ For the Pi's 3.5 mm jack instead, change the slave there to
   partition (`network-config`, `user-data`, `authorized_keys`), mounted
   read-only at `/boot`.
 - WiFi (brcmfmac) and Ethernet both get DHCP (udhcpc@wlan0, udhcpc@eth0).
-- Serial console on the GPIO header's mini UART (ttyS0, 115200).
+- Serial console on the GPIO header's PL011 (ttyAMA0, 115200; pins 8, 10,
+  6), Bluetooth off.
+- Sound through PipeWire with the speaker chain (above); the Chumby plays
+  to its codec directly.

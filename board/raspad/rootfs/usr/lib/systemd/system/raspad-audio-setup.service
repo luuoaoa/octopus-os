@@ -1,0 +1,13 @@
+[Unit]
+Description=Set up the speaker sinks (hardware at full volume, EQ chain default)
+After=wireplumber.service
+BindsTo=wireplumber.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PIPEWIRE_RUNTIME_DIR=/run/pipewire
+ExecStart=/usr/libexec/raspad-audio-setup
+
+[Install]
+WantedBy=multi-user.target
