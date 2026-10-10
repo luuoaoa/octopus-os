@@ -33,6 +33,12 @@
  * directly. While the shell has the backlight off (night), touches are
  * dropped so nothing gets pressed blind.
  *
+ * A screen bigger than the Chumby's (a RasPad's 1280x800, say) shows the
+ * 320x240 UI at the largest whole-number scale that fits, centred, pixels
+ * doubled or tripled (nearest, never blurred): the output's scale, with
+ * everything in a 320x240 tree in the middle of its layout. A touch is
+ * mapped over the whole output, so one on the border presses nothing.
+ *
  * The screen's corners are rounded: black quarter circles over
  * everything, CORNER_R px, anti-aliased.
  *
@@ -96,6 +102,8 @@
 #define MAX_TOUCH	10
 #define CORNER_R	8	/* the screen's rounded corners */
 #define MENU_GAP	4	/* the app menu card, from the edge and the bar */
+#define UI_W		320	/* the UI's size, whatever the screen's */
+#define UI_H		240
 
 enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_MENU, VIEW_CAL,
 		 VIEW_APP };
@@ -109,9 +117,10 @@ struct server {
 	struct wlr_scene_output_layout *scene_layout;
 	struct wlr_output_layout *output_layout;
 
-	/* Stacking: home < apps < popup < panel. */
-	struct wlr_scene_tree *home_tree, *apps_tree, *popup_tree, *panel_tree, *cal_tree,
-		*corner_tree;
+	/* Stacking: home < apps < popup < panel, all in the UI's tree. */
+	struct wlr_scene_tree *ui_tree, *home_tree, *apps_tree, *popup_tree, *panel_tree,
+		*cal_tree, *corner_tree;
+	struct wlr_scene_rect *ui_backdrop;
 	bool corners;			/* made (once the output's size is known) */
 
 	struct wlr_xdg_shell *xdg_shell;
@@ -130,7 +139,8 @@ struct server {
 
 	struct wl_listener new_output;
 	struct wlr_output *output;	/* the LCD */
-	int width, height;
+	int width, height;		/* the UI's (UI_W x UI_H on a bigger screen) */
+	double layout_w, layout_h;	/* the output's, in layout (scaled) pixels */
 };
 
 struct view {
@@ -404,6 +414,14 @@ static void view_unmap(struct wl_listener *l, void *data)
 		activate(s, top_app(s));
 }
 
+static void buffer_nearest(struct wlr_scene_buffer *b, int sx, int sy, void *user)
+{
+	(void)sx;
+	(void)sy;
+	(void)user;
+	wlr_scene_buffer_set_filter_mode(b, WLR_SCALE_FILTER_NEAREST);
+}
+
 static void view_commit(struct wl_listener *l, void *data)
 {
 	struct view *v = wl_container_of(l, v, commit);
@@ -415,6 +433,8 @@ static void view_commit(struct wl_listener *l, void *data)
 	 * for its callback (see frame_done_hidden). */
 	if (s->output)
 		wlr_output_schedule_frame(s->output);
+	/* Scaled up (a bigger screen): crisp pixels, not blurred ones. */
+	wlr_scene_node_for_each_buffer(&v->tree->node, buffer_nearest, NULL);
 	if (!v->xdg->base->initial_commit)
 		return;
 
@@ -641,7 +661,7 @@ static void touch_down(struct wl_listener *l, void *data)
 	struct touch_dev *t = wl_container_of(l, t, down);
 	struct server *s = t->server;
 	struct wlr_touch_down_event *ev = data;
-	double lx = ev->x * s->width, ly = ev->y * s->height, sx, sy;
+	double lx = ev->x * s->layout_w, ly = ev->y * s->layout_h, sx, sy;
 	struct wlr_surface *surface = surface_at(s, lx, ly, &sx, &sy);
 
 	/* Not marked active: its motion and up are dropped too. */
@@ -677,8 +697,8 @@ static void touch_motion(struct wl_listener *l, void *data)
 	    !s->touch[ev->touch_id].active)
 		return;
 	wlr_seat_touch_notify_motion(s->seat, ev->time_msec, ev->touch_id,
-				     ev->x * s->width - s->touch[ev->touch_id].ox,
-				     ev->y * s->height - s->touch[ev->touch_id].oy);
+				     ev->x * s->layout_w - s->touch[ev->touch_id].ox,
+				     ev->y * s->layout_h - s->touch[ev->touch_id].oy);
 }
 
 static void touch_up(struct wl_listener *l, void *data)
@@ -1025,6 +1045,7 @@ static void corners_create(struct server *s)
 		if (!b)
 			continue;
 		wlr_scene_buffer_set_transform(b, where[i].t);
+		wlr_scene_buffer_set_filter_mode(b, WLR_SCALE_FILTER_NEAREST);
 		wlr_scene_node_set_position(&b->node, where[i].right ? s->width - CORNER_R : 0,
 					    where[i].bottom ? s->height - CORNER_R : 0);
 	}
@@ -1042,22 +1063,50 @@ static void new_output(struct wl_listener *l, void *data)
 	struct wlr_scene_output *so;
 	struct output *o;
 	struct view *v;
+	int pw, ph, scale;
 
 	wlr_output_init_render(wo, s->allocator, s->renderer);
 	wlr_output_state_init(&state);
 	wlr_output_state_set_enabled(&state, true);
 	mode = wlr_output_preferred_mode(wo);
-	if (mode)
+	if (mode) {
+		pw = mode->width;
+		ph = mode->height;
 		wlr_output_state_set_mode(&state, mode);
-	else	/* modeless outputs (headless backend, for testing): the LCD's size */
-		wlr_output_state_set_custom_mode(&state, 320, 240, 0);
+	} else {	/* modeless (headless, for testing): the LCD's size, or
+			 * CHUMBY_WM_SIZE=<w>x<h> to try a bigger screen */
+		const char *size = getenv("CHUMBY_WM_SIZE");
+
+		if (!size || sscanf(size, "%dx%d", &pw, &ph) != 2 || pw <= 0 || ph <= 0) {
+			pw = UI_W;
+			ph = UI_H;
+		}
+		wlr_output_state_set_custom_mode(&state, pw, ph, 0);
+	}
+	/* The UI at the biggest whole scale that fits. */
+	scale = pw / UI_W < ph / UI_H ? pw / UI_W : ph / UI_H;
+	if (scale < 1)
+		scale = 1;
+	wlr_output_state_set_scale(&state, scale);
 	wlr_output_commit_state(wo, &state);
 	wlr_output_state_finish(&state);
 
-	s->width = wo->width;
-	s->height = wo->height;
+	s->layout_w = (double)wo->width / scale;
+	s->layout_h = (double)wo->height / scale;
+	if (scale > 1 || wo->width > UI_W || wo->height > UI_H) {
+		s->width = UI_W;
+		s->height = UI_H;
+	} else {	/* the Chumby's own LCD (or something smaller) */
+		s->width = wo->width;
+		s->height = wo->height;
+	}
+	/* Centred, black around it. */
+	wlr_scene_node_set_position(&s->ui_tree->node, (int)((s->layout_w - s->width) / 2),
+				    (int)((s->layout_h - s->height) / 2));
+	wlr_scene_rect_set_size(s->ui_backdrop, s->width, s->height);
 	corners_create(s);
-	wlr_log(WLR_INFO, "output %s: %dx%d", wo->name, s->width, s->height);
+	wlr_log(WLR_INFO, "output %s: %dx%d, UI %dx%d at scale %d", wo->name,
+		wo->width, wo->height, s->width, s->height, scale);
 
 	o = calloc(1, sizeof(*o));
 	if (!o)
@@ -1134,15 +1183,17 @@ int main(int argc, char **argv)
 
 	s.scene = wlr_scene_create();
 	s.scene_layout = wlr_scene_attach_output_layout(s.scene, s.output_layout);
-	/* Dark backdrop until the shell draws. */
-	wlr_scene_rect_create(&s.scene->tree, 4096, 4096,
-			      (float[4]){ 0.06f, 0.08f, 0.09f, 1.0f });
-	s.home_tree = wlr_scene_tree_create(&s.scene->tree);
-	s.apps_tree = wlr_scene_tree_create(&s.scene->tree);
-	s.popup_tree = wlr_scene_tree_create(&s.scene->tree);
-	s.panel_tree = wlr_scene_tree_create(&s.scene->tree);
-	s.cal_tree = wlr_scene_tree_create(&s.scene->tree);
-	s.corner_tree = wlr_scene_tree_create(&s.scene->tree);
+	/* Black around the UI (on a bigger screen), dark under it. */
+	wlr_scene_rect_create(&s.scene->tree, 4096, 4096, (float[4]){ 0, 0, 0, 1.0f });
+	s.ui_tree = wlr_scene_tree_create(&s.scene->tree);
+	s.ui_backdrop = wlr_scene_rect_create(s.ui_tree, UI_W, UI_H,
+					      (float[4]){ 0.06f, 0.08f, 0.09f, 1.0f });
+	s.home_tree = wlr_scene_tree_create(s.ui_tree);
+	s.apps_tree = wlr_scene_tree_create(s.ui_tree);
+	s.popup_tree = wlr_scene_tree_create(s.ui_tree);
+	s.panel_tree = wlr_scene_tree_create(s.ui_tree);
+	s.cal_tree = wlr_scene_tree_create(s.ui_tree);
+	s.corner_tree = wlr_scene_tree_create(s.ui_tree);
 
 	wl_list_init(&s.views);
 	s.xdg_shell = wlr_xdg_shell_create(s.display, 3);
