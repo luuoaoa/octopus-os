@@ -117,6 +117,7 @@
 #define MODE_MAX_W	1920	/* biggest mode we'll drive (pixman draws it all) */
 #define MODE_MAX_H	1200
 #define CURSOR_R	9	/* the cursor disc's radius, in UI pixels */
+#define CURSOR_MAX	64	/* cursor planes' size (vc4's): bigger is drawn in software */
 #define CURSOR_IDLE_MS	5000	/* still this long: it goes */
 
 enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_MENU, VIEW_CAL,
@@ -691,17 +692,26 @@ static void cursor_hide(struct server *s)
 	s->cursor_shown = false;
 }
 
+/* Its half-side, in UI pixels: the disc and a pixel round it, the whole
+ * fitting the cursor plane (64 device pixels) - at 4x it's a bit smaller. */
+static int cursor_half(int sc)
+{
+	int h = CURSOR_R + 1;
+
+	return h * 2 * sc > CURSOR_MAX ? CURSOR_MAX / (2 * sc) : h;
+}
+
 static void cursor_images(struct server *s)
 {
-	int sc = s->scale > 0 ? s->scale : 1, side = (2 * CURSOR_R + 4) * sc, i;
+	int sc = s->scale > 0 ? s->scale : 1, h = cursor_half(sc), i;
 
 	if (s->cursor_img_scale == sc && s->cursor_img[0])
 		return;
 	for (i = 0; i < 2; i++)
 		if (s->cursor_img[i])
 			wlr_buffer_drop(s->cursor_img[i]);
-	s->cursor_img[0] = disc_create(side, CURSOR_R * sc, 0.38);
-	s->cursor_img[1] = disc_create(side, CURSOR_R * sc * 0.75, 0.55);
+	s->cursor_img[0] = disc_create(2 * h * sc, (h - 1) * sc, 0.38);
+	s->cursor_img[1] = disc_create(2 * h * sc, (h - 1) * sc * 0.75, 0.55);
 	s->cursor_img_scale = sc;
 }
 
@@ -714,9 +724,10 @@ static void cursor_show(struct server *s)
 		return;
 	cursor_images(s);
 	sc = s->cursor_img_scale;
+	/* The hotspot (its centre) in logical pixels, the buffer at our scale. */
 	if (s->cursor_img[s->cursor_down])
 		wlr_cursor_set_buffer(s->cursor, s->cursor_img[s->cursor_down],
-				      (CURSOR_R + 2) * sc, (CURSOR_R + 2) * sc, sc);
+				      cursor_half(sc), cursor_half(sc), sc);
 	s->cursor_shown = true;
 	wl_event_source_timer_update(s->cursor_idle, CURSOR_IDLE_MS);
 }

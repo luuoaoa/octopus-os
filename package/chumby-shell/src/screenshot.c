@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * chumby-screenshot: save the screen as a binary PPM (P6), using
- * wlr-screencopy. Usage: chumby-screenshot [file.ppm]  (default: stdout)
+ * wlr-screencopy. Usage: chumby-screenshot [-c] [file.ppm]  (default: stdout;
+ * -c: with the mouse cursor in it)
  */
 
 #define _GNU_SOURCE
@@ -105,6 +106,8 @@ static const struct wl_registry_listener registry_listener = {
 
 int main(int argc, char **argv)
 {
+	int cursor = argc > 1 && !strcmp(argv[1], "-c");
+
 	struct wl_display *wl = wl_display_connect(NULL);
 	struct zwlr_screencopy_frame_v1 *f;
 	FILE *out = stdout;
@@ -121,7 +124,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	f = zwlr_screencopy_manager_v1_capture_output(manager, 0, output);
+	f = zwlr_screencopy_manager_v1_capture_output(manager, cursor, output);
 	zwlr_screencopy_frame_v1_add_listener(f, &frame_listener, NULL);
 	while (!frame.done && !frame.failed && wl_display_dispatch(wl) != -1)
 		;
@@ -134,6 +137,10 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	if (cursor) {
+		argc--;
+		argv++;
+	}
 	if (argc > 1 && !(out = fopen(argv[1], "wb"))) {
 		perror(argv[1]);
 		return 1;

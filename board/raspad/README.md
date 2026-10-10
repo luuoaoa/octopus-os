@@ -1,9 +1,21 @@
-# RasPad 3 (Raspberry Pi 4B) with the Chumby UI
+# Any 64-bit Raspberry Pi (made for the RasPad 3) with the Chumby UI
 
 `configs/raspad_defconfig` builds the Chumby One's userland (chumby-wm,
-chumby-shell, the clock and internet radio apps) for a SunFounder RasPad 3:
-a Raspberry Pi 4B inside a tablet case with a 10.1" 1280x800 IPS panel on
+chumby-shell, the clock, internet radio and podcast apps) for any 64-bit
+Raspberry Pi - 3, 3B+, Zero 2 W, CM3, 4, 400, CM4, 5, 500, CM5 - on any
+screen, with touch or a mouse. It was made for a SunFounder RasPad 3: a
+Raspberry Pi 4B inside a tablet case with a 10.1" 1280x800 IPS panel on
 HDMI and a USB touchscreen.
+
+## Which Pi
+
+One kernel (the Pi tree's bcm2711 config, which boots all of them) and
+every model's DTB; both firmware sets on the FAT (`start.elf` with
+`bootcode.bin` for the Pi 3 and Zero 2 W, `start4.elf` for the Pi 4; the
+Pi 5 boots from its EEPROM). The firmware picks the DTB and maps overlays
+to their Pi 5 versions. The serial console is `serial0`: GPIO 14/15 on
+every model (`dtparam=uart0_console` on the Pi 5). Tested on a Pi 4 (the
+RasPad); the rest only built.
 
 ```sh
 docker run --rm -v "$(pwd):/work" -w /work/buildroot pifansrf-builder:ubuntu20.04 \
@@ -12,14 +24,22 @@ docker run --rm -v "$(pwd):/work" -w /work/buildroot pifansrf-builder:ubuntu20.0
 # then write output-raspad/images/sdcard.img to a card
 ```
 
-## Display: 320x240 at 3x
+## Display: 320x240 at a whole-number scale
 
 The UI is drawn for the Chumby's 320x240 LCD. chumby-wm gives a bigger
 output the largest whole-number scale at which 320x240 fits — 3 on the
 RasPad (960x720), the remaining 160 px left and right and 40 px top and
-bottom black — and filters every window nearest, so pixels stay square
-and sharp. Nothing in the apps changes. Try a size headless with
+bottom black; 4 on a 1080p screen — and filters every window nearest, so
+pixels stay square and sharp. Nothing in the apps changes. A screen whose
+own mode is bigger than 1920x1200 (a 4K TV) is driven at the biggest mode
+that isn't: the CPU draws every pixel. Try a size headless with
 `CHUMBY_WM_SIZE=1280x800`.
+
+## Mouse
+
+A USB mouse moves a cursor kept to the UI, an iPad-style translucent disc
+(smaller while a button is down) on the display's hardware cursor plane;
+it goes after a touch or 5 s without moving. Clicks act like taps.
 
 The display runs through the kernel's KMS driver (`dtoverlay=vc4-kms-v3d`
 in config.txt) and wlroots' DRM backend, rendered with pixman (no GPU).
