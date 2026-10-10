@@ -857,10 +857,27 @@ int chumby_spawn(const char *path, char *const argv[])
 /* Hardware helpers                                                   */
 
 static snd_mixer_t *mixer;
+static snd_mixer_elem_t *dac;
+
+static bool has_db(snd_mixer_elem_t *e);
+
+/*
+ * PipeWire's ALSA control (the RasPad) talks to the daemon over a
+ * connection that dies with it, and calls on a dead one wait forever - the
+ * shell's UI with them. Unlike the Chumby's codec mixer (kept open), it is
+ * opened for each change and closed after.
+ */
+static void mixer_done(void)
+{
+	if (!dac || has_db(dac))
+		return;
+	snd_mixer_close(mixer);
+	mixer = NULL;
+	dac = NULL;
+}
 
 static snd_mixer_elem_t *dac_elem(void)
 {
-	static snd_mixer_elem_t *dac;
 	snd_mixer_selem_id_t *sid;
 
 	if (dac) {
@@ -912,9 +929,13 @@ int chumby_volume_get(void)
 		snd_mixer_selem_get_playback_switch(e, SND_MIXER_SCHN_FRONT_LEFT, &sw);
 	if (!has_db(e)) {
 		if (snd_mixer_selem_get_playback_volume_range(e, &min, &max) < 0 || min >= max ||
-		    snd_mixer_selem_get_playback_volume(e, SND_MIXER_SCHN_FRONT_LEFT, &v) < 0)
+		    snd_mixer_selem_get_playback_volume(e, SND_MIXER_SCHN_FRONT_LEFT, &v) < 0) {
+			mixer_done();
 			return -1;
-		return sw ? (int)(((v - min) * 100 + (max - min) / 2) / (max - min)) : 0;
+		}
+		v = sw ? (int)(((v - min) * 100 + (max - min) / 2) / (max - min)) : 0;
+		mixer_done();
+		return (int)v;
 	}
 	if (snd_mixer_selem_get_playback_dB(e, SND_MIXER_SCHN_FRONT_LEFT, &db) < 0)
 		return -1;
@@ -938,6 +959,10 @@ void chumby_volume_set(int percent)
 
 		if (snd_mixer_selem_get_playback_volume_range(e, &min, &max) == 0 && min < max)
 			snd_mixer_selem_set_playback_volume_all(e, min + (max - min) * percent / 100);
+		if (snd_mixer_selem_has_playback_switch(e))
+			snd_mixer_selem_set_playback_switch_all(e, percent > 0);
+		mixer_done();
+		return;
 	} else {
 		snd_mixer_selem_set_playback_dB_all(e, percent ? -5000 + percent * 50 : -12700, 0);
 	}

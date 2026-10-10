@@ -248,7 +248,12 @@ static void pcm_write(const unsigned char *buf, size_t bytes)
 		if (n < 0)
 			n = snd_pcm_recover(pcm, n, 1);
 		if (n < 0) {
-			fprintf(stderr, "chumby-stream: write: %s\n", snd_strerror(n));
+			/* Not an underrun: the device went (PipeWire restarted, on
+			 * the RasPad). Reopen it with the next write, not spin. */
+			fprintf(stderr, "chumby-stream: write: %s; reopening\n",
+				snd_strerror(n));
+			pcm_close();
+			usleep(500 * 1000);
 			return;
 		}
 		buf += n * 2 * pcm_channels;
