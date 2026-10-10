@@ -7,6 +7,8 @@ After=wireplumber.service
 
 [Service]
 # As root: its hooks call chumby-audio and the shell, both root's.
+# Ahead of the UI, like chumby-stream: redraws mustn't make it late.
+Nice=-10
 RuntimeDirectory=shairport-sync
 RuntimeDirectoryPreserve=yes
 Environment=PIPEWIRE_RUNTIME_DIR=/run/pipewire

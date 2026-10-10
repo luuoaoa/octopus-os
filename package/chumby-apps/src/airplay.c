@@ -86,11 +86,16 @@ static void art_show_note(void)
 	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_VER, 0);
 }
 
+/* Each cover tried once (decoding one is a second's work on the Chumby,
+ * and a cover that won't show must not be retried every poll). */
+static bool shown_active;
+
 static void art_update(void)
 {
-	if (st_cover_id == shown_cover_id && (st_cover[0] != 0) == !lv_obj_is_hidden(art_img))
+	if (st_cover_id == shown_cover_id && active() == shown_active)
 		return;
 	shown_cover_id = st_cover_id;
+	shown_active = active();
 	if (!active() || !st_cover[0] || !chumby_logo_set(art_img, st_cover, ART_SIZE)) {
 		art_show_note();
 		return;
@@ -102,9 +107,16 @@ static void art_update(void)
 	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_NONE, 0);
 }
 
+/* Only when it changes: setting a label redraws it, and the compositor. */
+static void label_set(lv_obj_t *l, const char *text)
+{
+	if (strcmp(lv_label_get_text(l), text))
+		lv_label_set_text(l, text);
+}
+
 static void ui_update(void)
 {
-	char top[160], sub[520], host[64] = "this Chumby";
+	char top[160], sub[520], host[64] = "this Chumby", hint[160];
 
 	if (active()) {
 		if (st_client[0])
@@ -123,12 +135,12 @@ static void ui_update(void)
 		gethostname(host, sizeof(host) - 1);
 		snprintf(sub, sizeof(sub), "Ready");
 		chumby_scroll_label_set(lbl_title, "Nothing playing");
-		lv_label_set_text_fmt(lbl_hint, "On an iPhone, iPad or Mac, choose \"%s\" as the speaker.",
-				      host);
+		snprintf(hint, sizeof(hint), "On an iPhone, iPad or Mac, choose \"%s\" as the speaker.",
+			 host);
+		label_set(lbl_hint, hint);
 	}
-	lv_label_set_text(lbl_top, top);
-	if (strcmp(lv_label_get_text(lbl_sub), sub))
-		lv_label_set_text(lbl_sub, sub);
+	label_set(lbl_top, top);
+	label_set(lbl_sub, sub);
 	lv_obj_set_hidden(btn_stop, !active());
 	lv_obj_set_hidden(lbl_hint, active());
 	art_update();
