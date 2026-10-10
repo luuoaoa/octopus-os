@@ -134,6 +134,7 @@ case "$1" in
 		loop_running
 		;;
 	off)
+		[ -x /usr/bin/chumby-audio ] && chumby-audio stopped fm
 		rm -f "$PAUSED"
 		stop_loop
 		stop_rds

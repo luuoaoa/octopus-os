@@ -1217,6 +1217,21 @@ int main(int argc, char **argv)
 	if (aac)
 		NeAACDecClose(aac);
 	unlink(status_path);
+	/* Not playing any more (stopped, paused, replaced): chumby-audio's
+	 * "playing" goes, unless something else plays by now. Before we're
+	 * gone - the stream replacing us waits for that - so it can't clear
+	 * the new one's. */
+	{
+		char *stopped_argv[] = { "chumby-audio", "stopped", "stream", NULL };
+
+		pid = fork();
+		if (pid == 0) {
+			execv(AUDIO, stopped_argv);
+			_exit(127);
+		}
+		if (pid > 0)
+			waitpid(pid, NULL, 0);
+	}
 	unlink(pid_path);
 	return 0;
 }

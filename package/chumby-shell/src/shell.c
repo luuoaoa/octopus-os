@@ -38,6 +38,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/inotify.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -416,8 +417,7 @@ static enum popup_kind popup_kind;
 static lv_display_t *popup_disp;
 static lv_obj_t *popup_bar;
 static lv_obj_t *popup_stop;	/* volume: stop what plays (if anything does) */
-static pid_t playing_pid = -1;	/* "chumby-audio playing", running */
-static lv_timer_t *playing_timer;	/* waiting for its answer */
+static bool media_playing;	/* chumby-audio's $run_dir/audio/playing is there */
 static lv_timer_t *popup_timer;
 
 /* The app in front: activated and not minimized (none: Home is). */
@@ -974,31 +974,51 @@ static void popup_stop_show(bool show)
 	popup_layout();
 }
 
-/* "chumby-audio playing" has finished (status from waitpid): the stop
- * button shows if something plays. */
-static void playing_answer(int status)
+/*
+ * What plays: chumby-audio keeps $run_dir/audio/playing (the source's
+ * name; gone while nothing plays) and we watch that directory, so the
+ * stop button is right when the popup opens and follows a player that
+ * starts or stops while it's open - nothing to ask, nothing to wait for.
+ */
+static char playing_path[256];
+
+static void media_playing_read(void)
 {
-	playing_pid = -1;
-	if (playing_timer)
-		lv_timer_pause(playing_timer);
-	popup_stop_show(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+	struct stat st;
+
+	media_playing = stat(playing_path, &st) == 0 && st.st_size > 0;
+	popup_stop_show(media_playing);
 }
 
-static bool playing_poll(void)
+static void audio_dir_readable(int fd, void *user)
 {
-	int status;
+	char buf[1024] __attribute__((aligned(__alignof__(struct inotify_event))));
 
-	if (playing_pid <= 0 || waitpid(playing_pid, &status, WNOHANG) != playing_pid)
-		return false;
-	playing_answer(status);
-	return true;
+	(void)user;
+	while (read(fd, buf, sizeof(buf)) > 0)
+		;
+	media_playing_read();
 }
 
-static void playing_timer_cb(lv_timer_t *t)
+static void audio_watch(void)
 {
-	(void)t;
-	if (playing_pid <= 0 || playing_poll())
-		lv_timer_pause(playing_timer);
+	char dir[256];
+	int fd;
+
+	snprintf(dir, sizeof(dir), "%s/audio", chumby_run_dir());
+	snprintf(playing_path, sizeof(playing_path), "%s/playing", dir);
+	mkdir(chumby_run_dir(), 0755);
+	mkdir(dir, 0755);	/* chumby-audio makes it too: whoever's first */
+	fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+	if (fd < 0 || inotify_add_watch(fd, dir, IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE |
+					IN_DELETE | IN_MOVED_FROM) < 0) {
+		fprintf(stderr, "chumby-shell: cannot watch %s\n", dir);
+		if (fd >= 0)
+			close(fd);
+		return;
+	}
+	chumby_watch_fd(fd, audio_dir_readable, NULL);
+	media_playing_read();
 }
 
 static void popup_open(enum popup_kind kind)
@@ -1050,25 +1070,12 @@ static void popup_open(enum popup_kind kind)
 	popup_bar = lv_slider_create(plate);
 	popup_stop = NULL;
 	if (kind == POPUP_VOLUME) {
-		/* Volume: a stop button for whatever plays (shown once
-		 * "chumby-audio playing" says something does), then the bar. */
+		/* Volume: a stop button while something plays (audio_watch()),
+		 * then the bar. */
 		lv_obj_t *stop = lv_button_create(plate), *l;
-		char *argv[] = { "chumby-audio", "playing", NULL };
 
 		popup_stop = stop;
-		lv_obj_set_hidden(stop, true);
-		playing_pid = chumby_spawn(AUDIO, argv);
-		/* Wait a moment for the answer, so the button is there when the
-		 * popup first shows (a Pi answers in tens of ms); if it's slower
-		 * (the Chumby), it pops in as soon as it comes. */
-		for (int i = 0; i < 10 && playing_pid > 0 && !playing_poll(); i++)
-			usleep(10 * 1000);
-		if (playing_pid > 0) {
-			if (!playing_timer)
-				playing_timer = lv_timer_create(playing_timer_cb, 20, NULL);
-			lv_timer_reset(playing_timer);
-			lv_timer_resume(playing_timer);
-		}
+		lv_obj_set_hidden(stop, !media_playing);
 		lv_obj_set_size(stop, STOP_SIZE, STOP_SIZE);
 		lv_obj_align(stop, LV_ALIGN_LEFT_MID, 8, 0);
 		lv_obj_set_style_radius(stop, LV_RADIUS_CIRCLE, 0);
@@ -1678,16 +1685,13 @@ static int cmd_fifo_open(void)
 static void reaper_cb(lv_timer_t *t)
 {
 	pid_t pid;
-	int status;
 
 	(void)t;
-	while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
 		int i;
 
 		if (pid == tone_pid)
 			tone_pid = -1;
-		if (pid == playing_pid)		/* the stop button: if anything plays */
-			playing_answer(status);
 		for (i = 0; i < n_apps; i++)
 			if (apps[i].starting_pid == pid)
 				apps[i].starting_pid = 0;	/* died starting */
@@ -1731,6 +1735,7 @@ int main(void)
 
 	chumby_watch_fd(find_input("rotary"), knob_readable, NULL);
 	chumby_watch_fd(find_input("snooze"), snooze_readable, NULL);
+	audio_watch();
 	resistive_ts = find_input("mxs-lradc-ts");
 	chumby_watch_fd(resistive_ts, touch_readable, NULL);
 	chumby_watch_fd(cmd_fifo_open(), cmd_readable, NULL);

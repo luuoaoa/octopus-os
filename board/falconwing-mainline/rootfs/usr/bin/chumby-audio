@@ -8,6 +8,8 @@
 #   chumby-audio release <source>   ...and resume once it's done
 #   chumby-audio stop               everything stops (the volume control's
 #                                   stop button, snooze while it's open)
+#   chumby-audio stopped <source>   <source> stopped by itself (its own stop
+#                                   button, an error)
 #   chumby-audio playing            exit status: does anything play?
 #   chumby-audio list               the sources, and which play
 #
@@ -16,11 +18,34 @@
 # playing?). A source calls "play" itself as it starts; its "resume"
 # mustn't (we hold the lock then). Sources run without the lock's fd: a
 # player they leave running in the background mustn't keep holding it.
+#
+# $S/playing names the source that plays, and is gone while none does:
+# watch the directory (inotify) to know at once (the shell's stop button).
+# A player that stops by itself says so with "stopped" - which takes no
+# lock, as a source told to stop by us says it too, while we hold it.
 
 D=/usr/share/chumby/audio.d
 S=${CHUMBY_RUN_DIR:-/run/chumby}/audio
 
 mkdir -p "$S"
+
+# What plays, replaced whole (a watcher never reads half a name).
+set_playing() {
+	echo "$1" > "$S/playing.tmp" && mv -f "$S/playing.tmp" "$S/playing"
+}
+
+case "$1" in
+	stopped)	# no lock: see above
+		[ -n "$2" ] || exit 2
+		[ "$(cat "$S/playing" 2>/dev/null)" = "$2" ] && rm -f "$S/playing"
+		exit 0
+		;;
+	playing)
+		[ -s "$S/playing" ]
+		exit
+		;;
+esac
+
 exec 9>"$S/lock"
 flock 9	# busybox: no -w; sources finish in seconds
 
@@ -40,6 +65,7 @@ case "$1" in
 		done
 		rm -f "$S/paused"	# nothing to come back to now
 		echo "$2" > "$S/current"
+		set_playing "$2"
 		;;
 	duck)
 		[ -n "$2" ] || exit 2
@@ -48,11 +74,12 @@ case "$1" in
 				echo "${src##*/}" >> "$S/paused"
 			fi
 		done
+		[ -f "$S/paused" ] && rm -f "$S/playing"	# for now
 		;;
 	release)
 		[ -f "$S/paused" ] || exit 0
 		for name in $(cat "$S/paused"); do
-			[ -x "$D/$name" ] && "$D/$name" resume 9>&-
+			[ -x "$D/$name" ] && "$D/$name" resume 9>&- && set_playing "$name"
 		done
 		rm -f "$S/paused"
 		;;
@@ -61,14 +88,7 @@ case "$1" in
 			[ -x "$src" ] || continue
 			"$src" active 9>&- && "$src" stop 9>&-
 		done
-		rm -f "$S/paused" "$S/current"
-		;;
-	playing)
-		for src in "$D"/*; do
-			[ -x "$src" ] || continue
-			"$src" active 9>&- && exit 0
-		done
-		exit 1
+		rm -f "$S/paused" "$S/current" "$S/playing"
 		;;
 	list)
 		for src in "$D"/*; do
