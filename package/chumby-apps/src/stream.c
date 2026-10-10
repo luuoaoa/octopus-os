@@ -50,6 +50,9 @@
 #include <unistd.h>
 #include <chumby.h>
 
+/* The board's own PCM if its asound.conf names one (the RasPad: HDMI,
+ * with a soft volume), else the first card, straight. */
+#define PCM_BOARD	"chumby"
 #define PCM		"plughw:0,0"
 #define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"	/* mbed TLS: no dirs */
 #define AUDIO		"/usr/bin/chumby-audio"
@@ -184,7 +187,9 @@ static bool pcm_setup(long rate, int channels)
 	pcm_close();
 	/* The FM loop may still be letting go of the card. */
 	for (i = 0; i < 30 && !stop; i++) {
-		err = snd_pcm_open(&pcm, PCM, SND_PCM_STREAM_PLAYBACK, 0);
+		err = snd_pcm_open(&pcm, PCM_BOARD, SND_PCM_STREAM_PLAYBACK, 0);
+		if (err == -ENOENT)	/* not defined here */
+			err = snd_pcm_open(&pcm, PCM, SND_PCM_STREAM_PLAYBACK, 0);
 		if (err != -EBUSY)
 			break;
 		usleep(100 * 1000);

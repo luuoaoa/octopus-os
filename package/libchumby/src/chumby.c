@@ -880,8 +880,12 @@ static snd_mixer_elem_t *dac_elem(void)
 		}
 	}
 	snd_mixer_selem_id_alloca(&sid);
-	snd_mixer_selem_id_set_name(sid, "DAC");
+	snd_mixer_selem_id_set_name(sid, "DAC");	/* the Chumby's codec */
 	dac = snd_mixer_find_selem(mixer, sid);
+	if (!dac) {	/* elsewhere: a softvol named so in asound.conf (RasPad) */
+		snd_mixer_selem_id_set_name(sid, "Master");
+		dac = snd_mixer_find_selem(mixer, sid);
+	}
 	return dac;
 }
 

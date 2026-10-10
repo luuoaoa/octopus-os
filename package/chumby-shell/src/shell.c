@@ -982,6 +982,8 @@ static void popup_open(enum popup_kind kind)
 	lv_area_t a;
 
 	menu_close();
+	if (!btn)	/* no brightness control here */
+		return;
 	if (popup_kind == kind && popup_disp) {
 		popup_keepalive();
 		return;
@@ -1133,9 +1135,12 @@ static void build_panel(lv_obj_t *scr)
 	/* Brightness, then volume: the volume popup is the wider one (its
 	 * stop button) and hangs from its button's right edge, so that is
 	 * the one further right. */
-	btn_bri = tray_button(tray, CHUMBY_ICON_SUN);
-	lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
-			    (void *)(intptr_t)POPUP_BRIGHTNESS);
+	btn_bri = NULL;
+	if (chumby_brightness_get() >= 0) {	/* none without a backlight we drive */
+		btn_bri = tray_button(tray, CHUMBY_ICON_SUN);
+		lv_obj_add_event_cb(btn_bri, quick_btn_cb, LV_EVENT_CLICKED,
+				    (void *)(intptr_t)POPUP_BRIGHTNESS);
+	}
 	btn_vol = tray_button(tray, LV_SYMBOL_VOLUME_MAX);
 	lv_obj_add_event_cb(btn_vol, quick_btn_cb, LV_EVENT_CLICKED,
 			    (void *)(intptr_t)POPUP_VOLUME);
@@ -1666,6 +1671,7 @@ static void volume_sync_cb(lv_timer_t *t)
 int main(void)
 {
 	lv_display_t *panel;
+	int resistive_ts;
 
 	chumby_init();
 	load_apps();
@@ -1688,7 +1694,8 @@ int main(void)
 
 	chumby_watch_fd(find_input("rotary"), knob_readable, NULL);
 	chumby_watch_fd(find_input("snooze"), snooze_readable, NULL);
-	chumby_watch_fd(find_input("mxs-lradc-ts"), touch_readable, NULL);
+	resistive_ts = find_input("mxs-lradc-ts");
+	chumby_watch_fd(resistive_ts, touch_readable, NULL);
 	chumby_watch_fd(cmd_fifo_open(), cmd_readable, NULL);
 	lv_timer_ready(lv_timer_create(volume_sync_cb, 2000, NULL));
 	lv_timer_create(reaper_cb, 1000, NULL);
@@ -1698,8 +1705,10 @@ int main(void)
 
 	snooze_hold_timer = lv_timer_create(snooze_hold_cb, CALIBRATE_HOLD_MS, NULL);
 	lv_timer_pause(snooze_hold_timer);
-	/* Never calibrated: that first (chumby-wm shows it over everything). */
-	if (access(CAL_FILE, F_OK) != 0)
+	/* Never calibrated: that first (chumby-wm shows it over everything).
+	 * Only the Chumby's resistive touchscreen needs it; a capacitive one
+	 * (the RasPad's) is right as it comes. */
+	if (access(CAL_FILE, F_OK) != 0 && resistive_ts >= 0)
 		calibrate_start();
 
 	return chumby_run();
