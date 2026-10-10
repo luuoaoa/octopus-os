@@ -121,6 +121,7 @@ void chumby_watch_fd(int fd, chumby_fd_cb_t cb, void *user);
 #define CHUMBY_ICON_BACK10	"\xEE\xA4\x85"	/* U+E905 */
 #define CHUMBY_ICON_AHEAD30	"\xEE\xA4\x86"	/* U+E906 */
 #define CHUMBY_ICON_AIRPLAY	"\xEE\xA4\x87"	/* U+E907 */
+#define CHUMBY_ICON_NO_NETWORK	"\xEE\xA4\x88"	/* U+E908 */
 const lv_font_t *chumby_icon_font(int px);
 
 /* Theme */
@@ -208,6 +209,13 @@ bool chumby_in_window(int start, int end);
  * alarms) must not act on a wrong clock.
  */
 bool chumby_time_valid(void);
+
+/*
+ * Has timesyncd set the clock from the internet this boot? Stricter than
+ * chumby_time_valid(): alarms wait for it, and the clock shows a "no
+ * network" icon until then.
+ */
+bool chumby_time_synced(void);
 
 /* Hardware helpers (percent, 0..100; -1 if unavailable) */
 int chumby_volume_get(void);

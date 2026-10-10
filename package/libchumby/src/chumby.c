@@ -126,12 +126,17 @@ bool chumby_in_window(int start, int end)
  */
 #define TIME_VALID_AFTER	1704067200	/* 2024-01-01 */
 
+bool chumby_time_synced(void)
+{
+	return access("/run/systemd/timesync/synchronized", F_OK) == 0;
+}
+
 bool chumby_time_valid(void)
 {
 	long long rtc = 0;
 	FILE *f;
 
-	if (access("/run/systemd/timesync/synchronized", F_OK) == 0)
+	if (chumby_time_synced())
 		return true;
 	f = fopen("/sys/class/rtc/rtc0/since_epoch", "r");
 	if (!f)

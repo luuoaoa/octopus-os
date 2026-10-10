@@ -1514,9 +1514,11 @@ static void alarm_tick_cb(lv_timer_t *t)
 		alarm_ring();
 
 	/* Check each minute once, so a dismissed alarm doesn't ring again
-	 * in the same minute. Not before the clock is set: 00:05 in 1970
-	 * could match an alarm. */
-	if (minute != last_minute && chumby_time_valid()) {
+	 * in the same minute. Not before the clock is synced from the
+	 * internet: 00:05 in 1970 could match an alarm, and even the RTC's
+	 * time can be off. (Exact minutes only, so one missed until then
+	 * doesn't ring late.) */
+	if (minute != last_minute && chumby_time_synced()) {
 		last_minute = minute;
 		localtime_r(&now, &tm);
 		for (i = 0; i < n_alarms; i++) {

@@ -16,7 +16,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 #include <chumby.h>
 
 #define GAP	8
@@ -93,10 +92,10 @@ static void alarms_save(void)
 /* ------------------------------------------------------------------ */
 /* Clock view                                                         */
 
-static lv_obj_t *face, *lbl_time, *lbl_date, *lbl_next, *ic_next, *lbl_unsynced;
+static lv_obj_t *face, *lbl_time, *lbl_date, *lbl_next, *ic_next, *ic_offline;
 
-/* Amber: legible on the day and the night background alike. */
-#define WARN_COLOR	lv_color_hex(0xc98a1a)
+/* Red: legible on the day and the night background alike. */
+#define WARN_COLOR	lv_color_hex(0xe03a2f)
 
 static void list_show(void);
 
@@ -124,12 +123,6 @@ static void date_set(const struct tm *tm)
 	}
 }
 
-/* timesyncd's flag: the clock has been set from the internet this boot. */
-static bool time_synced(void)
-{
-	return access("/run/systemd/timesync/synchronized", F_OK) == 0;
-}
-
 static void clock_update(void)
 {
 	char buf[64];
@@ -146,11 +139,9 @@ static void clock_update(void)
 		lv_label_set_text(lbl_time, "--:--");
 		lv_label_set_text(lbl_date, "");
 	}
-	/* Not set from the internet: the time is the RTC's guess (or none). */
-	if (lv_obj_is_hidden(lbl_unsynced) != time_synced()) {
-		lv_obj_set_hidden(lbl_unsynced, time_synced());
-		face_center();
-	}
+	/* Not set from the internet this boot: the time is the RTC's guess
+	 * (or none), and the shell holds the alarms until it is. */
+	lv_obj_set_hidden(ic_offline, chumby_time_synced());
 
 	for (i = 0; i < n_alarms; i++) {
 		time_t t = chumby_alarm_next(&alarms[i], now);
@@ -169,9 +160,9 @@ static void clock_update(void)
 		snprintf(buf, sizeof(buf), "No alarm set");
 	}
 	lv_label_set_text(lbl_next, buf);
-	lv_obj_set_style_text_color(ic_next, chumby_color(next || alarm_state ==
-				    CHUMBY_ALARM_SNOOZED ? CHUMBY_COLOR_ACCENT :
-				    CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(ic_next, chumby_color((next || alarm_state ==
+				    CHUMBY_ALARM_SNOOZED) && chumby_time_synced() ?
+				    CHUMBY_COLOR_ACCENT : CHUMBY_COLOR_TEXT_DIM), 0);
 }
 
 static void alarms_btn_cb(lv_event_t *e)
@@ -187,11 +178,14 @@ static void build_clock(void)
 	face = chumby_group(view_clock, LV_FLEX_FLOW_COLUMN, 2);
 	lbl_time = label(face, CHUMBY_FONT_HUGE, CHUMBY_COLOR_TEXT);
 	lbl_date = label(face, CHUMBY_FONT_MEDIUM, CHUMBY_COLOR_TEXT_DIM);
-	lbl_unsynced = label(face, CHUMBY_FONT_SMALL, CHUMBY_COLOR_TEXT);
-	lv_obj_set_style_text_color(lbl_unsynced, WARN_COLOR, 0);
-	lv_obj_set_style_pad_top(lbl_unsynced, 4, 0);
-	lv_label_set_text(lbl_unsynced, LV_SYMBOL_WARNING "  No internet: time not synced");
 	lv_obj_align(face, LV_ALIGN_TOP_MID, 0, 0);
+
+	/* No network time yet: a red icon in the corner. */
+	ic_offline = lv_label_create(view_clock);
+	lv_obj_set_style_text_font(ic_offline, chumby_icon_font(20), 0);
+	lv_obj_set_style_text_color(ic_offline, WARN_COLOR, 0);
+	lv_label_set_text(ic_offline, CHUMBY_ICON_NO_NETWORK);
+	lv_obj_align(ic_offline, LV_ALIGN_TOP_RIGHT, -GAP, GAP);
 
 	/* A small pill at the bottom opens the alarms. */
 	b = lv_button_create(view_clock);
@@ -555,7 +549,7 @@ static void tick(lv_timer_t *t)
 	long minute = (long)(now / 60);
 	bool changed = st != alarm_state || until != snooze_until;
 	/* Synced (or not) since: the warning goes (or comes) right away. */
-	bool sync_changed = lv_obj_is_hidden(lbl_unsynced) != time_synced();
+	bool sync_changed = lv_obj_is_hidden(ic_offline) != chumby_time_synced();
 
 	(void)t;
 	if (changed) {

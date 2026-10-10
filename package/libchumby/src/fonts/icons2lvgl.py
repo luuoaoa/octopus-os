@@ -3,7 +3,7 @@
 Make the Chumby icon fonts: a few Material Icons glyphs (Apache-2.0,
 https://github.com/google/material-design-icons, font/MaterialIcons-
 Regular.ttf) LVGL's built-in symbols don't have (a radio, a clock, a
-globe, a sun, a podcast, skip back 10 s / ahead 30 s, AirPlay), as LVGL 9 fonts (lv_font_fmt_txt, 4 bpp), sized and
+globe, a sun, a podcast, skip back 10 s / ahead 30 s, AirPlay, no network), as LVGL 9 fonts (lv_font_fmt_txt, 4 bpp), sized and
 placed like LVGL's Montserrat symbols so they mix with them. Montserrat
 is set as their fallback (libchumby), so a label in an icon font shows
 LV_SYMBOL_* too.
@@ -28,6 +28,7 @@ ICONS = [
     (0xE059, 0xE905, "back 10 s (replay_10)"),
     (0xE057, 0xE906, "ahead 30 s (forward_30)"),
     (0xE055, 0xE907, "AirPlay (airplay)"),
+    (0xE648, 0xE908, "no network (wifi_off)"),
 ]
 
 # Sizes like Montserrat's: (name, glyph px, line_height, base_line)
