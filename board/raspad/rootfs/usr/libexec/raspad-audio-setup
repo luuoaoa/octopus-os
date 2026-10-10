@@ -35,4 +35,4 @@ if [ -z "${HW_ID:-}" ]; then
 fi
 wpctl set-volume "$HW_ID" 1.0
 wpctl set-mute "$HW_ID" 0
-echo "raspad-audio-setup: $HW_NAME at 100 %, EQ chain ${EQ_ID:+id $EQ_ID}${EQ_ID:-missing}"
+echo "raspad-audio-setup: $HW_NAME at 100 %, EQ chain ${EQ_ID:-missing}"
