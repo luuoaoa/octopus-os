@@ -275,7 +275,7 @@ static void fonts_load(void)
 	fonts[CHUMBY_FONT_MEDIUM] = nimbus(&nimbus_14x2, &lv_font_montserrat_28);
 }
 
-extern lv_font_t chumby_icons_14, chumby_icons_20, chumby_icons_28;
+extern lv_font_t chumby_icons_14, chumby_icons_20, chumby_icons_28, chumby_icons_42;
 
 const lv_font_t *chumby_icon_font(int px)
 {
@@ -285,9 +285,10 @@ const lv_font_t *chumby_icon_font(int px)
 		chumby_icons_14.fallback = &lv_font_montserrat_14;
 		chumby_icons_20.fallback = &lv_font_montserrat_20;
 		chumby_icons_28.fallback = &lv_font_montserrat_28;
+		chumby_icons_42.fallback = &lv_font_montserrat_48;
 		init = true;
 	}
-	return px >= 28 ? &chumby_icons_28 : px >= 20 ? &chumby_icons_20 : &chumby_icons_14;
+	return px >= 42 ? &chumby_icons_42 : px >= 28 ? &chumby_icons_28 : px >= 20 ? &chumby_icons_20 : &chumby_icons_14;
 }
 
 const lv_font_t *chumby_font(chumby_font_t f)

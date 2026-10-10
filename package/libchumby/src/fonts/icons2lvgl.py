@@ -3,7 +3,9 @@
 Make the Chumby icon fonts: a few Material Icons glyphs (Apache-2.0,
 https://github.com/google/material-design-icons, font/MaterialIcons-
 Regular.ttf) LVGL's built-in symbols don't have (a radio, a clock, a
-globe, a sun, a podcast, skip back 10 s / ahead 30 s, AirPlay, no network), as LVGL 9 fonts (lv_font_fmt_txt, 4 bpp), sized and
+globe, a sun, a podcast, skip back 10 s / ahead 30 s, no network), plus
+glyphs drawn here that Material has no match for (AirPlay audio: its
+icon is the screen one, AirPlay video), as LVGL 9 fonts (lv_font_fmt_txt, 4 bpp), sized and
 placed like LVGL's Montserrat symbols so they mix with them. Montserrat
 is set as their fallback (libchumby), so a label in an icon font shows
 LV_SYMBOL_* too.
@@ -18,7 +20,35 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
-# (Material codepoint, ours, name)
+
+
+def airplay_audio(px):
+    """Apple's AirPlay audio mark: concentric rings over a triangle, apex
+    up into the rings, cut clear of them. On Material's 24-unit grid, so
+    it sizes like the font's glyphs."""
+    k = 16  # supersampling
+    s = px * k / 24.0
+    img = Image.new("L", (px * k, px * k), 0)
+    d = ImageDraw.Draw(img)
+
+    def disc(r, fill):
+        cx, cy = 12 * s, 10.5 * s
+        d.ellipse((cx - r * s, cy - r * s, cx + r * s, cy + r * s), fill=fill)
+
+    disc(9.6, 255)
+    disc(7.8, 0)
+    disc(5.6, 255)
+    disc(3.8, 0)
+    disc(2.0, 255)
+    # The triangle, and a clear margin around it.
+    m = 1.7
+    d.polygon([(12 * s, (13.2 - 2 * m) * s), ((5.5 - 1.7 * m) * s, (22.5 + m) * s),
+               ((18.5 + 1.7 * m) * s, (22.5 + m) * s)], fill=0)
+    d.polygon([(12 * s, 13.2 * s), (5.5 * s, 22.5 * s), (18.5 * s, 22.5 * s)], fill=255)
+    return img.resize((px, px), Image.LANCZOS)
+
+
+# (Material codepoint or a drawing function, ours, name)
 ICONS = [
     (0xE03E, 0xE900, "radio"),
     (0xE8B5, 0xE901, "clock (schedule)"),
@@ -27,7 +57,7 @@ ICONS = [
     (0xF048, 0xE904, "podcast (podcasts)"),
     (0xE059, 0xE905, "back 10 s (replay_10)"),
     (0xE057, 0xE906, "ahead 30 s (forward_30)"),
-    (0xE055, 0xE907, "AirPlay (airplay)"),
+    (airplay_audio, 0xE907, "AirPlay audio (drawn)"),
     (0xE648, 0xE908, "no network (wifi_off)"),
 ]
 
@@ -36,15 +66,20 @@ SIZES = [
     ("chumby_icons_14", 15, 16, 3),
     ("chumby_icons_20", 20, 22, 4),
     ("chumby_icons_28", 28, 30, 5),
+    ("chumby_icons_42", 42, 46, 8),  # placeholder cover art
 ]
 
 
-def render(font, cp):
+def render(font, cp, px):
     """The glyph's coverage, cropped: (w, h, rows of 0..255)."""
-    ch = chr(cp)
-    l, t, r, b = font.getbbox(ch)
-    img = Image.new("L", (r - l, b - t), 0)
-    ImageDraw.Draw(img).text((-l, -t), ch, font=font, fill=255)
+    if callable(cp):
+        img = cp(px)
+        img = img.crop(img.getbbox())
+    else:
+        ch = chr(cp)
+        l, t, r, b = font.getbbox(ch)
+        img = Image.new("L", (r - l, b - t), 0)
+        ImageDraw.Draw(img).text((-l, -t), ch, font=font, fill=255)
     w, h = img.size
     return w, h, [[img.getpixel((x, y)) for x in range(w)] for y in range(h)]
 
@@ -61,7 +96,7 @@ def make(ttf, name, size, line_h, base):
     font = ImageFont.truetype(ttf, size)
     bitmap, dscs = [], []
     for src, dst, label in ICONS:
-        w, h, rows = render(font, src)
+        w, h, rows = render(font, src, size)
         # Centred on the line's text centre above the baseline, like the
         # Montserrat symbols.
         centre = line_h / 2 - base

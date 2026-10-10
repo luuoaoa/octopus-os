@@ -226,8 +226,9 @@ int main(void)
 	lv_obj_set_hidden(art_img, true);
 	art_note = lv_label_create(art_tile);
 	lv_label_set_text(art_note, CHUMBY_ICON_AIRPLAY);
-	lv_obj_set_style_text_font(art_note, chumby_icon_font(28), 0);
-	lv_obj_set_style_transform_scale(art_note, 384, 0);	/* 1.5x */
+	/* Its own size, not scaled up: a transform scales from the top left
+	 * corner (off centre), and blurs. */
+	lv_obj_set_style_text_font(art_note, chumby_icon_font(42), 0);
 	lv_obj_center(art_note);
 
 	lbl_top = lv_label_create(scr);

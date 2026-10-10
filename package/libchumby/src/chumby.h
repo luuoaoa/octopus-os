@@ -110,8 +110,8 @@ void chumby_watch_fd(int fd, chumby_fd_cb_t cb, void *user);
 /*
  * Icons LVGL's symbols lack (Material Icons, fonts/icons2lvgl.py), as
  * UTF-8 strings like LV_SYMBOL_*. They show in chumby_icon_font(px)
- * (14, 20 or 28: sized like Montserrat), which falls back to LVGL's
- * symbols, so a label in it takes either.
+ * (14, 20, 28 or 42 for placeholder art: sized like Montserrat), which
+ * falls back to LVGL's symbols, so a label in it takes either.
  */
 #define CHUMBY_ICON_RADIO	"\xEE\xA4\x80"	/* U+E900 */
 #define CHUMBY_ICON_CLOCK	"\xEE\xA4\x81"	/* U+E901 */
