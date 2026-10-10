@@ -24,6 +24,9 @@
  *     by a thread on one kept-alive connection (a TLS handshake per 2 s
  *     segment would be too slow on this CPU) and queued for playing
  *   - .pls and .m3u playlists, followed to their first entry
+ *   - MP4 audio files (.m4a, a podcast's AAC): their index (moov) read
+ *     first - from the end, by a range request, if it's there - then
+ *     each AAC frame from where the index says
  * A dropped stream is reconnected, backing off up to 30 s. We run above
  * the UI's priority, so redraws can't make the decoder late.
  *
@@ -107,7 +110,7 @@ static void on_signal(int sig)
 	stop = 1;
 }
 
-enum codec { CODEC_UNKNOWN, CODEC_MP3, CODEC_AAC };
+enum codec { CODEC_UNKNOWN, CODEC_MP3, CODEC_AAC, CODEC_MP4 };
 static enum codec codec;	/* of the stream: by Content-Type, else sniffed */
 
 static pthread_mutex_t status_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -123,7 +126,8 @@ static void status_write_locked(void)
 	if (!f)
 		return;
 	fprintf(f, "state=%s\nurl=%s\nname=%s\ntitle=%s\ncodec=%s\nbitrate=%d\n", state, url,
-		name, title, codec == CODEC_AAC ? "AAC" : codec == CODEC_MP3 ? "MP3" : "", bitrate);
+		name, title, codec == CODEC_AAC || codec == CODEC_MP4 ? "AAC" :
+		codec == CODEC_MP3 ? "MP3" : "", bitrate);
 	if (finite)
 		fprintf(f, "byte=%lld\nlength=%lld\nplayed=%llu\n", base_byte + fed, file_len,
 			pcm_rate > 0 ? played_frames / (unsigned long long)pcm_rate : 0ULL);
@@ -410,14 +414,471 @@ static void aac_feed(const unsigned char *d, size_t n)
 
 /* Audio frames: to the decoder for the codec, sniffed from the first
  * frame header if the server didn't say (ADTS has layer bits 00). */
+/* ------------------------------------------------------------------ */
+/* MP4 (.m4a): an index (moov) of where each AAC frame is, then the     */
+/* frames (in mdat). Kept across reconnects: a resume goes straight to   */
+/* a frame.                                                             */
+
+#define MOOV_MAX	(16 << 20)
+
+static struct {
+	bool indexed;			/* moov read: the arrays below */
+	unsigned char asc[64];		/* AudioSpecificConfig, for faad */
+	int asc_len;
+	uint32_t n;			/* frames */
+	long long *off;			/* each one's place in the file */
+	uint32_t *size;
+	uint32_t next;			/* the next to decode */
+	unsigned char *part;		/* one cut by a chunk boundary */
+	size_t part_have;
+	bool dec_ready;
+	/* Boxes, as they stream by. */
+	enum { BOX_HEAD, BOX_SKIP, BOX_MOOV, BOX_MDAT } state;
+	unsigned char head[16];
+	int head_have;
+	long long remain;		/* of the box (-1: to the end) */
+	unsigned char *moov;
+	size_t moov_len, moov_have;
+	long long want_byte;		/* resume here, once indexed */
+} m4;
+static volatile bool restart_xfer;	/* a new range: this transfer's done */
+static char cur_target[1024];		/* what's being fetched */
+
+static uint32_t be32(const unsigned char *p)
+{
+	return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
+}
+
+static uint64_t be64(const unsigned char *p)
+{
+	return (uint64_t)be32(p) << 32 | be32(p + 4);
+}
+
+/* The box of type t directly inside [p, end), or NULL; *len its payload. */
+static const unsigned char *box_find(const unsigned char *p, const unsigned char *end,
+				     const char *t, size_t *len)
+{
+	while (end - p >= 8) {
+		uint64_t sz = be32(p);
+		size_t hl = 8;
+
+		if (sz == 1 && end - p >= 16) {
+			sz = be64(p + 8);
+			hl = 16;
+		} else if (sz == 0) {
+			sz = end - p;
+		}
+		if (sz < hl || sz > (uint64_t)(end - p))
+			return NULL;
+		if (!memcmp(p + 4, t, 4)) {
+			*len = sz - hl;
+			return p + hl;
+		}
+		p += sz;
+	}
+	return NULL;
+}
+
+/* An MPEG-4 descriptor's length (1-4 bytes, 7 bits each). */
+static size_t desc_len(const unsigned char **p, const unsigned char *end)
+{
+	size_t v = 0;
+	int i;
+
+	for (i = 0; i < 4 && *p < end; i++) {
+		unsigned char b = *(*p)++;
+
+		v = v << 7 | (b & 0x7f);
+		if (!(b & 0x80))
+			break;
+	}
+	return v;
+}
+
+/* esds: ES_Descriptor > DecoderConfigDescriptor > DecSpecificInfo. */
+static bool esds_asc(const unsigned char *p, size_t len)
+{
+	const unsigned char *end = p + len;
+	unsigned char flags;
+
+	p += 4;				/* version, flags */
+	if (p >= end || *p++ != 3)
+		return false;
+	desc_len(&p, end);
+	if (end - p < 3)
+		return false;
+	p += 2;				/* ES_ID */
+	flags = *p++;
+	if (flags & 0x80)
+		p += 2;
+	if ((flags & 0x40) && p < end)
+		p += 1 + *p;
+	if (flags & 0x20)
+		p += 2;
+	if (p >= end || *p++ != 4)
+		return false;
+	desc_len(&p, end);
+	p += 13;			/* object type ... average bitrate */
+	if (p >= end || *p++ != 5)
+		return false;
+	len = desc_len(&p, end);
+	if (!len || len > sizeof(m4.asc) || (size_t)(end - p) < len)
+		return false;
+	memcpy(m4.asc, p, len);
+	m4.asc_len = (int)len;
+	return true;
+}
+
+/* The first sound track's AAC: its config and every frame's place. */
+static bool moov_parse(const unsigned char *moov, size_t len)
+{
+	const unsigned char *end = moov + len, *trak = moov;
+	size_t tl;
+
+	while ((trak = box_find(trak, end, "trak", &tl))) {
+		const unsigned char *tend = trak + tl, *mdia, *hdlr, *minf, *stbl, *stsd, *e;
+		const unsigned char *stsz, *stco, *stsc;
+		size_t ml, hl, il, bl, dl, zl, cl, sl, el;
+		uint32_t n_chunks, n_stsc, fixed, i, c, k, smp;
+		bool co64 = false;
+
+		mdia = box_find(trak, tend, "mdia", &ml);
+		trak = tend;		/* the next one, if this isn't it */
+		if (!mdia)
+			continue;
+		hdlr = box_find(mdia, mdia + ml, "hdlr", &hl);
+		if (!hdlr || hl < 12 || memcmp(hdlr + 8, "soun", 4))
+			continue;
+		minf = box_find(mdia, mdia + ml, "minf", &il);
+		stbl = minf ? box_find(minf, minf + il, "stbl", &bl) : NULL;
+		stsd = stbl ? box_find(stbl, stbl + bl, "stsd", &dl) : NULL;
+		if (!stsd || dl < 8 + 36)
+			continue;
+		/* stsd: version/flags, count, then the mp4a entry. */
+		e = box_find(stsd + 8, stsd + dl, "mp4a", &el);
+		if (!e || el < 28)
+			continue;
+		{
+			/* The sample entry: 28 bytes (version 0), 44 (1), 64 (2). */
+			unsigned v = e[8] << 8 | e[9];
+			size_t skip = v == 1 ? 44 : v == 2 ? 64 : 28, xl;
+			const unsigned char *esds = el > skip ?
+				box_find(e + skip, e + el, "esds", &xl) : NULL;
+
+			if (!esds || !esds_asc(esds, xl))
+				continue;
+		}
+		stsz = box_find(stbl, stbl + bl, "stsz", &zl);
+		stsc = box_find(stbl, stbl + bl, "stsc", &sl);
+		stco = box_find(stbl, stbl + bl, "stco", &cl);
+		if (!stco) {
+			stco = box_find(stbl, stbl + bl, "co64", &cl);
+			co64 = true;
+		}
+		if (!stsz || zl < 12 || !stsc || sl < 8 || !stco || cl < 8)
+			continue;
+		fixed = be32(stsz + 4);
+		m4.n = be32(stsz + 8);
+		n_stsc = be32(stsc + 4);
+		n_chunks = be32(stco + 4);
+		if (!m4.n || (!fixed && zl < 12 + 4ull * m4.n) || sl < 8 + 12ull * n_stsc ||
+		    cl < 8 + (co64 ? 8ull : 4ull) * n_chunks)
+			continue;
+		m4.off = calloc(m4.n, sizeof(*m4.off));
+		m4.size = calloc(m4.n, sizeof(*m4.size));
+		if (!m4.off || !m4.size)
+			return false;
+		for (i = 0; i < m4.n; i++)
+			m4.size[i] = fixed ? fixed : be32(stsz + 12 + 4 * i);
+		/* Chunks: each n frames back to back from its offset. */
+		for (c = 0, smp = 0, k = 0; c < n_chunks && smp < m4.n; c++) {
+			long long o = co64 ? (long long)be64(stco + 8 + 8 * c) : be32(stco + 8 + 4 * c);
+			uint32_t per;
+
+			while (k + 1 < n_stsc && be32(stsc + 8 + 12 * (k + 1)) <= c + 1)
+				k++;
+			per = be32(stsc + 8 + 12 * k + 4);
+			for (i = 0; i < per && smp < m4.n; i++, smp++) {
+				m4.off[smp] = o;
+				o += m4.size[smp];
+			}
+		}
+		m4.n = smp;
+		m4.indexed = m4.n > 0;
+		return m4.indexed;
+	}
+	return false;
+}
+
+/* The first frame at or after a byte. */
+static uint32_t mp4_frame_at(long long byte)
+{
+	uint32_t lo = 0, hi = m4.n;
+
+	while (lo < hi) {
+		uint32_t mid = lo + (hi - lo) / 2;
+
+		if (m4.off[mid] < byte)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return lo;
+}
+
+struct tail {
+	unsigned char *p;
+	size_t len, cap;
+};
+
+static size_t on_tail(char *p, size_t size, size_t n, void *user)
+{
+	struct tail *b = user;
+	size_t len = size * n;
+
+	if (b->len + len > MOOV_MAX + 4096)
+		return 0;
+	if (b->len + len > b->cap) {
+		size_t cap = (b->len + len) * 2;
+		unsigned char *q = realloc(b->p, cap);
+
+		if (!q)
+			return 0;
+		b->p = q;
+		b->cap = cap;
+	}
+	memcpy(b->p + b->len, p, len);
+	b->len += len;
+	return len;
+}
+
+/* The index after the audio (no "fast start"): fetch it from there. */
+static bool moov_fetch_tail(long long from)
+{
+	struct tail b = { 0 };
+	const unsigned char *moov;
+	size_t ml;
+	char range[48];
+	bool ok = false;
+	CURL *c = curl_easy_init();
+
+	if (!c)
+		return false;
+	snprintf(range, sizeof(range), "%lld-", from);
+	curl_easy_setopt(c, CURLOPT_URL, cur_target);
+	curl_easy_setopt(c, CURLOPT_USERAGENT, USER_AGENT);
+	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(c, CURLOPT_CAINFO, CA_BUNDLE);
+	curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
+	curl_easy_setopt(c, CURLOPT_TIMEOUT, 60L);
+	curl_easy_setopt(c, CURLOPT_RANGE, range);
+	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, on_tail);
+	curl_easy_setopt(c, CURLOPT_WRITEDATA, &b);
+	if (curl_easy_perform(c) == CURLE_OK && b.len) {
+		moov = box_find(b.p, b.p + b.len, "moov", &ml);
+		ok = moov && moov_parse(moov, ml);
+	}
+	curl_easy_cleanup(c);
+	free(b.p);
+	return ok;
+}
+
+static void mp4_decode(const unsigned char *f, uint32_t len)
+{
+	NeAACDecFrameInfo fi;
+	unsigned long rate;
+	unsigned char ch;
+	void *out;
+
+	if (!aac)
+		return;
+	if (!m4.dec_ready) {
+		if (NeAACDecInit2(aac, m4.asc, m4.asc_len, &rate, &ch) < 0)
+			return;
+		m4.dec_ready = true;
+	}
+	out = NeAACDecDecode(aac, &fi, (unsigned char *)f, len);
+	if (!fi.error && fi.samples && out) {
+		if (!pcm_setup(fi.samplerate, fi.channels)) {
+			stop = 1;	/* no sound card */
+			return;
+		}
+		pcm_write(out, fi.samples * 2);
+		set_state("playing");
+	}
+}
+
+/* Bytes of mdat at file offset abs: the frames in them, whole. */
+static void mp4_frames(const unsigned char *d, size_t n, long long abs)
+{
+	long long end = abs + (long long)n;
+
+	while (m4.next < m4.n && !stop && !restart_xfer) {
+		long long fo = m4.off[m4.next];
+		uint32_t fs = m4.size[m4.next];
+
+		if (m4.part_have) {		/* one begun in an earlier piece */
+			size_t take = fs - m4.part_have;
+
+			if (abs + (long long)take > end)
+				take = (size_t)(end - abs);
+			memcpy(m4.part + m4.part_have, d + (fo + (long long)m4.part_have - abs), take);
+			m4.part_have += take;
+			if (m4.part_have < fs)
+				return;
+			mp4_decode(m4.part, fs);
+			m4.part_have = 0;
+			m4.next++;
+			continue;
+		}
+		if (fo >= end)
+			return;			/* in a later piece */
+		if (fo < abs) {			/* began before we got here: skip */
+			m4.next++;
+			continue;
+		}
+		if (fo + fs <= end) {
+			mp4_decode(d + (fo - abs), fs);
+			m4.next++;
+			continue;
+		}
+		free(m4.part);			/* cut: keep its start */
+		m4.part = malloc(fs);
+		if (!m4.part)
+			return;
+		m4.part_have = (size_t)(end - fo);
+		memcpy(m4.part, d + (fo - abs), m4.part_have);
+		return;
+	}
+}
+
+/* The file as it comes, from offset abs: boxes, the index, the frames. */
+static void mp4_feed(const unsigned char *d, size_t n, long long abs)
+{
+	while (n > 0 && !stop && !restart_xfer) {
+		size_t take;
+
+		switch (m4.state) {
+		case BOX_HEAD: {
+			uint64_t sz;
+			int need;
+
+			take = n < (size_t)(8 - m4.head_have) ? n : (size_t)(8 - m4.head_have);
+			if (m4.head_have >= 8)
+				take = n < (size_t)(16 - m4.head_have) ? n : (size_t)(16 - m4.head_have);
+			memcpy(m4.head + m4.head_have, d, take);
+			m4.head_have += take;
+			d += take;
+			n -= take;
+			abs += take;
+			if (m4.head_have < 8)
+				return;
+			sz = be32(m4.head);
+			need = sz == 1 ? 16 : 8;
+			if (m4.head_have < need)
+				continue;
+			if (sz == 1)
+				sz = be64(m4.head + 8);
+			m4.head_have = 0;
+			m4.remain = sz == 0 ? -1 : (long long)sz - need;
+			if (!memcmp(m4.head + 4, "moov", 4) && !m4.indexed && m4.remain > 0 &&
+			    m4.remain < MOOV_MAX) {
+				m4.moov_len = (size_t)m4.remain;
+				m4.moov_have = 0;
+				m4.moov = malloc(m4.moov_len);
+				m4.state = m4.moov ? BOX_MOOV : BOX_SKIP;
+			} else if (!memcmp(m4.head + 4, "mdat", 4)) {
+				m4.state = BOX_MDAT;
+				if (!m4.indexed) {
+					/* The index comes after: get it now. */
+					if (m4.remain < 0 || !moov_fetch_tail(abs + m4.remain)) {
+						fprintf(stderr, "chumby-stream: no index in this MP4\n");
+						stop = 1;
+						return;
+					}
+					/* Resuming further in: a new range, straight to it. */
+					if (m4.want_byte > abs + (1 << 16)) {
+						restart_xfer = true;
+						return;
+					}
+					m4.next = mp4_frame_at(abs);
+				}
+			} else {
+				m4.state = BOX_SKIP;
+			}
+			break;
+		}
+		case BOX_SKIP:
+			take = m4.remain < 0 || (long long)n < m4.remain ? n : (size_t)m4.remain;
+			d += take;
+			n -= take;
+			abs += take;
+			m4.remain -= m4.remain < 0 ? 0 : (long long)take;
+			if (!m4.remain)
+				m4.state = BOX_HEAD;
+			break;
+		case BOX_MOOV:
+			take = n < m4.moov_len - m4.moov_have ? n : m4.moov_len - m4.moov_have;
+			memcpy(m4.moov + m4.moov_have, d, take);
+			m4.moov_have += take;
+			d += take;
+			n -= take;
+			abs += take;
+			if (m4.moov_have < m4.moov_len)
+				break;
+			moov_parse(m4.moov, m4.moov_len);
+			free(m4.moov);
+			m4.moov = NULL;
+			m4.state = BOX_HEAD;
+			if (!m4.indexed) {
+				fprintf(stderr, "chumby-stream: no AAC track in this MP4\n");
+				stop = 1;
+				return;
+			}
+			/* Resuming further in: a new range, straight to it. */
+			if (m4.want_byte > abs + (1 << 16)) {
+				restart_xfer = true;
+				return;
+			}
+			m4.next = mp4_frame_at(abs);
+			break;
+		case BOX_MDAT:
+			take = m4.remain < 0 || (long long)n < m4.remain ? n : (size_t)m4.remain;
+			mp4_frames(d, take, abs);
+			d += take;
+			n -= take;
+			abs += take;
+			m4.remain -= m4.remain < 0 ? 0 : (long long)take;
+			if (!m4.remain)
+				m4.state = BOX_HEAD;
+			break;
+		}
+	}
+}
+
+static bool ends_with(const char *u, const char *ext);
+
+static bool looks_mp4(const char *u)
+{
+	return ends_with(u, ".m4a") || ends_with(u, ".mp4") || ends_with(u, ".m4b");
+}
+
 static void es_out(const unsigned char *d, size_t n)
 {
 	size_t i;
+
+	long long abs = base_byte + fed;	/* where d is in the file */
 
 	bitrate_count(n, 0);
 	fed += n;
 	if (codec == CODEC_UNKNOWN && n >= 3 && !memcmp(d, "ID3", 3))
 		codec = CODEC_MP3;	/* a podcast's tag: its picture could look like AAC */
+	if (codec == CODEC_UNKNOWN && n >= 8 && !memcmp(d + 4, "ftyp", 4))
+		codec = CODEC_MP4;
+	if (codec == CODEC_MP4) {
+		mp4_feed(d, n, abs);
+		return;
+	}
 	if (codec == CODEC_UNKNOWN) {
 		for (i = 0; i + 1 < n; i++)
 			if (d[i] == 0xff && (d[i + 1] & 0xe0) == 0xe0) {
@@ -574,6 +1035,9 @@ static size_t on_header(char *buf, size_t size, size_t n, void *user)
 			codec = CODEC_AAC;
 		else if (!strncasecmp(v, "audio/mpeg", 10))
 			codec = CODEC_MP3;
+		else if (!strncasecmp(v, "audio/mp4", 9) || !strncasecmp(v, "audio/x-m4a", 11) ||
+			 !strncasecmp(v, "audio/m4a", 9) || !strncasecmp(v, "video/mp4", 9))
+			codec = CODEC_MP4;
 	} else if (!strcasecmp(line, "icy-metaint")) {
 		metaint = atol(v);
 		audio_left = metaint;
@@ -660,13 +1124,13 @@ static size_t on_data(char *p, size_t size, size_t n, void *user)
 			}
 		}
 	}
-	return stop ? 0 : len;
+	return stop || restart_xfer ? 0 : len;
 }
 
 static int on_progress(void *u, curl_off_t a, curl_off_t b, curl_off_t c, curl_off_t d)
 {
 	(void)u; (void)a; (void)b; (void)c; (void)d;
-	return stop;	/* non-zero aborts the transfer */
+	return stop || restart_xfer;	/* non-zero aborts the transfer */
 }
 
 static CURL *easy(const char *u)
@@ -1046,7 +1510,7 @@ static CURLcode stream_play(CURL *c)
 	icy_br = 0;
 	if (pthread_create(&t, NULL, net_thread, c))
 		return CURLE_FAILED_INIT;
-	while (!stop) {
+	while (!stop && !restart_xfer) {
 		/* ~2 s of it: a 56k station shouldn't wait 7 s. */
 		prebuf = icy_br > 0 ? (size_t)icy_br * 250 : PREBUFFER;
 		prebuf = prebuf < PREBUFFER_MIN ? PREBUFFER_MIN : prebuf > PREBUFFER_MAX ? PREBUFFER_MAX : prebuf;
@@ -1103,6 +1567,27 @@ static void play(void)
 			continue;
 		}
 		decoders_reset();
+		snprintf(cur_target, sizeof(cur_target), "%s", target);
+		restart_xfer = false;
+		if (m4.indexed) {
+			/* An MP4 we have the index of: straight to a frame. */
+			codec = CODEC_MP4;
+			m4.state = BOX_MDAT;
+			m4.remain = -1;
+			m4.part_have = 0;
+			m4.dec_ready = false;
+			if (m4.want_byte > 0) {
+				start_byte = m4.want_byte;
+				m4.want_byte = 0;
+			}
+			m4.next = mp4_frame_at(start_byte);
+			if (m4.next < m4.n)
+				start_byte = m4.off[m4.next];
+		} else if (start_byte > 0 && looks_mp4(target)) {
+			/* Resuming into an MP4: its index first, from the top. */
+			m4.want_byte = start_byte;
+			start_byte = 0;
+		}
 		if (ends_with(target, ".m3u8")) {
 			hls_play(target);
 			if (stop)
@@ -1130,6 +1615,8 @@ static void play(void)
 		curl_easy_cleanup(c);
 		if (stop)
 			break;
+		if (restart_xfer)	/* an MP4's index read: now where we resume */
+			continue;
 		if (finite && file_len > 0 && base_byte + fed >= file_len) {
 			set_state("ended");	/* the whole file: done */
 			break;
