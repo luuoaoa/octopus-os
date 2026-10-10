@@ -398,9 +398,11 @@ static void status_read(void)
 	}
 	if (f)
 		fclose(f);
-	if (!f) {
-		/* Not running: stopped elsewhere (FM, an alarm), unless just
-		 * started and not up yet. */
+	/* chumby-stream plays podcasts too: a stream that isn't one of our
+	 * stations is someone else's, as good as none for us. */
+	if (!f || station_by_url(url) < 0) {
+		/* Not running: stopped elsewhere (FM, an alarm, a podcast),
+		 * unless just started and not up yet. */
 		if (playing && mono_ms() > start_grace_until) {
 			playing = false;
 			st_url[0] = st_state[0] = st_title[0] = st_codec[0] = '\0';
