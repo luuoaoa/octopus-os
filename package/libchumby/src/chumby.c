@@ -22,7 +22,6 @@
 /* chumby_logo_set() decodes JPEGs by hand. */
 #include "lvgl/src/image/lv_image_decoder_private.h"
 #include "lvgl/src/misc/cache/instance/lv_image_cache.h"
-#include "lvgl/src/libs/tjpgd/tjpgd.h"
 
 extern char **environ;
 
@@ -456,74 +455,38 @@ void chumby_center_y_at(lv_obj_t *obj, int32_t y)
 /* ------------------------------------------------------------------ */
 /* Logos                                                              */
 
-/*
- * JPEGs: TJpgDec ourselves, at the smallest of 1, 1/2, 1/4, 1/8 that still
- * covers the box (a 600 px cover for a 92 px tile: 1/4), into one buffer
- * LVGL then scales. Much less work than decoding it whole (LVGL's own
- * decoder can't scale): a cover per AirPlay track on the Chumby's ARM9.
- */
-#define JPEG_WORK	4096
-
-struct jpeg_io {
-	FILE *f;
-	lv_draw_buf_t *buf;
-};
-
-static size_t jpeg_in(JDEC *jd, uint8_t *b, size_t n)
+/* LVGL decodes JPEGs (TJPGD) one MCU at a time and can't scale images
+ * decoded that way, so decode the whole image into a buffer once. */
+static lv_draw_buf_t *decode_tiles(const char *src)
 {
-	struct jpeg_io *io = jd->device;
+	lv_image_decoder_dsc_t dsc;
+	lv_area_t full, part;
+	lv_draw_buf_t *buf = NULL;
+	int32_t w, h, y;
 
-	if (b)
-		return fread(b, 1, n, io->f);
-	return fseek(io->f, (long)n, SEEK_CUR) == 0 ? n : 0;
-}
-
-static int jpeg_out(JDEC *jd, void *bitmap, JRECT *r)
-{
-	struct jpeg_io *io = jd->device;
-	lv_draw_buf_t *buf = io->buf;
-	int32_t w = r->right - r->left + 1, y;
-	const uint8_t *src = bitmap;
-
-	for (y = r->top; y <= r->bottom; y++) {
-		if (y >= (int32_t)buf->header.h || r->left >= buf->header.w)
-			continue;
-		memcpy(buf->data + y * buf->header.stride + r->left * 3, src,
-		       (r->left + w > (int32_t)buf->header.w ? buf->header.w - r->left : w) * 3);
-		src += w * 3;
-	}
-	return 1;
-}
-
-static lv_draw_buf_t *decode_tiles(const char *src, int32_t box)
-{
-	const char *path = !strncmp(src, "A:", 2) ? src + 2 : src;
-	struct jpeg_io io = { .f = fopen(path, "rb") };
-	void *work = malloc(JPEG_WORK);
-	int32_t w, h;
-	uint8_t scale = 0;
-	JDEC jd;
-
-	if (!io.f || !work)
-		goto fail;
-	if (jd_prepare(&jd, jpeg_in, work, JPEG_WORK, &io) != JDR_OK)
-		goto fail;
-	while (scale < 3 && (LV_MIN(jd.width, jd.height) >> (scale + 1)) >= box)
-		scale++;
-	w = ((jd.width - 1) >> scale) + 1;
-	h = ((jd.height - 1) >> scale) + 1;
-	io.buf = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO);
-	if (!io.buf)
-		goto fail;
-	if (jd_decomp(&jd, jpeg_out, scale) != JDR_OK) {
-		lv_draw_buf_destroy(io.buf);
-		io.buf = NULL;
-	}
-fail:
-	free(work);
-	if (io.f)
-		fclose(io.f);
-	return io.buf;
+	if (lv_image_decoder_open(&dsc, src, NULL) != LV_RESULT_OK)
+		return NULL;
+	w = dsc.header.w;
+	h = dsc.header.h;
+	if (dsc.decoded || dsc.header.cf != LV_COLOR_FORMAT_RGB888 ||
+	    !(buf = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO)))
+		goto out;
+	lv_area_set(&full, 0, 0, w - 1, h - 1);
+	part.x1 = part.y1 = part.x2 = part.y2 = LV_COORD_MIN;
+	do {
+		if (lv_image_decoder_get_area(&dsc, &full, &part) != LV_RESULT_OK) {
+			lv_draw_buf_destroy(buf);
+			buf = NULL;
+			goto out;
+		}
+		for (y = part.y1; y <= part.y2; y++)
+			memcpy(buf->data + y * buf->header.stride + part.x1 * 3,
+			       dsc.decoded->data + (y - part.y1) * dsc.decoded->header.stride,
+			       lv_area_get_width(&part) * 3);
+	} while (part.x2 < w - 1 || part.y2 < h - 1);
+out:
+	lv_image_decoder_close(&dsc);
+	return buf;
 }
 
 #define MAX_LOGOS	4
@@ -584,7 +547,7 @@ bool chumby_logo_set(lv_obj_t *img, const char *path, int32_t box)
 		/* Decode again only when it's another file, or got replaced. */
 		if (!l->jpeg || strcmp(l->src, src) || st.st_mtime != l->mtime) {
 			logo_drop(l);
-			l->jpeg = decode_tiles(src, box);
+			l->jpeg = decode_tiles(src);
 			snprintf(l->src, sizeof(l->src), "%s", src);
 			l->mtime = st.st_mtime;
 		}
