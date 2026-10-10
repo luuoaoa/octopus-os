@@ -1,0 +1,14 @@
+[Unit]
+Description=Create the soft volume control (asound.conf's "Master")
+# ALSA's softvol makes its control the first time its PCM is opened; until
+# then the shell's volume has nothing to set. Open it once, briefly.
+After=sound.target
+Before=chumby-session.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'i=0; until aplay -q -D chumby -f S16_LE -r 48000 -c 2 -s 480 /dev/zero 2>/dev/null; do i=$((i + 1)); [ $i -ge 20 ] && exit 1; sleep 1; done'
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+# The root is the ext4 on p2, mounted by the kernel (cmdline.txt); systemd
+# remounts it read-write.
+# <file system>	<mount pt>	<type>	<options>	<dump>	<pass>
+/dev/root	/		ext4	rw,noatime	0	1
+tmpfs		/tmp		tmpfs	mode=1777,size=32m	0	0
+# The FAT boot partition: the Pi's firmware and config.txt, and the
+# config files (network-config, user-data, authorized_keys) read by
+# chumby-config.service. Read-only: edit it from another machine.
+/dev/mmcblk0p1	/boot		vfat	ro,noatime,fmask=0177,dmask=0077,nofail	0	0

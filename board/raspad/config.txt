@@ -1,0 +1,28 @@
+# RasPad 3 (Raspberry Pi 4B inside, 1280x800 HDMI panel, USB touch).
+# See board/raspad/README.md.
+
+start_file=start4.elf
+fixup_file=fixup4.dat
+kernel=Image
+arm_64bit=1
+
+# The display through the kernel's KMS driver: chumby-wm drives it with
+# wlroots' DRM backend (pixman rendering, so the GPU needs little memory).
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+gpu_mem=64
+disable_overscan=1
+# The panel's own mode is 1280x800, from its EDID. If it ever comes up in
+# something else, uncomment to force it (the kernel takes video= from
+# cmdline.txt instead under KMS: video=HDMI-A-1:1280x800@60).
+#hdmi_group=2
+#hdmi_mode=28
+
+# The 3.5 mm jack (inside the case); HDMI audio comes with vc4-kms-v3d.
+dtparam=audio=on
+
+# Serial console on the GPIO header (ttyS0, mini UART).
+enable_uart=1
+
+disable_splash=1
+boot_delay=0

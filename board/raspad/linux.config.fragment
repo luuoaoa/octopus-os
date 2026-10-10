@@ -1,0 +1,7 @@
+# On top of bcm2711_defconfig.
+
+# The RasPad's touchscreen: an ILITEK ILI2511 behind USB, 222a:0001
+# ("ILITEK ILITEK-TP"), a Windows-style HID multitouch device. hid-multitouch
+# knows it (MT_CLS_NSMU); built in so it's there before udev runs.
+CONFIG_HID_MULTITOUCH=y
+CONFIG_USB_HID=y
