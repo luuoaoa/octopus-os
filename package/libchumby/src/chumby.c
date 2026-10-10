@@ -774,6 +774,12 @@ lv_display_t *chumby_window_create(const char *app_id, int width, int height)
 		return NULL;
 	windows[n_windows++] = disp;
 	theme_apply(disp);
+	/* A window with alpha (a popup with rounded corners): its bottom layer
+	 * stays clear. lv_display_set_theme() themes screens[0], which is that
+	 * layer, so it would get the theme's opaque screen grey and the corners
+	 * would show that instead of what's under the window. */
+	if (lv_color_format_has_alpha(lv_display_get_color_format(disp)))
+		lv_obj_set_style_bg_opa(lv_display_get_layer_bottom(disp), LV_OPA_TRANSP, 0);
 	return disp;
 }
 
