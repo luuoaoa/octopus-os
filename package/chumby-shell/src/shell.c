@@ -1761,6 +1761,8 @@ int main(void)
 	 * (the RasPad's) is right as it comes. */
 	if (access(CAL_FILE, F_OK) != 0 && resistive_ts >= 0)
 		calibrate_start();
+	/* Start on the clock, not an empty desktop. */
+	show_clock();
 
 	return chumby_run();
 }

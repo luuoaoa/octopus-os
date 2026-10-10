@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <chumby.h>
 
 #define GAP	8
@@ -92,9 +93,42 @@ static void alarms_save(void)
 /* ------------------------------------------------------------------ */
 /* Clock view                                                         */
 
-static lv_obj_t *lbl_time, *lbl_date, *lbl_next, *ic_next;
+static lv_obj_t *face, *lbl_time, *lbl_date, *lbl_next, *ic_next, *lbl_unsynced;
+
+/* Amber: legible on the day and the night background alike. */
+#define WARN_COLOR	lv_color_hex(0xc98a1a)
 
 static void list_show(void);
+
+/* The face is centred in the space above the alarm pill. */
+static void face_center(void)
+{
+	chumby_center_y_at(face, (CHUMBY_APP_H - GAP - CHUMBY_TOUCH_MIN) / 2);
+}
+
+/* The date as big as it goes: the long form if it fits the width, else
+ * shortened ("Wednesday, 24 September" -> "Wed, 24 September" -> "Wed,
+ * 24 Sep"). */
+static void date_set(const struct tm *tm)
+{
+	static const char *const formats[] = { "%A, %d %B", "%a, %d %B", "%a, %d %b" };
+	char buf[64];
+	unsigned i;
+
+	for (i = 0; i < sizeof(formats) / sizeof(formats[0]); i++) {
+		strftime(buf, sizeof(buf), formats[i], tm);
+		lv_label_set_text(lbl_date, buf);
+		lv_obj_update_layout(lbl_date);
+		if (lv_obj_get_width(lbl_date) <= CHUMBY_APP_W - 2 * GAP)
+			break;
+	}
+}
+
+/* timesyncd's flag: the clock has been set from the internet this boot. */
+static bool time_synced(void)
+{
+	return access("/run/systemd/timesync/synchronized", F_OK) == 0;
+}
 
 static void clock_update(void)
 {
@@ -107,11 +141,15 @@ static void clock_update(void)
 	if (chumby_time_valid()) {
 		strftime(buf, sizeof(buf), "%H:%M", &tm);
 		lv_label_set_text(lbl_time, buf);
-		strftime(buf, sizeof(buf), "%A, %d %B", &tm);
-		lv_label_set_text(lbl_date, buf);
+		date_set(&tm);
 	} else {
 		lv_label_set_text(lbl_time, "--:--");
-		lv_label_set_text(lbl_date, "Waiting for network time");
+		lv_label_set_text(lbl_date, "");
+	}
+	/* Not set from the internet: the time is the RTC's guess (or none). */
+	if (lv_obj_is_hidden(lbl_unsynced) != time_synced()) {
+		lv_obj_set_hidden(lbl_unsynced, time_synced());
+		face_center();
 	}
 
 	for (i = 0; i < n_alarms; i++) {
@@ -144,28 +182,34 @@ static void alarms_btn_cb(lv_event_t *e)
 
 static void build_clock(void)
 {
-	lv_obj_t *b, *face;
+	lv_obj_t *b;
 
-	face = chumby_group(view_clock, LV_FLEX_FLOW_COLUMN, 4);
+	face = chumby_group(view_clock, LV_FLEX_FLOW_COLUMN, 2);
 	lbl_time = label(face, CHUMBY_FONT_HUGE, CHUMBY_COLOR_TEXT);
-	lbl_date = label(face, CHUMBY_FONT_LARGE, CHUMBY_COLOR_TEXT_DIM);
+	lbl_date = label(face, CHUMBY_FONT_MEDIUM, CHUMBY_COLOR_TEXT_DIM);
+	lbl_unsynced = label(face, CHUMBY_FONT_SMALL, CHUMBY_COLOR_TEXT);
+	lv_obj_set_style_text_color(lbl_unsynced, WARN_COLOR, 0);
+	lv_obj_set_style_pad_top(lbl_unsynced, 4, 0);
+	lv_label_set_text(lbl_unsynced, LV_SYMBOL_WARNING "  No internet: time not synced");
 	lv_obj_align(face, LV_ALIGN_TOP_MID, 0, 0);
 
-	/* The whole bottom bar opens the alarms. */
+	/* A small pill at the bottom opens the alarms. */
 	b = lv_button_create(view_clock);
-	lv_obj_set_size(b, CHUMBY_APP_W - 2 * 16, 52);
-	lv_obj_set_style_radius(b, 12, 0);
-	lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -16);
+	lv_obj_set_size(b, LV_SIZE_CONTENT, CHUMBY_TOUCH_MIN);
+	lv_obj_set_style_pad_hor(b, 16, 0);
+	lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_flex_flow(b, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(b, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(b, 8, 0);
+	lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -GAP);
 	lv_obj_add_event_cb(b, alarms_btn_cb, LV_EVENT_CLICKED, NULL);
 	ic_next = lv_label_create(b);
 	lv_label_set_text(ic_next, LV_SYMBOL_BELL);
-	lv_obj_set_style_text_font(ic_next, &lv_font_montserrat_28, 0);
-	lv_obj_align(ic_next, LV_ALIGN_LEFT_MID, 4, 0);
+	lv_obj_set_style_text_font(ic_next, &lv_font_montserrat_14, 0);
 	lbl_next = lv_label_create(b);
-	lv_obj_align_to(lbl_next, ic_next, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
-
-	/* The face is centred in the space above the bar. */
-	chumby_center_y_at(face, (CHUMBY_APP_H - 16 - 52) / 2);
+	lv_obj_set_style_text_font(lbl_next, chumby_font(CHUMBY_FONT_SMALL), 0);
+	face_center();
 }
 
 /* ------------------------------------------------------------------ */
@@ -510,6 +554,8 @@ static void tick(lv_timer_t *t)
 	chumby_alarm_state_t st = chumby_alarm_state(&until);
 	long minute = (long)(now / 60);
 	bool changed = st != alarm_state || until != snooze_until;
+	/* Synced (or not) since: the warning goes (or comes) right away. */
+	bool sync_changed = lv_obj_is_hidden(lbl_unsynced) != time_synced();
 
 	(void)t;
 	if (changed) {
@@ -520,7 +566,7 @@ static void tick(lv_timer_t *t)
 		else
 			lv_obj_set_hidden(view_ring, true);
 	}
-	if (changed || minute != shown_minute) {
+	if (changed || sync_changed || minute != shown_minute) {
 		char buf[16];
 		struct tm tm;
 
