@@ -90,6 +90,7 @@ static const struct { const char *name, *sym; } icons[] = {
 	{ "call", LV_SYMBOL_CALL }, { "keyboard", LV_SYMBOL_KEYBOARD },
 	/* libchumby's own (Material Icons): see CHUMBY_ICON_* */
 	{ "radio", CHUMBY_ICON_RADIO }, { "clock", CHUMBY_ICON_CLOCK },
+	{ "podcast", CHUMBY_ICON_PODCAST },
 	{ "globe", CHUMBY_ICON_GLOBE }, { "sun", CHUMBY_ICON_SUN },
 };
 

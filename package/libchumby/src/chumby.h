@@ -117,6 +117,9 @@ void chumby_watch_fd(int fd, chumby_fd_cb_t cb, void *user);
 #define CHUMBY_ICON_CLOCK	"\xEE\xA4\x81"	/* U+E901 */
 #define CHUMBY_ICON_GLOBE	"\xEE\xA4\x82"	/* U+E902 */
 #define CHUMBY_ICON_SUN		"\xEE\xA4\x83"	/* U+E903 */
+#define CHUMBY_ICON_PODCAST	"\xEE\xA4\x84"	/* U+E904 */
+#define CHUMBY_ICON_BACK10	"\xEE\xA4\x85"	/* U+E905 */
+#define CHUMBY_ICON_AHEAD30	"\xEE\xA4\x86"	/* U+E906 */
 const lv_font_t *chumby_icon_font(int px);
 
 /* Theme */

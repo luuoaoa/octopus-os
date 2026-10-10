@@ -74,7 +74,8 @@ Color = #3a9a5c
 
 - `Icon` is a name from the shell's table (`icons[]` in `shell.c`):
   audio, bell, home, settings, image, list, wifi, gps, video, envelope,
-  eye, file, charge, play, call, keyboard, and radio, clock, globe, sun
+  eye, file, charge, play, call, keyboard, and radio, clock, globe, sun,
+  podcast
   (Material Icons, see `chumby_icon_font`). Add to it for new ones.
 - `Short` (optional) is the name on the tab when `Name` is too long for
   one (tab titles are capped at 80 px and cut with dots).
@@ -188,8 +189,8 @@ A **source** is an executable in `/usr/share/chumby/audio.d/<name>` taking
 
 - `fm` -> the `radio` script. `stop` = audio loop off and the tuner chip
   to standby (`qn8005 sleep`); `pause` keeps it tuned for a quick resume.
-- `stream` -> `chumby-stream`. `pause` remembers the URL and name;
-  `resume` reconnects to it.
+- `stream` -> `chumby-stream`. `pause` remembers the URL and name (and,
+  in a podcast episode, the byte it was at); `resume` reconnects to it.
 
 **To add a player** (local music, a podcast app...):
 
@@ -199,7 +200,11 @@ A **source** is an executable in `/usr/share/chumby/audio.d/<name>` taking
    `pause` must not return until the sound card is free.
 3. Call `chumby-audio play <name>` *before* opening the sound card when
    the user starts it. Its `resume` must **not** call `chumby-audio`
-   (chumby-audio holds its lock while resuming you).
+   (chumby-audio holds its lock while resuming you). When it stops by
+   itself (its own stop button, the end, an error), call
+   `chumby-audio stopped <name>`: it takes no lock, and keeps
+   `$run_dir/audio/playing` (what plays; the shell's stop button watches
+   it) right.
 4. Daemons started from a source must not inherit chumby-audio's lock fd:
    chumby-audio runs sources with fd 9 closed, but close inherited fds in
    your daemon anyway (`chumby-stream` does after forking).
@@ -219,6 +224,13 @@ players just play.
   audio), `.pls`/`.m3u`. Reconnects with backoff, buffers ~2 s ahead,
   resamples through ALSA. Its state is in `$run_dir/stream` (`state=`,
   `url=`, `name=`, `title=`, `codec=`, `bitrate=`), gone when stopped.
+  **`chumby-stream <url> <name> <byte>`** plays a file (a podcast episode)
+  from a byte on (an HTTP range); for a file the state adds `byte=` (where
+  it is: resume from there), `length=` and `played=` (s), about once a
+  second, and at its end it's `state=ended` (left in place for the app).
+- **`chumby-podcast-feed <feed> <cache> [n]`**: a podcast's RSS, parsed as
+  it downloads (expat), its newest n episodes (30) as tab-separated lines:
+  published (epoch), duration (s), bytes, audio URL, title.
 - **`radio on|off|tune|scan|pause|resume|active`**: the FM tuner (QN8005)
   and its audio loop; RDS goes to `$run_dir/rds` (`ps`, `rt`, `title`,
   `artist`, `psdyn`, `pstext`, `rssi`). See the script's header.

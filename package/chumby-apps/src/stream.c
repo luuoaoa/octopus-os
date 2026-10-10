@@ -2,9 +2,12 @@
 /*
  * chumby-stream: play an internet radio stream.
  *
- *   chumby-stream <url> [name]   start playing (replacing any stream), in
+ *   chumby-stream <url> [name] [byte]
+ *                                start playing (replacing any stream), in
  *                                the background; takes the sound from
- *                                other sources (chumby-audio play stream)
+ *                                other sources (chumby-audio play stream).
+ *                                A file (a podcast episode) can start at a
+ *                                byte (an HTTP range: resuming it)
  *   chumby-stream stop
  *   chumby-stream pause | resume   for chumby-audio: stop for a while,
  *                                remembering what played; play it again
@@ -27,6 +30,12 @@
  * State goes to $run_dir/stream for the app ("state=", "url=", "name=",
  * "title=", "codec=" MP3/AAC, "bitrate=" kbit/s as measured over a few
  * seconds) lines, gone once stopped; our pid to $run_dir/stream.pid.
+ *
+ * A file rather than a live stream (a Content-Length and no ICY: a podcast
+ * episode) also gets "byte=" (how far into it is played: resume from
+ * there), "length=" (its size) and "played=" (seconds played this time),
+ * written about once a second. A drop mid-file resumes from there; at its
+ * end it's "state=ended" - and that status stays, for the app to see.
  */
 
 #define _GNU_SOURCE
@@ -63,6 +72,15 @@ static volatile sig_atomic_t stop;
 static char status_path[256], pid_path[256], paused_path[256];
 static int bitrate;			/* kbit/s, measured */
 static char url[1024], name[128], title[256], state[16];
+
+/* A file (see above): where in it, how long, how much played. */
+static bool finite;			/* this response is one */
+static long long start_byte;		/* asked for (a range) */
+static long long base_byte;		/* where this response starts */
+static long long fed;			/* bytes of it to the decoders */
+static long long file_len;		/* its whole size */
+static unsigned long long played_frames;
+static time_t pos_written;
 
 
 static void sleep_s(int s);
@@ -106,6 +124,9 @@ static void status_write_locked(void)
 		return;
 	fprintf(f, "state=%s\nurl=%s\nname=%s\ntitle=%s\ncodec=%s\nbitrate=%d\n", state, url,
 		name, title, codec == CODEC_AAC ? "AAC" : codec == CODEC_MP3 ? "MP3" : "", bitrate);
+	if (finite)
+		fprintf(f, "byte=%lld\nlength=%lld\nplayed=%llu\n", base_byte + fed, file_len,
+			pcm_rate > 0 ? played_frames / (unsigned long long)pcm_rate : 0ULL);
 	fclose(f);
 	rename(tmp, status_path);
 }
@@ -259,6 +280,13 @@ static void pcm_write(const unsigned char *buf, size_t bytes)
 		buf += n * 2 * pcm_channels;
 		frames -= n;
 		bitrate_count(0, n);
+		played_frames += n;
+	}
+	if (finite && time(NULL) != pos_written) {
+		pos_written = time(NULL);
+		pthread_mutex_lock(&status_lock);
+		status_write_locked();
+		pthread_mutex_unlock(&status_lock);
 	}
 }
 
@@ -387,6 +415,9 @@ static void es_out(const unsigned char *d, size_t n)
 	size_t i;
 
 	bitrate_count(n, 0);
+	fed += n;
+	if (codec == CODEC_UNKNOWN && n >= 3 && !memcmp(d, "ID3", 3))
+		codec = CODEC_MP3;	/* a podcast's tag: its picture could look like AAC */
 	if (codec == CODEC_UNKNOWN) {
 		for (i = 0; i + 1 < n; i++)
 			if (d[i] == 0xff && (d[i + 1] & 0xe0) == 0xe0) {
@@ -511,8 +542,14 @@ static size_t on_header(char *buf, size_t size, size_t n, void *user)
 	snprintf(line, sizeof(line), "%.*s", (int)(len < sizeof(line) ? len : sizeof(line) - 1), buf);
 	line[strcspn(line, "\r\n")] = '\0';
 	if (!strncmp(line, "HTTP/", 5) || !strncmp(line, "ICY ", 4)) {
+		const char *code = strchr(line, ' ');
+
 		metaint = 0;	/* a new response (redirects) */
 		meta_len = -1;
+		finite = false;
+		/* Our range honoured (206), or the whole file again (200). */
+		base_byte = code && atoi(code + 1) == 206 ? start_byte : 0;
+		fed = 0;
 		return len;
 	}
 	v = strchr(line, ':');
@@ -523,6 +560,15 @@ static size_t on_header(char *buf, size_t size, size_t n, void *user)
 		v++;
 	if (!strcasecmp(line, "icy-br")) {
 		icy_br = atoi(v);
+	} else if (!strcasecmp(line, "content-length")) {
+		finite = atoll(v) > 0;		/* until ICY says otherwise */
+		if (!file_len || base_byte == 0)
+			file_len = base_byte + atoll(v);
+	} else if (!strcasecmp(line, "content-range")) {
+		const char *total = strchr(v, '/');	/* bytes a-b/total */
+
+		if (total && atoll(total + 1) > 0)
+			file_len = atoll(total + 1);
 	} else if (!strcasecmp(line, "content-type")) {
 		if (!strncasecmp(v, "audio/aac", 9) || !strncasecmp(v, "audio/x-aac", 11))
 			codec = CODEC_AAC;
@@ -531,6 +577,7 @@ static size_t on_header(char *buf, size_t size, size_t n, void *user)
 	} else if (!strcasecmp(line, "icy-metaint")) {
 		metaint = atol(v);
 		audio_left = metaint;
+		finite = false;
 	} else if (!strcasecmp(line, "icy-name") && !got_name && *v) {
 		pthread_mutex_lock(&status_lock);
 		snprintf(name, sizeof(name), "%s", v);
@@ -636,6 +683,8 @@ static CURL *easy(const char *u)
 	curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
 	curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
 	curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, on_progress);
+	if (start_byte > 0)
+		curl_easy_setopt(c, CURLOPT_RESUME_FROM_LARGE, (curl_off_t)start_byte);
 	return c;
 }
 
@@ -1081,6 +1130,12 @@ static void play(void)
 		curl_easy_cleanup(c);
 		if (stop)
 			break;
+		if (finite && file_len > 0 && base_byte + fed >= file_len) {
+			set_state("ended");	/* the whole file: done */
+			break;
+		}
+		if (finite)	/* dropped mid-file: carry on from there */
+			start_byte = base_byte + fed;
 failed:
 		if (!strcmp(state, "playing"))
 			backoff = 2;	/* it was working: retry soon */
@@ -1115,11 +1170,13 @@ int main(int argc, char **argv)
 
 		if (!running_pid())
 			return 0;
-		/* What plays, to come back to: its URL and name. */
+		/* What plays, to come back to: its URL and name (and, in a
+		 * file, where). */
 		st = fopen(status_path, "r");
 		f = fopen(paused_path, "w");
 		while (st && f && fgets(line, sizeof(line), st))
-			if (!strncmp(line, "url=", 4) || !strncmp(line, "name=", 5))
+			if (!strncmp(line, "url=", 4) || !strncmp(line, "name=", 5) ||
+			    !strncmp(line, "byte=", 5))
 				fputs(line, f);
 		if (st)
 			fclose(st);
@@ -1142,6 +1199,8 @@ int main(int argc, char **argv)
 			else if (!strncmp(line, "name=", 5) && line[5]) {
 				snprintf(name, sizeof(name), "%.127s", line + 5);
 				got_name = true;
+			} else if (!strncmp(line, "byte=", 5)) {
+				start_byte = atoll(line + 5);
 			}
 		}
 		fclose(f);
@@ -1162,6 +1221,8 @@ int main(int argc, char **argv)
 			snprintf(name, sizeof(name), "%s", argv[2]);
 			got_name = true;
 		}
+		if (argc > 3)
+			start_byte = atoll(argv[3]);
 		unlink(paused_path);
 		/* Whatever else plays (the FM radio) stops: one at a time. A
 		 * resume comes from chumby-audio itself (it holds the lock). */
@@ -1216,7 +1277,8 @@ int main(int argc, char **argv)
 		mpg123_delete(mh);
 	if (aac)
 		NeAACDecClose(aac);
-	unlink(status_path);
+	if (strcmp(state, "ended"))	/* that one stays, for the app */
+		unlink(status_path);
 	/* Not playing any more (stopped, paused, replaced): chumby-audio's
 	 * "playing" goes, unless something else plays by now. Before we're
 	 * gone - the stream replacing us waits for that - so it can't clear
