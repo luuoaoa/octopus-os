@@ -417,6 +417,7 @@ static lv_display_t *popup_disp;
 static lv_obj_t *popup_bar;
 static lv_obj_t *popup_stop;	/* volume: stop what plays (if anything does) */
 static pid_t playing_pid = -1;	/* "chumby-audio playing", running */
+static lv_timer_t *playing_timer;	/* waiting for its answer */
 static lv_timer_t *popup_timer;
 
 /* The app in front: activated and not minimized (none: Home is). */
@@ -973,6 +974,33 @@ static void popup_stop_show(bool show)
 	popup_layout();
 }
 
+/* "chumby-audio playing" has finished (status from waitpid): the stop
+ * button shows if something plays. */
+static void playing_answer(int status)
+{
+	playing_pid = -1;
+	if (playing_timer)
+		lv_timer_pause(playing_timer);
+	popup_stop_show(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+static bool playing_poll(void)
+{
+	int status;
+
+	if (playing_pid <= 0 || waitpid(playing_pid, &status, WNOHANG) != playing_pid)
+		return false;
+	playing_answer(status);
+	return true;
+}
+
+static void playing_timer_cb(lv_timer_t *t)
+{
+	(void)t;
+	if (playing_pid <= 0 || playing_poll())
+		lv_timer_pause(playing_timer);
+}
+
 static void popup_open(enum popup_kind kind)
 {
 	lv_obj_t *scr, *plate, *sq;
@@ -1030,6 +1058,17 @@ static void popup_open(enum popup_kind kind)
 		popup_stop = stop;
 		lv_obj_set_hidden(stop, true);
 		playing_pid = chumby_spawn(AUDIO, argv);
+		/* Wait a moment for the answer, so the button is there when the
+		 * popup first shows (a Pi answers in tens of ms); if it's slower
+		 * (the Chumby), it pops in as soon as it comes. */
+		for (int i = 0; i < 10 && playing_pid > 0 && !playing_poll(); i++)
+			usleep(10 * 1000);
+		if (playing_pid > 0) {
+			if (!playing_timer)
+				playing_timer = lv_timer_create(playing_timer_cb, 20, NULL);
+			lv_timer_reset(playing_timer);
+			lv_timer_resume(playing_timer);
+		}
 		lv_obj_set_size(stop, STOP_SIZE, STOP_SIZE);
 		lv_obj_align(stop, LV_ALIGN_LEFT_MID, 8, 0);
 		lv_obj_set_style_radius(stop, LV_RADIUS_CIRCLE, 0);
@@ -1647,10 +1686,8 @@ static void reaper_cb(lv_timer_t *t)
 
 		if (pid == tone_pid)
 			tone_pid = -1;
-		if (pid == playing_pid) {	/* the stop button: if anything plays */
-			playing_pid = -1;
-			popup_stop_show(WIFEXITED(status) && WEXITSTATUS(status) == 0);
-		}
+		if (pid == playing_pid)		/* the stop button: if anything plays */
+			playing_answer(status);
 		for (i = 0; i < n_apps; i++)
 			if (apps[i].starting_pid == pid)
 				apps[i].starting_pid = 0;	/* died starting */
