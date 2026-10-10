@@ -597,6 +597,14 @@ static void scroll_done(lv_anim_t *a)
 	lv_async_call(scroll_done_async, a->var);
 }
 
+/* The text a scroll label was given, kept as its user data: once it's cut
+ * with dots, LVGL has written the dots into the label's own text, so that
+ * can't tell whether the text changed (it always would: scroll again). */
+static void scroll_label_deleted(lv_event_t *e)
+{
+	free(lv_obj_get_user_data(lv_event_get_target_obj(e)));
+}
+
 void chumby_scroll_label_init(lv_obj_t *l)
 {
 	if (!scroll_twice.completed_cb) {
@@ -610,12 +618,18 @@ void chumby_scroll_label_init(lv_obj_t *l)
 	lv_obj_set_style_anim(l, &scroll_twice, 0);
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
 	lv_label_set_text(l, "");
+	lv_obj_set_user_data(l, strdup(""));
+	lv_obj_add_event_cb(l, scroll_label_deleted, LV_EVENT_DELETE, NULL);
 }
 
 void chumby_scroll_label_set(lv_obj_t *l, const char *text)
 {
-	if (!strcmp(lv_label_get_text(l), text))
-		return;
+	char *given = lv_obj_get_user_data(l);
+
+	if (given && !strcmp(given, text))
+		return;		/* the same: let it be (dots and all) */
+	free(given);
+	lv_obj_set_user_data(l, strdup(text));
 	lv_anim_delete(l, NULL);	/* start over, from the beginning */
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
 	chumby_label_scroll_speed(l, text, CHUMBY_SCROLL_SPEED);
