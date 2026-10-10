@@ -7,7 +7,10 @@
  *   right       "AirPlay" and the sending device, small, level with the
  *               art's top; under it the title (scrolling twice when it
  *               changes, then cut with dots), the artist and album
- *   bottom      stop (ends the AirPlay session: the phone stops sending)
+ *   bottom      as the radios: a small button (tap: "Hold for disconnect";
+ *               hold: the phone stops and the session ends), then previous,
+ *               play/pause and next, which the phone does (DACP remote
+ *               control, chumby-airplay-remote)
  *
  * shairport-sync is the receiver (an AirPlay 1 speaker named after the
  * host). When something starts playing, its hook makes the other sources
@@ -25,7 +28,10 @@
 #include <unistd.h>
 #include <chumby.h>
 
-#define AUDIO		"/usr/bin/chumby-audio"
+#define REMOTE		"/usr/bin/chumby-airplay-remote"
+#define AIRPLAY_SOURCE	"/usr/share/chumby/audio.d/airplay"
+#define MESSAGE_MS	2500
+#define SMALL_SIZE	38	/* the disconnect button */
 #define ART_X		14
 #define ART_SIZE	92
 #define COL_X		(ART_X + ART_SIZE + 12)
@@ -35,10 +41,12 @@
 static char st_state[16], st_title[256], st_artist[256], st_album[256], st_client[128];
 static char st_cover[96];
 static unsigned st_cover_id = ~0u, shown_cover_id = ~0u;
-static int audio_child = -1;
+static int remote_child = -1, disconnect_child = -1;
+static char message[64];	/* transient, instead of the artist line */
+static uint32_t message_until;
 
 static lv_obj_t *scr, *lbl_top, *lbl_title, *lbl_sub, *art_tile, *art_img, *art_note;
-static lv_obj_t *btn_stop, *lbl_hint;
+static lv_obj_t *row, *btn_disc, *btn_prev, *btn_play, *btn_next, *lbl_hint;
 
 static void state_read(void)
 {
@@ -129,6 +137,8 @@ static void ui_update(void)
 			snprintf(sub, sizeof(sub), "%s%s", st_artist, st_album);
 		if (!strcmp(st_state, "paused"))
 			snprintf(sub, sizeof(sub), "paused");
+		if (message[0])
+			snprintf(sub, sizeof(sub), "%s", message);
 		chumby_scroll_label_set(lbl_title, st_title[0] ? st_title : "Playing");
 	} else {
 		snprintf(top, sizeof(top), "AirPlay");
@@ -141,9 +151,17 @@ static void ui_update(void)
 	}
 	label_set(lbl_top, top);
 	label_set(lbl_sub, sub);
-	lv_obj_set_hidden(btn_stop, !active());
+	lv_obj_set_hidden(row, !active());
 	lv_obj_set_hidden(lbl_hint, active());
+	label_set(lv_obj_get_child(btn_play, 0),
+		  !strcmp(st_state, "paused") ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE);
 	art_update();
+}
+
+static void message_set(const char *text)
+{
+	snprintf(message, sizeof(message), "%s", text);
+	message_until = lv_tick_get() + MESSAGE_MS;
 }
 
 static void poll_cb(lv_timer_t *t)
@@ -151,21 +169,61 @@ static void poll_cb(lv_timer_t *t)
 	int status;
 
 	(void)t;
-	if (audio_child > 0 && waitpid(audio_child, &status, WNOHANG) == audio_child)
-		audio_child = -1;
+	if (remote_child > 0 && waitpid(remote_child, &status, WNOHANG) == remote_child) {
+		remote_child = -1;
+		if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+			message_set("No answer from the sender");
+	}
+	if (disconnect_child > 0 && waitpid(disconnect_child, &status, WNOHANG) == disconnect_child)
+		disconnect_child = -1;
+	if (message[0] && (int32_t)(lv_tick_get() - message_until) >= 0)
+		message[0] = '\0';
 	state_read();
 	ui_update();
 }
 
-/* Ends the AirPlay session (the phone stops sending), like the volume
- * control's stop. */
-static void stop_cb(lv_event_t *e)
+/* Previous, play/pause, next: the phone does them. One at a time (each
+ * takes a moment the first time: finding the phone's remote control). */
+static void remote_cb(lv_event_t *e)
 {
-	char *argv[] = { "chumby-audio", "stop", NULL };
+	const char *cmd = lv_event_get_user_data(e);
+	char *argv[] = { "chumby-airplay-remote", (char *)cmd, NULL };
 
-	(void)e;
-	if (audio_child <= 0)
-		audio_child = chumby_spawn(AUDIO, argv);
+	if (remote_child > 0)
+		return;
+	remote_child = chumby_spawn(REMOTE, argv);
+}
+
+/* Tap: how to use it. Hold: the phone stops, and the session ends. */
+static void disconnect_cb(lv_event_t *e)
+{
+	char *argv[] = { "airplay", "disconnect", NULL };
+
+	if (lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) {
+		message_set("Hold for disconnect");
+		ui_update();
+		return;
+	}
+	if (disconnect_child <= 0) {
+		disconnect_child = chumby_spawn(AIRPLAY_SOURCE, argv);
+		message_set("Disconnecting...");
+		ui_update();
+	}
+}
+
+static lv_obj_t *round_button(lv_obj_t *parent, const char *sym, int size,
+			      const lv_font_t *font)
+{
+	lv_obj_t *b = lv_button_create(parent);
+	lv_obj_t *l = lv_label_create(b);
+
+	lv_obj_set_size(b, size, size);
+	lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_shadow_width(b, 0, 0);
+	lv_label_set_text(l, sym);
+	lv_obj_set_style_text_font(l, font, 0);
+	lv_obj_center(l);
+	return b;
 }
 
 static void on_mode(chumby_mode_t mode, void *user)
@@ -176,7 +234,12 @@ static void on_mode(chumby_mode_t mode, void *user)
 	lv_obj_set_style_text_color(lbl_title, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_style_text_color(lbl_sub, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_style_text_color(lbl_hint, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_bg_color(btn_stop, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_bg_color(btn_prev, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_bg_color(btn_play, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_bg_color(btn_next, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_bg_color(btn_disc, chumby_color(CHUMBY_COLOR_SURFACE), LV_STATE_PRESSED);
+	lv_obj_set_style_text_color(btn_disc, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_border_color(btn_disc, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	if (!lv_obj_is_hidden(art_note))
 		art_show_note();
 }
@@ -184,24 +247,36 @@ static void on_mode(chumby_mode_t mode, void *user)
 int main(void)
 {
 	int32_t art_y, title_y, line_large, line_body;
-	lv_obj_t *l;
 
 	scr = chumby_app_init("AirPlay");
 	lv_obj_set_scrollable(scr, false);
 	line_large = lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE));
 	line_body = lv_font_get_line_height(chumby_font(CHUMBY_FONT_BODY));
 
-	/* Bottom: stop, while something plays; else how to start. */
-	btn_stop = lv_button_create(scr);
-	lv_obj_set_size(btn_stop, 56, 56);
-	lv_obj_set_style_radius(btn_stop, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_shadow_width(btn_stop, 0, 0);
-	lv_obj_align(btn_stop, LV_ALIGN_BOTTOM_MID, 0, -8);
-	l = lv_label_create(btn_stop);
-	lv_label_set_text(l, LV_SYMBOL_STOP);
-	lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
-	lv_obj_center(l);
-	lv_obj_add_event_cb(btn_stop, stop_cb, LV_EVENT_CLICKED, NULL);
+	/* Bottom, while something plays (as the radios): disconnect (small,
+	 * hold it), previous, play/pause, next. Else how to start. */
+	row = lv_obj_create(scr);
+	lv_obj_remove_style_all(row);
+	lv_obj_set_scrollable(row, false);
+	lv_obj_set_size(row, CHUMBY_APP_W, 56);
+	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -8);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	btn_disc = round_button(row, LV_SYMBOL_STOP, SMALL_SIZE, &lv_font_montserrat_14);
+	lv_obj_set_style_bg_opa(btn_disc, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_bg_opa(btn_disc, LV_OPA_COVER, LV_STATE_PRESSED);
+	lv_obj_set_style_border_width(btn_disc, 1, 0);
+	lv_obj_set_style_border_opa(btn_disc, LV_OPA_40, 0);
+	lv_obj_set_ext_click_area(btn_disc, (CHUMBY_TOUCH_MIN - SMALL_SIZE) / 2);
+	lv_obj_add_event_cb(btn_disc, disconnect_cb, LV_EVENT_SHORT_CLICKED, NULL);
+	lv_obj_add_event_cb(btn_disc, disconnect_cb, LV_EVENT_LONG_PRESSED, NULL);
+	btn_prev = round_button(row, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
+	lv_obj_add_event_cb(btn_prev, remote_cb, LV_EVENT_CLICKED, "previtem");
+	btn_play = round_button(row, LV_SYMBOL_PAUSE, 56, &lv_font_montserrat_28);
+	lv_obj_add_event_cb(btn_play, remote_cb, LV_EVENT_CLICKED, "playpause");
+	btn_next = round_button(row, LV_SYMBOL_NEXT, 52, &lv_font_montserrat_28);
+	lv_obj_add_event_cb(btn_next, remote_cb, LV_EVENT_CLICKED, "nextitem");
 	lbl_hint = lv_label_create(scr);
 	lv_obj_set_width(lbl_hint, CHUMBY_APP_W - 2 * ART_X);
 	lv_label_set_long_mode(lbl_hint, LV_LABEL_LONG_MODE_WRAP);
@@ -212,7 +287,7 @@ int main(void)
 	lv_obj_update_layout(scr);
 
 	/* The art, centred in the space above the buttons (as the radios). */
-	art_y = (lv_obj_get_y(btn_stop) - ART_SIZE) / 2;
+	art_y = (lv_obj_get_y(row) - ART_SIZE) / 2;
 	art_tile = lv_obj_create(scr);
 	lv_obj_remove_style_all(art_tile);
 	lv_obj_set_pos(art_tile, ART_X, art_y);

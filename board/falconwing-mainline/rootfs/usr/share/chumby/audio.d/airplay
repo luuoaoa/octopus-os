@@ -1,21 +1,33 @@
 #!/bin/sh
 # chumby-audio source: AirPlay (shairport-sync, see chumby-airplay-hook).
 #
-# A receiver can't pause or resume what a phone sends: stop and pause both
-# end the session (restarting shairport-sync drops the connection; the
-# phone stops). So pause says it didn't (exit 1): nothing to resume after
-# an alarm.
+# A receiver can't pause or resume what a phone sends, but it can ask the
+# phone (chumby-airplay-remote, DACP): stop and pause both pause it there,
+# so it doesn't carry on "playing" to us, then end the session
+# (restarting shairport-sync drops the connection and frees the sound
+# card). So pause says it didn't (exit 1): nothing to resume after an
+# alarm.
+#
+#   disconnect   the AirPlay app's held button: the phone stops (not just
+#                pauses), and the session ends
 MARK=/run/shairport-sync/playing
 
 case "$1" in
 	active)
 		[ -f "$MARK" ]
 		;;
-	stop | pause)
-		[ -f "$MARK" ] || exit 0
+	stop | pause | disconnect)
+		[ -f "$MARK" ] || [ "$1" = disconnect ] || exit 0
+		if [ "$1" = disconnect ]; then
+			chumby-airplay-remote stop
+		else
+			chumby-airplay-remote pause
+		fi
 		rm -f "$MARK"
 		systemctl restart shairport-sync
-		[ "$1" = stop ]
+		# Not through chumby-audio (nothing else stops): say so.
+		[ "$1" = disconnect ] && chumby-audio stopped airplay
+		[ "$1" != pause ]
 		;;
 	resume)
 		exit 1

@@ -14,7 +14,9 @@
  * the data base64. We keep what matters in $run_dir/airplay (written whole,
  * renamed into place): "state=" playing / paused / stopped, "title=",
  * "artist=", "album=", "client=" (the sending device's name), "cover="
- * (the cover art, a file next to the pipe), "cover_id=" (changes with it).
+ * (the cover art, a file next to the pipe), "cover_id=" (changes with it),
+ * and for remote control of the sender (chumby-airplay-remote) its
+ * "dacp_id=", "active_remote=" (token) and "client_ip=".
  * Started with shairport-sync (chumby-airplay-meta.service); it reads the
  * pipe whether the app runs or not, so the app sees the current track
  * even when opened late.
@@ -34,7 +36,7 @@
 #define RUN_DEFAULT	"/run/chumby"
 
 static char state[16] = "stopped", title[256], artist[256], album[256], client[128];
-static char cover[64];
+static char cover[64], dacp_id[64], active_remote[64], client_ip[80];
 static unsigned cover_id;
 static const char *run_dir;
 
@@ -49,8 +51,10 @@ static void state_write(void)
 	f = fopen(tmp, "w");
 	if (!f)
 		return;
-	fprintf(f, "state=%s\ntitle=%s\nartist=%s\nalbum=%s\nclient=%s\ncover=%s\ncover_id=%u\n",
-		state, title, artist, album, client, cover, cover_id);
+	fprintf(f, "state=%s\ntitle=%s\nartist=%s\nalbum=%s\nclient=%s\ncover=%s\ncover_id=%u\n"
+		"dacp_id=%s\nactive_remote=%s\nclient_ip=%s\n",
+		state, title, artist, album, client, cover, cover_id,
+		dacp_id, active_remote, client_ip);
 	fclose(f);
 	rename(tmp, path);
 }
@@ -151,6 +155,12 @@ static void item(unsigned type, unsigned code, char *data, size_t n)
 			cover_save(data, n);
 		} else if (code == CODE('s', 'n', 'a', 'm')) {
 			text_set(client, sizeof(client), data, n);
+		} else if (code == CODE('d', 'a', 'i', 'd')) {
+			text_set(dacp_id, sizeof(dacp_id), data, n);
+		} else if (code == CODE('a', 'c', 'r', 'e')) {
+			text_set(active_remote, sizeof(active_remote), data, n);
+		} else if (code == CODE('c', 'l', 'i', 'p')) {
+			text_set(client_ip, sizeof(client_ip), data, n);
 		} else if (code == CODE('p', 'b', 'e', 'g') || code == CODE('p', 'r', 's', 'm')) {
 			snprintf(state, sizeof(state), "playing");
 		} else if (code == CODE('p', 'f', 'l', 's') || code == CODE('p', 'p', 'a', 'u')) {
@@ -158,6 +168,7 @@ static void item(unsigned type, unsigned code, char *data, size_t n)
 		} else if (code == CODE('p', 'e', 'n', 'd')) {
 			snprintf(state, sizeof(state), "stopped");
 			title[0] = artist[0] = album[0] = client[0] = cover[0] = '\0';
+			dacp_id[0] = active_remote[0] = client_ip[0] = '\0';
 		} else {
 			return;
 		}
