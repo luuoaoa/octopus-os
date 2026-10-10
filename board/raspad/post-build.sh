@@ -21,7 +21,7 @@ GIT_DIR="${BR2_EXTERNAL_PIFANSRF_PATH:-.}"
 COMMIT=${PIFANSRF_COMMIT:-$(git -C "${GIT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)}
 cat > "${TARGET_DIR}/etc/motd" <<MOTD
 
-  raspad (Raspberry Pi 4B, Chumby UI) — buildroot
+  raspad (64-bit Raspberry Pi, Chumby UI) — buildroot
   build:  ${COMMIT}
   date:   $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 

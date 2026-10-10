@@ -37,7 +37,15 @@
  * 320x240 UI at the largest whole-number scale that fits, centred, pixels
  * doubled or tripled (nearest, never blurred): the output's scale, with
  * everything in a 320x240 tree in the middle of its layout. A touch is
- * mapped over the whole output, so one on the border presses nothing.
+ * mapped over the whole output, so one on the border presses nothing. A
+ * screen whose own mode is huge (a 4K TV) gets one up to 1920x1200: all
+ * of it is drawn by the CPU.
+ *
+ * A mouse (on a screen without touch, say) moves a cursor kept to the UI:
+ * a translucent disc, like an iPad's, drawn at the output's scale on the
+ * display's cursor plane where there is one. It shrinks while a button is
+ * down, and goes after a touch or a few seconds' stillness. Apps' own
+ * cursor requests are ignored.
  *
  * The screen's corners are rounded: black quarter circles over
  * everything, CORNER_R px, anti-aliased.
@@ -71,6 +79,8 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
 #include <wlr/types/wlr_input_device.h>
@@ -104,6 +114,10 @@
 #define MENU_GAP	4	/* the app menu card, from the edge and the bar */
 #define UI_W		320	/* the UI's size, whatever the screen's */
 #define UI_H		240
+#define MODE_MAX_W	1920	/* biggest mode we'll drive (pixman draws it all) */
+#define MODE_MAX_H	1200
+#define CURSOR_R	9	/* the cursor disc's radius, in UI pixels */
+#define CURSOR_IDLE_MS	5000	/* still this long: it goes */
 
 enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_MENU, VIEW_CAL,
 		 VIEW_APP };
@@ -141,6 +155,17 @@ struct server {
 	struct wlr_output *output;	/* the LCD */
 	int width, height;		/* the UI's (UI_W x UI_H on a bigger screen) */
 	double layout_w, layout_h;	/* the output's, in layout (scaled) pixels */
+	int scale;
+
+	/* A mouse: its cursor. */
+	struct wlr_cursor *cursor;
+	struct wlr_buffer *cursor_img[2];	/* up, pressed */
+	int cursor_img_scale;
+	bool cursor_shown, cursor_down, cursor_swallow;
+	int pointers;
+	struct wl_event_source *cursor_idle;
+	struct wl_listener cursor_motion, cursor_motion_abs, cursor_button, cursor_axis,
+		cursor_frame;
 };
 
 struct view {
@@ -656,6 +681,159 @@ static void shell_dismiss(void)
 	close(fd);
 }
 
+static struct wlr_buffer *disc_create(int side, double r, double a);
+
+static void cursor_hide(struct server *s)
+{
+	if (!s->cursor || !s->cursor_shown)
+		return;
+	wlr_cursor_unset_image(s->cursor);
+	s->cursor_shown = false;
+}
+
+static void cursor_images(struct server *s)
+{
+	int sc = s->scale > 0 ? s->scale : 1, side = (2 * CURSOR_R + 4) * sc, i;
+
+	if (s->cursor_img_scale == sc && s->cursor_img[0])
+		return;
+	for (i = 0; i < 2; i++)
+		if (s->cursor_img[i])
+			wlr_buffer_drop(s->cursor_img[i]);
+	s->cursor_img[0] = disc_create(side, CURSOR_R * sc, 0.38);
+	s->cursor_img[1] = disc_create(side, CURSOR_R * sc * 0.75, 0.55);
+	s->cursor_img_scale = sc;
+}
+
+/* Shown (as it is now: up or pressed); gone again after a while still. */
+static void cursor_show(struct server *s)
+{
+	int sc;
+
+	if (!s->cursor)
+		return;
+	cursor_images(s);
+	sc = s->cursor_img_scale;
+	if (s->cursor_img[s->cursor_down])
+		wlr_cursor_set_buffer(s->cursor, s->cursor_img[s->cursor_down],
+				      (CURSOR_R + 2) * sc, (CURSOR_R + 2) * sc, sc);
+	s->cursor_shown = true;
+	wl_event_source_timer_update(s->cursor_idle, CURSOR_IDLE_MS);
+}
+
+static int cursor_idle_cb(void *data)
+{
+	struct server *s = data;
+
+	if (!s->cursor_down)
+		cursor_hide(s);
+	return 0;
+}
+
+/* The pointer's surface (if any) gets it, where it is. */
+static void cursor_moved(struct server *s, uint32_t time)
+{
+	double sx, sy;
+	struct wlr_surface *surface = surface_at(s, s->cursor->x, s->cursor->y, &sx, &sy);
+
+	cursor_show(s);
+	if (!surface) {
+		wlr_seat_pointer_clear_focus(s->seat);
+		return;
+	}
+	wlr_seat_pointer_notify_enter(s->seat, surface, sx, sy);
+	wlr_seat_pointer_notify_motion(s->seat, time, sx, sy);
+}
+
+static void cursor_motion(struct wl_listener *l, void *data)
+{
+	struct server *s = wl_container_of(l, s, cursor_motion);
+	struct wlr_pointer_motion_event *ev = data;
+
+	wlr_cursor_move(s->cursor, &ev->pointer->base, ev->delta_x, ev->delta_y);
+	cursor_moved(s, ev->time_msec);
+}
+
+static void cursor_motion_abs(struct wl_listener *l, void *data)
+{
+	struct server *s = wl_container_of(l, s, cursor_motion_abs);
+	struct wlr_pointer_motion_absolute_event *ev = data;
+
+	wlr_cursor_warp_absolute(s->cursor, &ev->pointer->base, ev->x, ev->y);
+	cursor_moved(s, ev->time_msec);
+}
+
+static bool shell_popup_up(struct server *s);
+static bool in_tree(struct wlr_scene_node *node, struct wlr_scene_tree *tree);
+static void shell_dismiss(void);
+
+static void cursor_button(struct wl_listener *l, void *data)
+{
+	struct server *s = wl_container_of(l, s, cursor_button);
+	struct wlr_pointer_button_event *ev = data;
+	bool down = ev->state == WL_POINTER_BUTTON_STATE_PRESSED;
+
+	if (screen_dark())
+		return;		/* as for touches: nothing pressed blind */
+	s->cursor_down = down;
+	cursor_show(s);
+	/* Like a tap: outside the shell's popup or menu (and the bar), a
+	 * click closes them and goes no further - its release neither. */
+	if (down && shell_popup_up(s)) {
+		struct wlr_scene_node *node = wlr_scene_node_at(&s->scene->tree.node,
+								s->cursor->x, s->cursor->y,
+								NULL, NULL);
+
+		if (!in_tree(node, s->popup_tree) && !in_tree(node, s->panel_tree) &&
+		    !in_tree(node, s->cal_tree)) {
+			shell_dismiss();
+			s->cursor_swallow = true;
+			return;
+		}
+	}
+	if (!down && s->cursor_swallow) {
+		s->cursor_swallow = false;
+		return;
+	}
+	wlr_seat_pointer_notify_button(s->seat, ev->time_msec, ev->button, ev->state);
+}
+
+static void cursor_axis(struct wl_listener *l, void *data)
+{
+	struct server *s = wl_container_of(l, s, cursor_axis);
+	struct wlr_pointer_axis_event *ev = data;
+
+	cursor_show(s);
+	wlr_seat_pointer_notify_axis(s->seat, ev->time_msec, ev->orientation, ev->delta,
+				     ev->delta_discrete, ev->source, ev->relative_direction);
+}
+
+static void cursor_frame(struct wl_listener *l, void *data)
+{
+	struct server *s = wl_container_of(l, s, cursor_frame);
+
+	(void)data;
+	wlr_seat_pointer_notify_frame(s->seat);
+}
+
+/* Kept to the UI (not the black border), and to the middle at first. */
+static void cursor_fit(struct server *s)
+{
+	struct wlr_box box;
+
+	if (!s->cursor)
+		return;
+	box.x = s->ui_tree->node.x;
+	box.y = s->ui_tree->node.y;
+	box.width = s->width;
+	box.height = s->height;
+	wlr_cursor_map_to_region(s->cursor, &box);
+	wlr_cursor_warp(s->cursor, NULL, box.x + box.width / 2.0, box.y + box.height / 2.0);
+	s->cursor_img_scale = 0;	/* redrawn for the new scale */
+	if (s->cursor_shown)
+		cursor_show(s);
+}
+
 static void touch_down(struct wl_listener *l, void *data)
 {
 	struct touch_dev *t = wl_container_of(l, t, down);
@@ -667,6 +845,7 @@ static void touch_down(struct wl_listener *l, void *data)
 	/* Not marked active: its motion and up are dropped too. */
 	if (ev->touch_id < 0 || ev->touch_id >= MAX_TOUCH || screen_dark())
 		return;
+	cursor_hide(s);		/* a finger now, not the mouse */
 	if (shell_popup_up(s)) {
 		struct wlr_scene_node *node =
 			wlr_scene_node_at(&s->scene->tree.node, lx, ly, NULL, NULL);
@@ -895,11 +1074,17 @@ static void new_input(struct wl_listener *l, void *data)
 	case WLR_INPUT_DEVICE_KEYBOARD:
 		new_keyboard(s, dev);
 		break;
+	case WLR_INPUT_DEVICE_POINTER:
+		wlr_cursor_attach_input_device(s->cursor, dev);
+		s->pointers++;
+		break;
 	default:
 		break;
 	}
 	if (s->have_touch)
 		caps |= WL_SEAT_CAPABILITY_TOUCH;
+	if (s->pointers)
+		caps |= WL_SEAT_CAPABILITY_POINTER;
 	if (!wl_list_empty(&s->keyboards))
 		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
 	wlr_seat_set_capabilities(s->seat, caps);
@@ -976,6 +1161,73 @@ static void output_destroy(struct wl_listener *l, void *data)
 
 /* A read-only pixel buffer: the top-left corner's mask, black outside a
  * quarter circle (premultiplied ARGB, so just alpha). */
+/* A buffer of premultiplied ARGB pixels: the cursor's discs. */
+struct pix_buf {
+	struct wlr_buffer base;
+	int side;
+	uint32_t px[];
+};
+
+static void pix_destroy(struct wlr_buffer *b)
+{
+	free(wl_container_of(b, (struct pix_buf *)NULL, base));
+}
+
+static bool pix_begin(struct wlr_buffer *b, uint32_t flags, void **data, uint32_t *format,
+		      size_t *stride)
+{
+	struct pix_buf *pb = wl_container_of(b, pb, base);
+
+	if (flags & WLR_BUFFER_DATA_PTR_ACCESS_WRITE)
+		return false;
+	*data = pb->px;
+	*format = DRM_FORMAT_ARGB8888;
+	*stride = pb->side * 4;
+	return true;
+}
+
+static void pix_end(struct wlr_buffer *b)
+{
+	(void)b;
+}
+
+static const struct wlr_buffer_impl pix_impl = {
+	.destroy = pix_destroy,
+	.begin_data_ptr_access = pix_begin,
+	.end_data_ptr_access = pix_end,
+};
+
+/* A soft disc of radius r (device pixels), centred in a side x side
+ * square: a dark grey fill, alpha a, with a thin light rim so it shows
+ * on dark screens too. */
+static struct wlr_buffer *disc_create(int side, double r, double a)
+{
+	struct pix_buf *pb = calloc(1, sizeof(*pb) + sizeof(uint32_t) * side * side);
+	double c = side / 2.0, rim = r > 6 ? r / 9 : 1;
+	int x, y;
+
+	if (!pb)
+		return NULL;
+	pb->side = side;
+	wlr_buffer_init(&pb->base, &pix_impl, side, side);
+	for (y = 0; y < side; y++)
+		for (x = 0; x < side; x++) {
+			double d = hypot(x + 0.5 - c, y + 0.5 - c);
+			double cover = r + 0.5 - d;		/* antialiased edge */
+			double inner = (r - rim) + 0.5 - d;
+			double al, grey;
+
+			cover = cover < 0 ? 0 : cover > 1 ? 1 : cover;
+			inner = inner < 0 ? 0 : inner > 1 ? 1 : inner;
+			/* rim: light, a bit more opaque; inside: dark grey */
+			al = cover * (inner * a + (1 - inner) * (a + 0.25));
+			grey = inner * 0.22 + (1 - inner) * 0.92;
+			pb->px[y * side + x] = (uint32_t)(al * 255 + 0.5) << 24 |
+					       (uint32_t)(grey * al * 255 + 0.5) * 0x010101u;
+		}
+	return &pb->base;
+}
+
 struct corner_buf {
 	struct wlr_buffer base;
 	uint32_t px[CORNER_R * CORNER_R];
@@ -1053,6 +1305,28 @@ static void corners_create(struct server *s)
 	s->corners = true;
 }
 
+/* The screen's own mode, unless it's bigger than we'd want to draw every
+ * pixel of in software (a 4K TV): then its biggest one that isn't, at the
+ * refresh nearest 60 Hz. */
+static struct wlr_output_mode *pick_mode(struct wlr_output *wo)
+{
+	struct wlr_output_mode *pref = wlr_output_preferred_mode(wo), *m, *best = NULL;
+
+	if (!pref || (pref->width <= MODE_MAX_W && pref->height <= MODE_MAX_H))
+		return pref;
+	wl_list_for_each(m, &wo->modes, link) {
+		long area = (long)m->width * m->height, best_area;
+
+		if (m->width > MODE_MAX_W || m->height > MODE_MAX_H)
+			continue;
+		best_area = best ? (long)best->width * best->height : -1;
+		if (area > best_area || (area == best_area &&
+		    labs(m->refresh - 60000) < labs(best->refresh - 60000)))
+			best = m;
+	}
+	return best ? best : pref;
+}
+
 static void new_output(struct wl_listener *l, void *data)
 {
 	struct server *s = wl_container_of(l, s, new_output);
@@ -1068,7 +1342,7 @@ static void new_output(struct wl_listener *l, void *data)
 	wlr_output_init_render(wo, s->allocator, s->renderer);
 	wlr_output_state_init(&state);
 	wlr_output_state_set_enabled(&state, true);
-	mode = wlr_output_preferred_mode(wo);
+	mode = pick_mode(wo);
 	if (mode) {
 		pw = mode->width;
 		ph = mode->height;
@@ -1104,6 +1378,7 @@ static void new_output(struct wl_listener *l, void *data)
 	wlr_scene_node_set_position(&s->ui_tree->node, (int)((s->layout_w - s->width) / 2),
 				    (int)((s->layout_h - s->height) / 2));
 	wlr_scene_rect_set_size(s->ui_backdrop, s->width, s->height);
+	s->scale = scale;
 	corners_create(s);
 	wlr_log(WLR_INFO, "output %s: %dx%d, UI %dx%d at scale %d", wo->name,
 		wo->width, wo->height, s->width, s->height, scale);
@@ -1124,6 +1399,7 @@ static void new_output(struct wl_listener *l, void *data)
 	lo = wlr_output_layout_add_auto(s->output_layout, wo);
 	so = wlr_scene_output_create(s->scene, wo);
 	wlr_scene_output_layout_add_output(s->scene_layout, lo, so);
+	cursor_fit(s);
 
 	/* Re-place windows created before the output appeared. */
 	wl_list_for_each(v, &s->views, link)
@@ -1177,6 +1453,10 @@ int main(int argc, char **argv)
 	wlr_screencopy_manager_v1_create(s.display);
 
 	s.output_layout = wlr_output_layout_create(s.display);
+	s.cursor = wlr_cursor_create();
+	wlr_cursor_attach_output_layout(s.cursor, s.output_layout);
+	s.cursor_idle = wl_event_loop_add_timer(wl_display_get_event_loop(s.display),
+					       cursor_idle_cb, &s);
 	wlr_xdg_output_manager_v1_create(s.display, s.output_layout);
 	s.new_output.notify = new_output;
 	wl_signal_add(&s.backend->events.new_output, &s.new_output);
@@ -1203,6 +1483,16 @@ int main(int argc, char **argv)
 	wl_signal_add(&s.xdg_shell->events.new_popup, &s.new_xdg_popup);
 
 	wl_list_init(&s.keyboards);
+	s.cursor_motion.notify = cursor_motion;
+	wl_signal_add(&s.cursor->events.motion, &s.cursor_motion);
+	s.cursor_motion_abs.notify = cursor_motion_abs;
+	wl_signal_add(&s.cursor->events.motion_absolute, &s.cursor_motion_abs);
+	s.cursor_button.notify = cursor_button;
+	wl_signal_add(&s.cursor->events.button, &s.cursor_button);
+	s.cursor_axis.notify = cursor_axis;
+	wl_signal_add(&s.cursor->events.axis, &s.cursor_axis);
+	s.cursor_frame.notify = cursor_frame;
+	wl_signal_add(&s.cursor->events.frame, &s.cursor_frame);
 	wl_list_init(&s.touch_devs);
 	/* Watch for chumby-calibrate's results (written to a temp name and
 	 * renamed into place). */

@@ -1,6 +1,11 @@
 #!/bin/sh
 # sdcard.img: the boot FAT and the ext4 root (genimage.cfg).
 #
+# The FAT gets whatever the build made for it: the firmware for every
+# model (rpi-firmware/: bootcode.bin, start*.elf, fixup*.dat, overlays,
+# config.txt, cmdline.txt), the kernel, every DTB - so the list follows
+# the defconfig's DTS names.
+#
 # customize-raspad/{network-config,user-data,authorized_keys,
 # wpa_supplicant.conf} at the top of the tree (gitignored: your WiFi
 # password) go onto the boot FAT too, so a fresh card joins your network.
@@ -14,19 +19,24 @@ GENIMAGE_TMP="${BUILD_DIR}/genimage.tmp"
 ROOTPATH_TMP="$(mktemp -d)"
 trap 'rm -rf "${ROOTPATH_TMP}"' EXIT
 
-EXTRA=""
 mkdir -p "${BINARIES_DIR}/customize"
 rm -f "${BINARIES_DIR}"/customize/*
+FILES=""
+add() { FILES="${FILES}\t\t\t\"$1\",\n"; }
+for f in "${BINARIES_DIR}"/*.dtb "${BINARIES_DIR}"/rpi-firmware/*; do
+	[ -e "$f" ] && add "${f#${BINARIES_DIR}/}"
+done
+add Image
 for f in network-config user-data authorized_keys wpa_supplicant.conf; do
 	if [ -f "${CUSTOMIZE}/${f}" ]; then
 		cp "${CUSTOMIZE}/${f}" "${BINARIES_DIR}/customize/${f}"
-		EXTRA="${EXTRA}\t\t\t\"customize/${f}\",\n"
+		add "customize/${f}"
 		echo "raspad: ${f} from customize-raspad/ onto the boot FAT"
 	fi
 done
 # (genimage puts each listed file at the FAT's root, by its name.)
-EXTRA=$(printf "%b" "${EXTRA}")
-awk -v extra="${EXTRA}" '{ print } /files = \{/ && extra != "" { print extra }' \
+FILES=$(printf "%b" "${FILES}" | sed '$ s/,$//')
+awk -v files="${FILES}" '/^#BOOT_FILES#$/ { print files; next } { print }' \
 	"${BOARD_DIR}/genimage.cfg" > "${GENIMAGE_CFG}"
 
 rm -rf "${GENIMAGE_TMP}"
