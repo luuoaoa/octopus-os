@@ -56,7 +56,8 @@ improved on the way. The setup comes from pifansrf's pi-radio branch.
   LV2 plugin) synthesises the harmonics of the bass the speakers can't
   reproduce, at its reference strength (the Pi 0W on pi-radio had to
   run it cut down), then a by-ear EQ (+6 dB below 150 Hz, softer treble:
-  -3 dB at 3.2 kHz, -4 dB above 6 kHz) until the RasPad's
+  -4 dB around 2.5 kHz, -6 dB above 5 kHz, a roll-off above 11 kHz)
+  until the RasPad's
   speakers are measured: export Room EQ Wizard's filters as text and run
   `bin/rew-to-pipewire.py --bass export.txt`, whose output replaces the
   file's `filter.graph` block.
