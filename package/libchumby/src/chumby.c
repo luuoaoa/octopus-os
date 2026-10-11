@@ -53,6 +53,7 @@ static struct chumby_policy policy = {
 	.wake_seconds = 10,
 	.snooze_minutes = 9,
 	.alarm_volume = 60,
+	.saver = "toasters",
 };
 
 static int parse_hhmm(const char *s, int def)
@@ -95,6 +96,8 @@ static void policy_load(void)
 			policy.snooze_minutes = atoi(val);
 		else if (!strcmp(key, "alarm_volume"))
 			policy.alarm_volume = atoi(val);
+		else if (!strcmp(key, "saver") && !strchr(val, '/'))
+			snprintf(policy.saver, sizeof(policy.saver), "%.31s", val);
 	}
 	fclose(f);
 }

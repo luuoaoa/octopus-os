@@ -10,7 +10,7 @@ LIBCHUMBY_SITE_METHOD = local
 LIBCHUMBY_LICENSE = GPL-2.0+ (framework, Nimbus fonts from Rockbox), MIT (LVGL)
 LIBCHUMBY_INSTALL_STAGING = YES
 LIBCHUMBY_DEPENDENCIES = host-pkgconf host-wayland wayland wayland-protocols \
-	libxkbcommon alsa-lib lvgl
+	libxkbcommon alsa-lib lvgl pixman
 
 # LVGL is compiled into the library with our lv_conf.h. (A local package
 # never runs the download step, so LVGL comes from its own package.)
@@ -23,12 +23,13 @@ define LIBCHUMBY_BUILD_CMDS
 		WAYLAND_PROTOCOLS="$(STAGING_DIR)/usr/share/wayland-protocols"
 endef
 
-# Headers: chumby.h, lv_conf.h and LVGL's headers under include/chumby/.
+# Headers: chumby.h, chumby_saver.h (the screen saver kit), lv_conf.h and LVGL's headers under include/chumby/.
 define LIBCHUMBY_INSTALL_STAGING_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/libchumby.so.1 $(STAGING_DIR)/usr/lib/libchumby.so.1
 	ln -sf libchumby.so.1 $(STAGING_DIR)/usr/lib/libchumby.so
 	mkdir -p $(STAGING_DIR)/usr/include/chumby
-	$(INSTALL) -m 0644 $(@D)/chumby.h $(@D)/lv_conf.h $(STAGING_DIR)/usr/include/chumby/
+	$(INSTALL) -m 0644 $(@D)/chumby.h $(@D)/chumby_saver.h $(@D)/lv_conf.h \
+		$(STAGING_DIR)/usr/include/chumby/
 	rsync -a --include '*/' --include '*.h' --exclude '*' \
 		$(@D)/lvgl/ $(STAGING_DIR)/usr/include/chumby/lvgl/
 	$(INSTALL) -D -m 0644 $(LIBCHUMBY_PKGDIR)/libchumby.pc \

@@ -207,7 +207,7 @@ lit
 front() { say "launch $1"; sleep ${2:-12}; }
 saver() {
 	say idle; sleep 4
-	[ -n "$(pidof chumby-toasters)" ] || echo "   (no saver: see the journal, \"no screen saver: ...\")"
+	ls -l /proc/[0-9]*/exe 2>/dev/null | grep -q /usr/lib/chumby/savers/ || echo "   (no saver: see the journal, \"no screen saver: ...\")"
 }
 
 [ -n "$SCENARIOS" ] || SCENARIOS="idle saver stream podcast saver-stream"

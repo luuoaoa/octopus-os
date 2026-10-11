@@ -84,10 +84,12 @@ struct chumby_policy {
 	int day_brightness;	/* percent, until the popup sets the day's */
 	int night_brightness;	/* percent, until the popup sets the night's */
 	int screen_off_start;	/* unused: the power button turns the screen */
-	int screen_off_end;	/* on and off (kept so old policy files parse) */
+	int screen_off_end;	/* on and off (kept so old policies parse) */
 	int wake_seconds;	/* unused, likewise */
 	int snooze_minutes;	/* default 9 */
 	int alarm_volume;	/* minimum volume while ringing, percent */
+	char saver[32];		/* the screen saver: /usr/lib/chumby/savers/<this>,
+				 * "none" for none; default toasters */
 };
 
 typedef void (*chumby_mode_cb_t)(chumby_mode_t mode, void *user);

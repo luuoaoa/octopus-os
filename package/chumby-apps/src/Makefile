@@ -37,8 +37,9 @@ chumby-airplay-meta: airplay-meta.o
 chumby-airplay-remote: airplay-remote.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
+# A screen saver, on libchumby's saver kit (pixman, no LVGL).
 chumby-toasters: toasters.o
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) $(shell $(PKG_CONFIG) --libs pixman-1)
 
 chumby-calibrate: calibrate.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) -lm

@@ -79,7 +79,6 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/render/pixman.h>
-#include "toasters.h"
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_pointer.h>
@@ -152,7 +151,6 @@ struct server {
 	bool blur_pending;
 	int veil_mode;			/* enum veil_mode */
 	struct view *saver;		/* the screen saver's window, if any */
-	struct toasters *toasters;	/* flying over it (toasters.c) */
 
 	/* Nobody's touched anything for IDLE_MS: the shell is told ("idle",
 	 * then "active" at the next input), and may start the saver. */
@@ -308,8 +306,6 @@ static void set_keyboard_focus(struct server *s, struct view *v)
 
 /* Stop or continue an app's process. Only apps: the shell's windows
  * (bar, menu, home) stay live. */
-static uint32_t *saver_backdrop(struct server *s);
-
 static void view_freeze(struct view *v, bool freeze)
 {
 	struct wl_client *client;
@@ -440,14 +436,6 @@ static void view_map(struct wl_listener *l, void *data)
 
 	(void)data;
 	v->mapped = true;
-	/* The screen saver's window holds the screen; we fly the toasters
-	 * over it (25 fps on a GPU, 12.5 on pixman: each frame is the
-	 * ARM9's work). */
-	if (v->kind == VIEW_SAVER && !s->toasters)
-		s->toasters = toasters_start(s->saver_tree, wl_display_get_event_loop(s->display),
-					     s->width, s->height, s->gpu ? 40 : 80, !s->gpu,
-					     s->output ? s->output->render_format : 0,
-					     s->gpu ? NULL : saver_backdrop(s));
 	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU || v->kind == VIEW_SAVER)
 		veil_update(s);
 	if (v->kind != VIEW_APP)
@@ -487,10 +475,6 @@ static void view_unmap(struct wl_listener *l, void *data)
 	}
 	if (v->kind == VIEW_APP)
 		activate(s, top_app(s));
-	if (v->kind == VIEW_SAVER) {
-		toasters_stop(s->toasters);
-		s->toasters = NULL;
-	}
 	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU || v->kind == VIEW_APP ||
 	    v->kind == VIEW_SAVER)
 		veil_update(s);
@@ -1367,9 +1351,8 @@ static struct wlr_buffer *disc_create(int side, double r, double a)
 #define BLUR_EVERY_MS	250	/* what's under it changing: blurred again, at most (~10 ms each on a Pi 4) */
 #define DIM_GPU		0.22f	/* black over the blur */
 #define DIM_SOFT	0.30f	/* black over the app, no blur (pixman) */
-#define DIM_SAVER_GPU	0.45f	/* under the screen saver: the toasters stand out */
+#define DIM_SAVER_GPU	0.45f	/* under the screen saver: what it draws stands out */
 #define DIM_SAVER_SOFT	0.60f
-#define DIM_SAVER_BACKDROP 0.45f	/* no GPU: the saver's still backdrop, as the GPU's dim */
 
 /* One box-blur pass along a line of n pixels, `step` apart, all four
  * channels: a running sum over 2r+1, the edges repeated. */
@@ -1462,58 +1445,6 @@ static void veil_blur_now(struct server *s)
 fail:
 	free(tmp);
 	free(pb);
-}
-
-/* No GPU: the screen as the saver comes up (the bar and the app), blurred
- * and dimmed once, for the toasters' canvas to fly over - still (blurring
- * it again each frame would cost the ARM9 what the canvas saved), while the
- * app under it is stopped anyway. XRGB8888, s->width x s->height, the
- * caller's to free; NULL (black) if it can't be had. */
-static uint32_t *saver_backdrop(struct server *s)
-{
-	int w = s->width, h = s->height, x, y, pass;
-	struct timespec t0, t1;
-	struct pix_buf *pb;
-	uint32_t *px, *tmp;
-
-	clock_gettime(CLOCK_MONOTONIC, &t0);
-	pb = calloc(1, sizeof(*pb) + sizeof(uint32_t) * w * h);
-	tmp = malloc(sizeof(uint32_t) * (w > h ? w : h));
-	if (!pb || !tmp) {
-		free(pb);
-		free(tmp);
-		return NULL;
-	}
-	pb->w = w;
-	pb->h = h;
-	pb->format = DRM_FORMAT_XRGB8888;
-	veil_read(pb, panel_view(s), 0);
-	veil_read(pb, top_app(s), BAR_H);
-	for (pass = 0; pass < BLUR_PASSES; pass++) {
-		for (y = 0; y < h; y++)
-			blur_line(pb->px + y * w, w, 1, BLUR_R, tmp);
-		for (x = 0; x < w; x++)
-			blur_line(pb->px + x, h, w, BLUR_R, tmp);
-	}
-	free(tmp);
-	/* Dimmed: each channel scaled by 1 - DIM_SAVER_BACKDROP (in 1/256ths). */
-	{
-		uint32_t k = (uint32_t)((1 - DIM_SAVER_BACKDROP) * 256);
-
-		for (x = 0; x < w * h; x++) {
-			uint32_t v = pb->px[x];
-
-			pb->px[x] = 0xff000000u | (((v & 0xff00ffu) * k >> 8) & 0xff00ffu) |
-				    (((v & 0x00ff00u) * k >> 8) & 0x00ff00u);
-		}
-	}
-	/* The pixels alone, for the caller. */
-	px = (uint32_t *)pb;
-	memmove(px, pb->px, sizeof(uint32_t) * w * h);
-	clock_gettime(CLOCK_MONOTONIC, &t1);
-	wlr_log(WLR_INFO, "saver backdrop: %ld ms", (t1.tv_sec - t0.tv_sec) * 1000 +
-		(t1.tv_nsec - t0.tv_nsec) / 1000000);
-	return px;
 }
 
 static bool shell_popup_up(struct server *s);
