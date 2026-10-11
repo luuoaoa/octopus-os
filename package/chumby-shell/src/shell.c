@@ -1383,22 +1383,43 @@ static void saver_stop(void)
 		kill(saver_pid, SIGTERM);	/* reaped by reaper_cb */
 }
 
-static void saver_maybe_start(void)
+/* Why not, if not (said to the journal when chumby-wm says "idle"). */
+static const char *saver_not_now(void)
+{
+	if (saver_pid > 0)
+		return "already up";
+	if (clock_front)
+		return "the clock is in front";
+	if (popup_disp || menu_disp)
+		return "a popup or menu is open";
+	if (alarm_state == CHUMBY_ALARM_RINGING)
+		return "an alarm rings";
+	if (screen_applied != 1)
+		return "the screen is dark";
+	if (our_input_ms && mono_ms() - our_input_ms < SAVER_IDLE_MS)
+		return "the knob or snooze button moved lately";
+	if (access(SAVER, X_OK) != 0)
+		return "no " SAVER;
+	return NULL;
+}
+
+static void saver_maybe_start(bool say)
 {
 	char *argv[] = { "chumby-toasters", NULL };
+	const char *why = wm_idle ? saver_not_now() : "not idle";
 
-	if (!wm_idle || saver_pid > 0 || clock_front || popup_disp || menu_disp ||
-	    alarm_state == CHUMBY_ALARM_RINGING || screen_applied != 1 ||
-	    (our_input_ms && mono_ms() - our_input_ms < SAVER_IDLE_MS) ||
-	    access(SAVER, X_OK) != 0)
+	if (why) {
+		if (say)
+			fprintf(stderr, "chumby-shell: no screen saver: %s\n", why);
 		return;
+	}
 	saver_pid = chumby_spawn(SAVER, argv);
 }
 
 static void saver_timer_cb(lv_timer_t *t)
 {
 	(void)t;
-	saver_maybe_start();
+	saver_maybe_start(false);
 }
 
 /* The knob or snooze button: someone's there. */
@@ -1729,7 +1750,7 @@ static void command(const char *cmd)
 		menu_close();
 	} else if (!strcmp(cmd, "idle")) {	/* chumby-wm: no input a while */
 		wm_idle = true;
-		saver_maybe_start();
+		saver_maybe_start(true);
 	} else if (!strcmp(cmd, "active")) {	/* chumby-wm: and now some */
 		wm_idle = false;
 		saver_stop();

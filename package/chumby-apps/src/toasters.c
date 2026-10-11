@@ -8,8 +8,15 @@
  * The shell starts us after a while without a touch (chumby-wm tells it),
  * unless the clock is in front; a tap (anything, really: the shell closes
  * us at any input) ends it. Our window ("chumby-saver") covers the whole
- * screen, bar too, and is see-through: chumby-wm puts the screen under it
- * blurred and dimmed (on a GPU), or dimmed (pixman).
+ * screen, bar too. With a GPU it's see-through: chumby-wm puts the screen
+ * under it blurred and dimmed. Without (the Chumby: pixman) it's black, as
+ * After Dark was: see-through, every frame would cost the compositor the
+ * app, a dimming layer and us blended where anything moved (60% of the
+ * Chumby's CPU, measured); opaque, it skips what's under us and copies
+ * the few squares that changed. And half as many frames (the toasters as
+ * fast, in bigger steps): even so, a frame is the ARM9's work, ours and
+ * the compositor's (~55% between us at 25 fps, measured, beside a
+ * podcast playing).
  *
  * The pictures are After Dark CSS's GIFs (toaster-sprite.gif: four 64 px
  * wing frames side by side; toast1.gif), (c) Berkeley Systems: fetched
@@ -23,9 +30,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <chumby.h>
 
 #define DIR		"/usr/share/chumby/toasters"
+#define RENDER_NODE	"/dev/dri/renderD128"	/* a GPU: see-through */
 #define W		CHUMBY_SCREEN_W
 #define H		CHUMBY_SCREEN_H
 #define SRC		64		/* the GIFs' frame size */
@@ -34,7 +43,9 @@
 #define N_TOASTERS	8
 #define N_TOAST		4
 #define N		(N_TOASTERS + N_TOAST)
-#define TICK_MS		40
+#define TICK_MS		40		/* 25 fps on a GPU... */
+#define TICK_MS_SOFT	80		/* ...12.5 without: each frame costs the
+					   Chumby's ARM9, us and the compositor alike */
 #define FLAP_STEP_MS	50		/* .2 s for the four frames, then back */
 #define GAP		(SZ + 4)	/* apart, at least, when they come in */
 
@@ -366,6 +377,7 @@ static void tapped(lv_event_t *e)
 int main(void)
 {
 	struct gif sheet = { 0 }, slice = { 0 };
+	bool see_through;
 	lv_display_t *disp;
 	lv_obj_t *scr;
 	int i;
@@ -381,15 +393,19 @@ int main(void)
 	if (!(toast = frame_make(&slice, 0)))
 		return 1;
 
-	/* See-through: chumby-wm blurs and dims what's under us. */
-	lv_wayland_window_set_next_color_format(LV_COLOR_FORMAT_ARGB8888);
+	/* See-through on a GPU: chumby-wm blurs and dims what's under us.
+	 * Else opaque black. */
+	see_through = access(RENDER_NODE, F_OK) == 0;
+	if (see_through)
+		lv_wayland_window_set_next_color_format(LV_COLOR_FORMAT_ARGB8888);
 	disp = chumby_window_create("chumby-saver", W, H);
 	if (!disp)
 		return 1;
 	scr = lv_display_get_screen_active(disp);
 	lv_obj_clean(scr);
 	lv_obj_set_scrollable(scr, false);
-	lv_obj_set_style_bg_opa(scr, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
+	lv_obj_set_style_bg_opa(scr, see_through ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
 	lv_obj_add_event_cb(scr, tapped, LV_EVENT_PRESSED, NULL);
 
 	srand(time(NULL));
@@ -408,6 +424,6 @@ int main(void)
 	}
 	last_ms = lv_tick_get();
 	lv_display_add_event_cb(disp, drawn, LV_EVENT_REFR_READY, NULL);
-	lv_timer_create(tick, TICK_MS, NULL);
+	lv_timer_create(tick, see_through ? TICK_MS : TICK_MS_SOFT, NULL);
 	return chumby_run();
 }
