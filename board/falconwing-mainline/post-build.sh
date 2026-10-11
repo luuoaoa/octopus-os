@@ -24,6 +24,11 @@ ln -sfn /dev/null "${TARGET_DIR}/etc/systemd/system/systemd-update-done.service"
 # Where init-ram leaves the carrier (p2) after pivoting.
 mkdir -p "${TARGET_DIR}/media/sd"
 
+# MediaTek MT7610U USB WiFi (Panda PAU0A; driver mt76x0u): its firmware,
+# which buildroot's linux-firmware has no option for (only the MT7610E's).
+mkdir -p "${TARGET_DIR}/lib/firmware/mediatek"
+cp "${BUILD_DIR}"/linux-firmware-*/mediatek/mt7610u.bin "${TARGET_DIR}/lib/firmware/mediatek/"
+
 # systemd units replace the shared overlay's sysvinit scripts.
 rm -f "${TARGET_DIR}"/etc/init.d/S[0-9]*
 

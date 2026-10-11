@@ -1,0 +1,12 @@
+# Whichever WiFi interface there is is "wlan0" - the stock rt73 dongle, the
+# PAU0A's mt76x0u or another - whatever name its driver or the kernel
+# picked (wlan1 after a dongle swap, a wlx... name): wpa_supplicant@wlan0,
+# udhcpc@wlan0 and the config files all expect wlan0. (A second WiFi
+# interface keeps its own name: wlan0 is taken.)
+[Match]
+Type=wlan
+
+[Link]
+NamePolicy=
+Name=wlan0
+MACAddressPolicy=persistent
