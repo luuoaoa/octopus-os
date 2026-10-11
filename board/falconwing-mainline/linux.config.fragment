@@ -80,7 +80,9 @@ CONFIG_DEBUG_INFO_NONE=y
 # CONFIG_DETECT_HUNG_TASK is not set
 # CONFIG_FTRACE is not set
 # CONFIG_DEBUG_FS is not set
-# CONFIG_PERF_EVENTS is not set
+# perf events: perf (in the image) samples on the timer (the ARM926 has
+# no counters for it) - the CPU's profile, kernel and user, on the device.
+CONFIG_PERF_EVENTS=y
 # CONFIG_BLK_DEV_INTEGRITY is not set
 # CONFIG_TASKSTATS is not set
 

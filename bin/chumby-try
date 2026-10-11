@@ -1,0 +1,157 @@
+#!/bin/sh
+# Try builds on a running Chumby One without reflashing it, and measure.
+#
+#   bin/chumby-try HOST push PATH...   run this build's PATH (e.g.
+#                     /usr/bin/chumby-toasters, /usr/lib/libchumby.so.1)
+#                     on the Chumby instead of the image's: an unstripped
+#                     copy (named functions in perf) in its RAM (/tmp/try),
+#                     bind-mounted over the read-only root's
+#   bin/chumby-try HOST reset          back to the image's files (as a
+#                     reboot does; restarts the UI session)
+#   bin/chumby-try HOST restart        restart the UI session (to take a
+#                     pushed compositor, shell or library)
+#   bin/chumby-try HOST perf [S]       S seconds (default 10) of the whole
+#                     system sampled (perf, on the timer), the busiest
+#                     functions by process and library
+#   bin/chumby-try HOST bench [NAME...] (the screen lit first) CPU per process and the system's
+#                     load in scenarios (default: all): idle (the clock in
+#                     front), saver (over FM Radio), stream (Internet
+#                     Radio playing, the clock in front), podcast (playing,
+#                     Podcasts in front), saver-stream (the saver over a
+#                     stream)
+#
+# The image needs perf (configs/falconwing_mainline_defconfig). Load is
+# shares of the ticks counted, not of wall time: this kernel counts fewer
+# ticks than pass while idle. Key auth, else password "root"
+# (CHUMBY_SSH_PASSWORD), as bin/update-chumby.sh.
+set -eu
+
+HOST="${1:-}"
+CMD="${2:-}"
+[ -n "$HOST" ] && [ -n "$CMD" ] || { sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+shift 2
+case "$HOST" in *@*) ;; *) HOST="root@${HOST}" ;; esac
+
+TOP="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="${TOP}/output-falconwing-mainline"
+
+SSH_CTL="${TMPDIR:-/tmp}/chumby-try-$$.sock"
+SSH_OPTS="-o ControlMaster=auto -o ControlPath=${SSH_CTL} -o ControlPersist=60s \
+-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+-o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=30"
+on() { ssh ${SSH_OPTS} "${HOST}" "$@"; }
+trap 'ssh ${SSH_OPTS} -O exit "${HOST}" 2>/dev/null || true; rm -f "${SSH_CTL}"' EXIT
+if ! SSH_ASKPASS_REQUIRE=never ssh ${SSH_OPTS} -o BatchMode=yes "${HOST}" true 2>/dev/null; then
+	command -v sshpass >/dev/null 2>&1 || { echo "key auth failed and sshpass is not installed" >&2; exit 1; }
+	SSH_ASKPASS_REQUIRE=never sshpass -p "${CHUMBY_SSH_PASSWORD:-root}" \
+		ssh ${SSH_OPTS} -o PubkeyAuthentication=no "${HOST}" true
+fi
+
+# This build's unstripped copy of a target path: staging has the libraries
+# as built, a package's build directory its programs.
+unstripped() {
+	# (staging links to the build container's /work path: the sysroot.)
+	for sysroot in "${OUT}"/host/*-linux-*/sysroot; do
+		if [ -f "${sysroot}$1" ]; then
+			echo "${sysroot}$1"
+			return
+		fi
+	done
+	find "${OUT}/build" -name "$(basename "$1")" -type f -perm -u+x \
+		-not -name '.*' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-
+}
+
+case "$CMD" in
+push)
+	for p in "$@"; do
+		src=$(unstripped "$p")
+		[ -n "$src" ] || { echo "no build of $p under ${OUT}" >&2; exit 1; }
+		on "mkdir -p /tmp/try$(dirname "$p") && cat > /tmp/try$p.new && chmod 755 /tmp/try$p.new &&
+		    { ! mountpoint -q $p 2>/dev/null || umount $p; } &&
+		    mv /tmp/try$p.new /tmp/try$p && mount --bind /tmp/try$p $p" < "$src"
+		echo "$p <- ${src#${TOP}/} ($(du -h "$src" | cut -f1))"
+	done
+	;;
+reset)
+	# The session uses them: stopped first, started again after (a
+	# file still held elsewhere is let go of lazily).
+	on 'systemctl stop chumby-session
+	    grep " /usr/" /proc/mounts | cut -d" " -f2 | while read -r m; do umount "$m" 2>/dev/null || umount -l "$m"; done
+	    rm -rf /tmp/try
+	    systemctl start chumby-session
+	    echo "back to the image'"'"'s files ($(grep -c " /usr/" /proc/mounts) left mounted)"'
+	;;
+restart)
+	on 'systemctl restart chumby-session && echo "session restarted"'
+	;;
+perf)
+	secs="${1:-10}"
+	on "perf record -a -F 250 -o /tmp/perf.data -q -- sleep ${secs} 2>/dev/null &&
+	    echo '-- by process and library:' &&
+	    perf report -i /tmp/perf.data --stdio --sort comm,dso --percent-limit 0.5 2>/dev/null |
+	    grep -v '^#' | grep -v '^$' | head -25 &&
+	    echo '-- busiest functions (idle left out):' &&
+	    perf report -i /tmp/perf.data --stdio --sort comm,dso,sym 2>/dev/null |
+	    grep -v '^#' | grep -v '^$' | grep -v default_idle_call | head -30; rm -f /tmp/perf.data"
+	;;
+bench)
+	on "SCENARIOS='$*' sh -s" <<'EOF'
+export XDG_RUNTIME_DIR=/run/chumby WAYLAND_DISPLAY=wayland-0
+C=/run/chumby/shell.cmd
+T=15
+STATION=$(grep -v '^[#[]' /usr/share/chumby/streams.conf | grep -m1 '|' | cut -d'|' -f2 | tr -d ' ')
+EPISODE=$(head -1 "$(ls /var/lib/chumby/podcasts/*.feed 2>/dev/null | head -1)" 2>/dev/null | cut -f4)
+
+snap() {	# pid ticks name
+	for p in /proc/[0-9]*; do
+		awk '{ c = $2; for (i = 3; i <= NF && c !~ /\)$/; i++) c = c " " $i;
+		       print $1, $(i + 11) + $(i + 12), c }' $p/stat 2>/dev/null
+	done
+}
+ticks() { awk '/^cpu / { s = 0; for (i = 2; i <= 9; i++) s += $i; print s, $5 + $6 }' /proc/stat; }
+measure() {
+	snap > /tmp/b0; set -- $(ticks); t0=$1 i0=$2
+	sleep $T
+	snap > /tmp/b1; set -- $(ticks); t1=$1 i1=$2
+	tot=$((t1 - t0))
+	echo "== $SC: busy $(( (tot - (i1 - i0)) * 100 / tot ))%"
+	awk -v T=$tot 'NR == FNR { a[$1] = $2; next }
+	     ($1 in a) && ($2 - a[$1]) * 100 / T >= 1 { printf "   %3d%% %s\n", ($2 - a[$1]) * 100 / T, substr($0, index($0, $3)) }' \
+		/tmp/b0 /tmp/b1 | sort -rn | head -6
+}
+quiet() { echo active > $C; chumby-stream stop 2>/dev/null; radio off >/dev/null 2>&1; }
+# The screen on (the snooze button's way: past the screen-off hours too):
+# a dark screen gets no saver, and draws nothing.
+lit() { [ "$(cat /sys/class/backlight/backlight/bl_power 2>/dev/null)" = 0 ] || { echo snooze > $C; sleep 2; }; }
+lit
+front() { echo "launch $1" > $C; sleep ${2:-12}; }
+saver() {
+	echo idle > $C; sleep 4
+	[ -n "$(pidof chumby-toasters)" ] || echo "   (no saver: see the journal, \"no screen saver: ...\")"
+}
+
+[ -n "$SCENARIOS" ] || SCENARIOS="idle saver stream podcast saver-stream"
+for SC in $SCENARIOS; do
+	quiet
+	case $SC in
+	idle)	front Clock; measure ;;
+	saver)	front "FM Radio"; saver; measure ;;
+	stream)	chumby-stream "$STATION" Bench 2>/dev/null; front Clock 15; measure ;;
+	podcast)
+		kill $(pidof chumby-podcasts) 2>/dev/null
+		chumby-stream "$EPISODE" Bench 10000000 2>/dev/null; sleep 3
+		front Podcasts 15; measure ;;
+	saver-stream)
+		chumby-stream "$STATION" Bench 2>/dev/null; front "FM Radio" 15; saver; measure ;;
+	*)	echo "== $SC: unknown" ;;
+	esac
+done 2>&1 | grep -v "ALSA lib"
+quiet
+echo "launch Clock" > $C
+EOF
+	;;
+*)
+	echo "unknown command: $CMD" >&2
+	exit 2
+	;;
+esac

@@ -189,6 +189,27 @@ on the dark screen.
 **Clock**: HH:MM (one redraw a minute), date, the next alarm; alarms in
 `/var/lib/chumby/alarms.conf` (`06:30 MTWTF-- on`, editable by hand).
 
+## Measuring CPU, without reflashing
+
+The ARM926 is where costs show: measure there, not in QEMU (no cache or
+timing model; this CPU's VIVT caches are flushed at every process switch).
+`bin/chumby-try HOST ...` does it over SSH:
+
+- `push /usr/bin/chumby-toasters /usr/lib/libchumby.so.1 ...` runs this
+  build's unstripped copies (named functions in perf) from the Chumby's RAM,
+  bind-mounted over the read-only root's; `restart` restarts the UI session
+  to take them; `reset` (or a reboot) goes back to the image's.
+- `perf [S]` samples the whole system S seconds (perf is in the image, the
+  kernel has `CONFIG_PERF_EVENTS`; timer sampling, the ARM926 has no
+  counters for it): time by process and library, then by function.
+- `bench [idle saver stream podcast saver-stream]` lights the screen and
+  runs scenarios, CPU per process and the system's load in each.
+
+`CHUMBY_REFR_DEBUG=1` (any app: its redraws a second, pixels, time) and
+`CHUMBY_WM_DEBUG=1` (chumby-wm: frames a second, their time) log to the
+journal. `/proc/stat`'s idle ticks undercount here (tickless idle):
+compare shares of the ticks counted, as `bench` does.
+
 ## Unverified until it runs on hardware
 
 - Panel dot clock (vendor: 3.3 MHz ≈ 29 Hz) and LCD reset polarity.

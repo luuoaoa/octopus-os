@@ -98,6 +98,13 @@ BR2_PACKAGE_ALSA_UTILS_APLAY=y
 # BR2_PACKAGE_IFUPDOWN_SCRIPTS is not set
 
 # Root filesystem: a read-only squashfs. post-image.sh puts it on the p2
+# Profiling on the device: perf (timer sampling; the kernel's
+# CONFIG_PERF_EVENTS), elfutils for it to read symbols. bin/chumby-try runs
+# unstripped builds in place of the image's for named functions.
+BR2_PACKAGE_ELFUTILS=y
+BR2_PACKAGE_LINUX_TOOLS=y
+BR2_PACKAGE_LINUX_TOOLS_PERF=y
+
 # "carrier" ext4 with the early boot (board/falconwing-mainline/carrier/
 # sbin/init-ram loop-mounts it as the root) and the persistent /var.
 # zstd: close to xz in size, several times faster to unpack on demand.
