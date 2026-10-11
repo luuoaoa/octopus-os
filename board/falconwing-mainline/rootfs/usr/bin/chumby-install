@@ -23,6 +23,18 @@ IMAGE_APPS=/usr/share/chumby/apps
 die() { echo "chumby-install: $*" >&2; exit 1; }
 conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$2" | head -1; }
 
+# What an ELF program runs on: 32/64-bit, the CPU, and for 32-bit ARM the
+# float ABI (soft: the Chumby's ARMv5; hard: a Pi in 32 bits). Empty if it
+# isn't ELF (a script runs anywhere).
+elf_sig() {
+	[ "$(od -An -c -N4 "$1" 2>/dev/null | tr -d ' ')" = "177ELF" ] || return 0
+	cls=$(od -An -tu1 -j4 -N1 "$1" | tr -d ' ')
+	mach=$(od -An -tu2 -j18 -N2 "$1" | tr -d ' ')
+	abi=
+	[ "$cls" = 1 ] && [ "$mach" = 40 ] && abi=$(( $(od -An -tu4 -j36 -N4 "$1" | tr -d ' ') & 0x600 ))
+	echo "$cls/$mach/$abi"
+}
+
 [ "$(id -u)" = 0 ] || die "run as root"
 mkdir -p "$APPS"
 
@@ -36,6 +48,9 @@ install_dir() {	# a bundle's directory, unpacked
 	[ -n "$exec" ] || die "no Exec in app.conf"
 	case "$exec" in /* | *..*) die "Exec must be a path inside the bundle" ;; esac
 	[ -f "$src/$exec" ] || die "Exec $exec isn't in the bundle"
+	sig=$(elf_sig "$src/$exec")
+	[ -z "$sig" ] || [ "$sig" = "$(elf_sig /bin/busybox)" ] ||
+		die "$exec is built for another kind of board (an SDK for this one: docs/sdk-build.md)"
 	grep -lsE "^[[:space:]]*Id[[:space:]]*=[[:space:]]*$id[[:space:]]*\$" "$IMAGE_APPS"/*.app >/dev/null &&
 		die "Id $id is one of the image's apps"
 	tmp="$APPS/.new-$id"

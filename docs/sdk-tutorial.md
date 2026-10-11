@@ -2,8 +2,9 @@
 
 In this tutorial you build **One Song**: an app with one big button that
 plays a song from the internet, or stops it. You'll try it in the
-simulator on your PC, then install it on a Chumby. It takes about 15
-minutes, and needs neither buildroot nor a Chumby until the last step.
+simulator on your PC, then install it on a device running the Chumby's
+UI - a Raspberry Pi, or the Chumby One itself. It takes about 15 minutes,
+and needs no device until the last step.
 
 What you'll learn:
 - the shape of an app (an LVGL screen, the main loop, day and night
@@ -12,9 +13,11 @@ What you'll learn:
   app is in the background;
 - bundles: building, packing, the simulator, installing.
 
-You need the SDK set up: Docker with the `chumby-sdk` and `chumby-sim`
-images, ARM emulation, and `chumby-app` on your PATH ([sdk.md](sdk.md),
-"Setting up").
+You need the SDK for your board, built once with `sdk/make-sdk.sh`
+([sdk-build.md](sdk-build.md)), ARM emulation, and `chumby-app` on your
+PATH ([sdk.md](sdk.md), "Setting up"). `chumby-app` builds for a Raspberry
+Pi unless `CHUMBY_BOARD` says otherwise (`falconwing_mainline` for the
+Chumby One).
 
 ## 1. Start from the template
 
@@ -235,7 +238,7 @@ Things to try:
 - Open the volume control (the speaker icon): its stop button stops your
   song, and your app notices within half a second.
 
-## 5. Pack and install it on a Chumby
+## 5. Pack and install it on your device
 
 ```sh
 chumby-app pack                 # -> OneSong.chumbyapp (a few KB)
@@ -243,12 +246,15 @@ chumby-app pack                 # -> OneSong.chumbyapp (a few KB)
 
 Then either:
 - **USB:** copy `OneSong.chumbyapp` into a folder named `chumby-apps` on a
-  FAT-formatted stick, and plug it into the Chumby. One Song appears in the
+  FAT-formatted stick, and plug it into the device. One Song appears in the
   Home menu.
-- **Network:** `chumby-app deploy 192.168.1.178` (your Chumby's address; it
-  asks for the root password, `root` by default).
+- **Network:** `chumby-app deploy <the device's address>` (SSH, as root:
+  turn the SSH server on in Settings > Network first, which shows the
+  address and the password).
 
-Remove it with `chumby-install --remove OneSong` on the Chumby.
+Remove it with `chumby-install --remove OneSong` on the device. A bundle
+runs only on the kind of board its SDK was built for: `chumby-install`
+says so if it's another's.
 
 ## Where next
 

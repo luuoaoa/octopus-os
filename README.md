@@ -105,6 +105,9 @@ fonts, sound and system helpers.
   real compositor, shell and apps, running under QEMU as a window on your
   desktop. Package them as `.chumbyapp` bundles, installed from a USB stick
   or with `chumby-app deploy`.
+- **[docs/sdk-build.md](docs/sdk-build.md):** building the SDK yourself,
+  with `sdk/make-sdk.sh`: for a Raspberry Pi by default, the Chumby One, or
+  a board of your own.
 - **[docs/sdk-tutorial.md](docs/sdk-tutorial.md):** a walk-through building
   One Song, an app that plays a song from the internet.
 - **[docs/writing-chumby-apps.md](docs/writing-chumby-apps.md):** how the

@@ -1,29 +1,36 @@
 # The Chumby SDK: apps without buildroot
 
-Write an app for the Chumby on any Linux PC with Docker, see it in a
-simulator, and install it on a Chumby, from a USB stick or over the network,
-without building the whole image. A step-by-step walk-through:
-[sdk-tutorial.md](sdk-tutorial.md). How apps work on the Chumby (the UI,
-sound, the traps): [writing-chumby-apps.md](writing-chumby-apps.md).
+Write an app for the Chumby's UI on any Linux PC with Docker, see it in a
+simulator, and install it on a device, from a USB stick or over the
+network. The SDK targets one board: by default any 64-bit Raspberry Pi
+running the Chumby's UI (`raspad`), or the Chumby One itself
+(`falconwing_mainline`), or a board of your own. You build it once, from
+this repository: [sdk-build.md](sdk-build.md). Then a step-by-step
+walk-through of an app: [sdk-tutorial.md](sdk-tutorial.md). How apps work
+(the UI, sound, the traps): [writing-chumby-apps.md](writing-chumby-apps.md).
 
 ## What's in it
 
 | | |
 |---|---|
-| `chumby-sdk` (Docker image, x86-64) | buildroot's SDK for the Chumby: `arm-linux-gcc`, the device's libraries and headers (libchumby with LVGL, pixman, ALSA, libcurl, ...), `pkg-config` set up for them; `chumby-app`; the examples |
-| `chumby-sim` (Docker image, ARMv5) | the Chumby's own root filesystem, to run its UI on a PC through QEMU |
+| `chumby-sdk:BOARD` (Docker image, x86-64) | buildroot's SDK for the board: its cross compiler, the device's libraries and headers (libchumby with LVGL, pixman, ALSA, libcurl, ...), `pkg-config` set up for them; `chumby-app`; the examples |
+| `chumby-sim:BOARD` (Docker image, the board's CPU) | the board's own root filesystem, to run its UI on a PC through QEMU |
 | `sdk/chumby-app` | the one command: `new`, `build`, `pack`, `sim`, `deploy` |
 | `sdk/examples/hello` | the template `chumby-app new` copies |
 | `sdk/examples/onesong` | One Song: play a song online, the tutorial's app |
 
 ## Setting up
 
-- **Docker.** Load the two images (or build them, below):
-  `zstd -dc chumby-sdk-images.tar.zst | docker load`.
+- **Docker**, and the SDK's two images for your board, built with
+  `sdk/make-sdk.sh` ([sdk-build.md](sdk-build.md)).
+- **Which board:** `chumby-app` uses `CHUMBY_BOARD` (the images' tag),
+  `raspad` if it's unset: `export CHUMBY_BOARD=falconwing_mainline` for the
+  Chumby One. A bundle runs only on the kind of board it was built for
+  (`chumby-install` checks).
 - **ARM emulation for the simulator:** QEMU user emulation registered with
   binfmt_misc and the `F` flag. Distribution packages (`qemu-user-static`,
   `qemu-user-binfmt`) do this; otherwise, once per boot:
-  `docker run --privileged --rm tonistiigi/binfmt --install arm`.
+  `docker run --privileged --rm tonistiigi/binfmt --install arm,arm64`.
 - **A Wayland desktop** for `chumby-app sim` (GNOME, KDE Plasma and sway are
   all Wayland by default now).
 - **`chumby-app` on your PATH:** copy `sdk/chumby-app` into `~/bin`.
@@ -113,22 +120,13 @@ in it, so open it from the Home menu. The mouse is the finger.
 - **`chumby-app sim-shot FILE`** runs it headless and saves a screenshot
   with your app in front (`FILE.ppm`), for scripts and tests.
 
-## For maintainers: making the SDK
+## Making the SDK
 
-The SDK comes from a Chumby build (`configs/falconwing_mainline_defconfig`):
-
-1. Build the image as usual (`bash docker-build.sh falconwing-mainline`).
-   It also makes `images/rootfs.tar`, for the simulator.
-2. In the build container, `make sdk` makes
-   `images/arm-buildroot-linux-gnueabi_sdk-buildroot.tar.gz` (the toolchain
-   and the sysroot, relocatable).
-3. `sh sdk/make-images.sh` builds the `chumby-sdk` and `chumby-sim` Docker
-   images from those two files. To hand them out:
-   `docker save chumby-sdk chumby-sim | zstd > chumby-sdk-images.tar.zst`.
-
-An SDK goes with the image it was made from: libchumby's interface
-(`chumby.h`) can change between images. Apps built against an older one
-keep working as long as the functions they use stay.
+See [sdk-build.md](sdk-build.md): `sdk/make-sdk.sh [BOARD]` builds the
+board's image and buildroot's SDK from source, then the two images. An SDK
+goes with the image it was made from: libchumby's interface (`chumby.h`)
+can change between images. Apps built against an older one keep working
+as long as the functions they use stay.
 
 ## Design notes
 

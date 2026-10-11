@@ -14,15 +14,21 @@
 #   chumby-app deploy HOST       install <Id>.chumbyapp on a Chumby (SSH)
 #   chumby-app shell             a shell with the SDK, in this directory
 #
-# On the PC it needs Docker (and SSH for deploy): build, pack and new run in
-# the chumby-sdk image, sim in chumby-sim (the device's own software, ARM,
-# through QEMU: register it once with
-#   docker run --privileged --rm tonistiigi/binfmt --install arm
+# On the PC it needs Docker (and SSH for deploy), and the SDK's images for
+# the board (CHUMBY_BOARD, raspad by default), built with sdk/make-sdk.sh
+# (docs/sdk-build.md): build, pack and new run in chumby-sdk:BOARD, sim in
+# chumby-sim:BOARD (the board's own software, ARM, through QEMU: register
+# it once with
+#   docker run --privileged --rm tonistiigi/binfmt --install arm,arm64
 # if "chumby-app sim" says "exec format error").
 set -eu
 
-SDK_IMAGE=${CHUMBY_SDK_IMAGE:-chumby-sdk}
-SIM_IMAGE=${CHUMBY_SIM_IMAGE:-chumby-sim}
+# The board the SDK was built for (sdk/make-sdk.sh BOARD): its images are
+# tagged with it. raspad (any 64-bit Raspberry Pi) by default;
+# falconwing_mainline is the Chumby One.
+BOARD=${CHUMBY_BOARD:-raspad}
+SDK_IMAGE=${CHUMBY_SDK_IMAGE:-chumby-sdk:$BOARD}
+SIM_IMAGE=${CHUMBY_SIM_IMAGE:-chumby-sim:$BOARD}
 
 usage() { sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 die() { echo "chumby-app: $*" >&2; exit 1; }
@@ -31,6 +37,8 @@ conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$2" | head -1; 
 # In the SDK image, or on the PC (then: into it, for what needs the SDK).
 in_sdk() { [ -n "${CHUMBY_SDK:-}" ] && [ -d "$CHUMBY_SDK" ]; }
 sdk_run() {
+	docker image inspect "$SDK_IMAGE" >/dev/null 2>&1 ||
+		die "no $SDK_IMAGE image: build it with sdk/make-sdk.sh $BOARD (docs/sdk-build.md)"
 	docker run --rm -i $( [ -t 0 ] && echo -t ) -u "$(id -u):$(id -g)" \
 		-v "$PWD:/work" -w /work "$SDK_IMAGE" chumby-app "$@"
 }
@@ -63,7 +71,7 @@ new)
 	;;
 build)
 	in_sdk || { sdk_run build "$@"; exit; }
-	make CC="$CHUMBY_SDK/bin/arm-linux-gcc" \
+	make CC="$CHUMBY_SDK/bin/${CHUMBY_CROSS}gcc" \
 		PKG_CONFIG="$CHUMBY_SDK/bin/pkg-config" "$@"
 	;;
 pack)
