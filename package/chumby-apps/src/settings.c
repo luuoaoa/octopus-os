@@ -4,6 +4,8 @@
  * category's options to the right of it.
  *
  *   Appearance   night mode: auto (by the policy's hours), on, off
+ *   Screen saver which (none, or one in /usr/lib/chumby/savers), after how
+ *                long without input; a preview
  *   Time         the time zone
  *   Network      the SSH server (off by default; the first time on, a
  *                random root password, shown here)
@@ -19,9 +21,11 @@
  */
 
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <signal.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +39,7 @@
 #define SSH_PW_FILE	"/var/lib/chumby-root/ssh-password"
 #define TZ_FILE		"/etc/timezone"
 #define CAT_W		118		/* the category list */
-#define CAT_H		40
+#define CAT_H		36		/* five fit: 5 x (36 + 2) + 8 <= 208 */
 #define PAD		8
 #define PANEL_W		(CHUMBY_APP_W - CAT_W)
 
@@ -47,6 +51,7 @@ struct category {
 };
 
 static void appearance_build(lv_obj_t *panel);
+static void saver_build(lv_obj_t *panel);
 static void time_build(lv_obj_t *panel);
 static void network_build(lv_obj_t *panel);
 static void sound_build(lv_obj_t *panel);
@@ -54,6 +59,7 @@ static bool sound_applies(void);
 
 static const struct category categories[] = {
 	{ "Appearance", CHUMBY_ICON_SUN, NULL, appearance_build },
+	{ "Saver", LV_SYMBOL_IMAGE, NULL, saver_build },
 	{ "Time", CHUMBY_ICON_CLOCK, NULL, time_build },
 	{ "Network", LV_SYMBOL_WIFI, NULL, network_build },
 	{ "Sound", LV_SYMBOL_AUDIO, sound_applies, sound_build },
@@ -82,7 +88,7 @@ static lv_obj_t *note(lv_obj_t *parent, const char *text)
 {
 	lv_obj_t *l = lv_label_create(parent);
 
-	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_SMALL), 0);
+	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_CAPTION), 0);
 	lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
 	lv_obj_set_width(l, LV_PCT(100));
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
@@ -191,7 +197,107 @@ static void appearance_build(lv_obj_t *p)
 			chosen = i;
 	heading(p, "Night mode");
 	choice_buttons(p, mode_names, 3, chosen, mode_cb);
-	note(p, "Auto: dark and warm at night, by the hours in /etc/chumby/policy.conf.");
+}
+
+/* ------------------------------------------------------------------ */
+/* Screen saver                                                       */
+
+#define SAVERS		"/usr/lib/chumby/savers"
+#define MAX_SAVERS	8
+
+static char savers[MAX_SAVERS + 1][32];	/* [0]: "none" */
+static int n_savers;
+static const int minutes[] = { 1, 2, 5, 10, 15, 30, 60 };
+#define N_MINUTES	(int)(sizeof(minutes) / sizeof(minutes[0]))
+
+static void saver_cb(lv_event_t *e)
+{
+	int i = lv_dropdown_get_selected(lv_event_get_target(e));
+
+	if (i < n_savers)
+		chumby_setting_set("saver", savers[i]);
+}
+
+static void minutes_cb(lv_event_t *e)
+{
+	char v[8];
+
+	snprintf(v, sizeof(v), "%d", minutes[lv_dropdown_get_selected(lv_event_get_target(e))]);
+	chumby_setting_set("saver_minutes", v);
+}
+
+static void preview_cb(lv_event_t *e)
+{
+	(void)e;
+	chumby_shell_command("saver");	/* the shell starts it; a tap ends it */
+}
+
+static lv_obj_t *dropdown_in(lv_obj_t *r, const char *opts, int sel, int w, lv_event_cb_t cb)
+{
+	lv_obj_t *dd = lv_dropdown_create(r);
+
+	lv_dropdown_set_options(dd, opts);
+	lv_dropdown_set_selected(dd, sel);
+	lv_obj_set_width(dd, w);
+	lv_obj_set_style_text_font(dd, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_add_event_cb(dd, cb, LV_EVENT_VALUE_CHANGED, NULL);
+	return dd;
+}
+
+static void saver_build(lv_obj_t *p)
+{
+	const struct chumby_policy *pol = chumby_policy();
+	char opts[(MAX_SAVERS + 1) * 34] = "None", mopts[N_MINUTES * 12] = "";
+	struct dirent *e;
+	DIR *d;
+	lv_obj_t *r, *b, *l;
+	int i, sel = 0, msel = 2;
+
+	/* Every program in SAVERS: its name, capitalised ("toasters": Toasters). */
+	n_savers = 1;
+	snprintf(savers[0], sizeof(savers[0]), "none");
+	if ((d = opendir(SAVERS))) {
+		while ((e = readdir(d)) && n_savers <= MAX_SAVERS) {
+			char path[300], name[32];
+
+			snprintf(path, sizeof(path), SAVERS "/%s", e->d_name);
+			if (e->d_name[0] == '.' || access(path, X_OK) != 0 || strlen(e->d_name) > 30)
+				continue;
+			snprintf(savers[n_savers], sizeof(savers[0]), "%s", e->d_name);
+			snprintf(name, sizeof(name), "%s", e->d_name);
+			name[0] = toupper((unsigned char)name[0]);
+			strcat(opts, "\n");
+			strcat(opts, name);
+			if (!strcmp(pol->saver, e->d_name))
+				sel = n_savers;
+			n_savers++;
+		}
+		closedir(d);
+	}
+	for (i = 0; i < N_MINUTES; i++) {
+		char m[12];
+
+		snprintf(m, sizeof(m), "%s%d min", i ? "\n" : "", minutes[i]);
+		strcat(mopts, m);
+		if (minutes[i] == pol->saver_minutes)
+			msel = i;
+	}
+
+	heading(p, "Screen saver");
+	r = row(p, "Saver");
+	dropdown_in(r, opts, sel, 116, saver_cb);
+	r = row(p, "After");
+	dropdown_in(r, mopts, msel, 116, minutes_cb);
+	b = lv_button_create(p);
+	lv_obj_set_size(b, 96, 36);
+	lv_obj_set_style_radius(b, 8, 0);
+	lv_obj_set_style_shadow_width(b, 0, 0);
+	chumby_glossy(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	l = lv_label_create(b);
+	lv_obj_set_style_text_color(l, chumby_on_accent(), 0);
+	lv_label_set_text(l, "Preview");
+	lv_obj_center(l);
+	lv_obj_add_event_cb(b, preview_cb, LV_EVENT_CLICKED, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -285,12 +391,12 @@ static void time_build(lv_obj_t *p)
 	free(opts);
 	lv_roller_set_visible_row_count(tz_roller, 3);
 	lv_roller_set_selected(tz_roller, sel, LV_ANIM_OFF);
-	lv_obj_set_width(tz_roller, 104);
+	lv_obj_set_width(tz_roller, 116);	/* "Johannesburg" */
 	lv_obj_set_style_text_font(tz_roller, chumby_font(CHUMBY_FONT_BODY), 0);
 	lv_obj_set_style_bg_color(tz_roller, chumby_color(CHUMBY_COLOR_ACCENT), LV_PART_SELECTED);
 	lv_obj_set_style_text_color(tz_roller, chumby_on_accent(), LV_PART_SELECTED);
 	b = lv_button_create(r);
-	lv_obj_set_size(b, 64, 40);
+	lv_obj_set_size(b, 56, 40);
 	lv_obj_set_style_radius(b, 8, 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
 	chumby_glossy(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
@@ -370,7 +476,6 @@ static void network_build(lv_obj_t *p)
 	r = row(p, "Allow logins");
 	ssh_switch = switch_in(r, ssh_on(), ssh_cb);
 	ssh_info = note(p, "");
-	lv_obj_set_style_text_font(ssh_info, chumby_font(CHUMBY_FONT_BODY), 0);
 	ssh_info_update();
 }
 
@@ -445,7 +550,7 @@ static void sound_build(lv_obj_t *p)
 	dd = lv_dropdown_create(r);
 	lv_dropdown_set_options(dd, opts);
 	lv_dropdown_set_selected(dd, sel);
-	lv_obj_set_width(dd, 128);
+	lv_obj_set_width(dd, 140);	/* "Speaker tuning" */
 	lv_obj_set_style_text_font(dd, chumby_font(CHUMBY_FONT_BODY), 0);
 	lv_obj_add_event_cb(dd, eq_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	note(p, "Bass enhancer: bass the ear fills in, sparing the small speakers.");
@@ -509,11 +614,12 @@ static void build(void)
 		lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
 		lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_CHECKED);
 		lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_ACCENT), LV_STATE_CHECKED);
-		lv_obj_set_style_pad_left(b, 6, 0);
+		lv_obj_set_style_pad_left(b, 4, 0);	/* room for "Appearance" */
+		lv_obj_set_style_pad_right(b, 2, 0);
 		lv_obj_set_flex_flow(b, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(b, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 				      LV_FLEX_ALIGN_CENTER);
-		lv_obj_set_style_pad_column(b, 6, 0);
+		lv_obj_set_style_pad_column(b, 4, 0);
 		l = lv_label_create(b);
 		lv_obj_set_style_text_font(l, chumby_icon_font(20), 0);
 		lv_label_set_text(l, categories[i].icon);

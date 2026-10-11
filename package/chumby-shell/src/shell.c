@@ -63,7 +63,7 @@
 #define AUDIO		"/usr/bin/chumby-audio"	/* who plays: see there */
 #define CALIBRATE	"/usr/bin/chumby-calibrate"
 #define SAVERS		"/usr/lib/chumby/savers"	/* screen savers: policy's "saver" */
-#define SAVER_IDLE_MS	(5 * 60 * 1000)	/* no input this long (as chumby-wm's) */
+#define WM_IDLE_MS	(60 * 1000)	/* chumby-wm says "idle" after this long */
 #define CAL_FILE	"/var/lib/chumby/touch.cal"	/* its result */
 #define RING_MAX_S	(10 * 60)	/* give up ringing after this */
 
@@ -1608,16 +1608,19 @@ static void screen_set(bool on)
 /* Screen saver                                                       */
 
 /*
- * The screen saver (policy.conf's "saver", from SAVERS: Flying Toasters by
- * default), over everything, after SAVER_IDLE_MS without input: chumby-wm
- * says "idle" (touches, the mouse, keys: it sees those), and the knob and
- * snooze button (ours) have been still as long.
+ * The screen saver (the policy's "saver", from SAVERS: Flying Toasters by
+ * default; Settings sets it), over everything, after "saver_minutes"
+ * without input: chumby-wm says "idle" after WM_IDLE_MS (touches, the
+ * mouse, keys: it sees those), we count on from there, and the knob and
+ * snooze button (ours) have been still as long. "saver" (the FIFO: Settings'
+ * preview) starts it now.
  * Not over the clock (that's what to look at, idle), a popup or menu, an
  * alarm, the calibration or a dark screen. Any input ends it ("active",
  * or ours), as an alarm does.
  */
 static pid_t saver_pid = -1;
 static bool wm_idle;
+static uint64_t wm_idle_since;	/* the last input chumby-wm saw, about */
 static uint64_t our_input_ms;	/* the knob or snooze button, last (0: never) */
 
 static void saver_stop(void)
@@ -1637,6 +1640,11 @@ static const char *saver_path(void)
 	return path;
 }
 
+static uint64_t saver_idle_ms(void)
+{
+	return chumby_policy()->saver_minutes * 60000ull;
+}
+
 /* Why not, if not (said to the journal when chumby-wm says "idle"). */
 static const char *saver_not_now(void)
 {
@@ -1650,7 +1658,9 @@ static const char *saver_not_now(void)
 		return "an alarm rings";
 	if (screen_applied != 1)
 		return "the screen is dark";
-	if (our_input_ms && mono_ms() - our_input_ms < SAVER_IDLE_MS)
+	if (mono_ms() - wm_idle_since < saver_idle_ms())
+		return "not idle long enough yet";
+	if (our_input_ms && mono_ms() - our_input_ms < saver_idle_ms())
 		return "the knob or snooze button moved lately";
 	if (!strcmp(chumby_policy()->saver, "none"))
 		return "none chosen (policy.conf: saver = none)";
@@ -2063,7 +2073,14 @@ static void command(const char *cmd)
 		menu_close();
 	} else if (!strcmp(cmd, "idle")) {	/* chumby-wm: no input a while */
 		wm_idle = true;
-		saver_maybe_start(true);
+		wm_idle_since = mono_ms() - WM_IDLE_MS;
+		saver_maybe_start(false);	/* (saver_timer_cb: again every 10 s) */
+	} else if (!strcmp(cmd, "saver")) {	/* now: Settings' preview */
+		char *argv[] = { (char *)chumby_policy()->saver, NULL };
+
+		if (saver_pid <= 0 && strcmp(chumby_policy()->saver, "none") &&
+		    access(saver_path(), X_OK) == 0)
+			saver_pid = spawn_app(saver_path(), argv, OOM_SAVER);
 	} else if (!strcmp(cmd, "active")) {	/* chumby-wm: and now some */
 		wm_idle = false;
 		saver_stop();

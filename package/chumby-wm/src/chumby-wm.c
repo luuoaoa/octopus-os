@@ -109,7 +109,9 @@
 #define APP_MENU	"chumby-menu"
 #define APP_CAL		"chumby-calibrate"
 #define APP_SAVER	"chumby-saver"	/* the screen saver: over everything */
-#define IDLE_MS		(5 * 60 * 1000)	/* no input this long: idle */
+/* No input this long: idle (the shell is told, and counts on from there
+ * to its screen saver's time: Settings, 1 minute or more). */
+#define IDLE_MS		(60 * 1000)
 #define CAL_DIR		"/var/lib/chumby"
 #define CAL_NAME	"touch.cal"
 #define CAL_FILE	CAL_DIR "/" CAL_NAME

@@ -63,6 +63,7 @@ typedef enum {
 	CHUMBY_FONT_XL,		/* Nimbus 35: big values */
 	CHUMBY_FONT_HUGE,	/* Nimbus 35 at 2x: clock */
 	CHUMBY_FONT_MEDIUM,	/* Nimbus 14 at 2x (28 px): mid-size values */
+	CHUMBY_FONT_CAPTION,	/* Nimbus 12: subtext, explanations (smaller than the body) */
 	CHUMBY_FONT_COUNT
 } chumby_font_t;
 
@@ -90,6 +91,7 @@ struct chumby_policy {
 	int alarm_volume;	/* minimum volume while ringing, percent */
 	char saver[32];		/* the screen saver: /usr/lib/chumby/savers/<this>,
 				 * "none" for none; default toasters */
+	int saver_minutes;	/* without input this long, it starts; default 5 */
 };
 
 typedef void (*chumby_mode_cb_t)(chumby_mode_t mode, void *user);

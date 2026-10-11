@@ -57,6 +57,7 @@ static struct chumby_policy policy = {
 	.snooze_minutes = 9,
 	.alarm_volume = 60,
 	.saver = "toasters",
+	.saver_minutes = 5,
 };
 
 static int parse_hhmm(const char *s, int def)
@@ -99,6 +100,8 @@ static void policy_load_file(const char *path)
 			policy.snooze_minutes = atoi(val);
 		else if (!strcmp(key, "alarm_volume"))
 			policy.alarm_volume = atoi(val);
+		else if (!strcmp(key, "saver_minutes") && atoi(val) > 0)
+			policy.saver_minutes = atoi(val);
 		else if (!strcmp(key, "saver") && !strchr(val, '/'))
 			snprintf(policy.saver, sizeof(policy.saver), "%.31s", val);
 	}
@@ -276,7 +279,7 @@ chumby_mode_t chumby_mode(void)
 }
 
 /* Rockbox's Nimbus bitmap fonts, generated from the BDFs in fonts/ at build time. */
-extern lv_font_t nimbus_14, nimbus_19, nimbus_35, nimbus_35x2, nimbus_14x2;
+extern lv_font_t nimbus_12, nimbus_14, nimbus_19, nimbus_35, nimbus_35x2, nimbus_14x2;
 
 static const lv_font_t *fonts[CHUMBY_FONT_COUNT];
 
@@ -295,6 +298,7 @@ static void fonts_load(void)
 	fonts[CHUMBY_FONT_XL] = nimbus(&nimbus_35, &lv_font_montserrat_28);
 	fonts[CHUMBY_FONT_HUGE] = nimbus(&nimbus_35x2, &lv_font_montserrat_28);
 	fonts[CHUMBY_FONT_MEDIUM] = nimbus(&nimbus_14x2, &lv_font_montserrat_28);
+	fonts[CHUMBY_FONT_CAPTION] = nimbus(&nimbus_12, &lv_font_montserrat_14);
 }
 
 extern lv_font_t chumby_icons_14, chumby_icons_20, chumby_icons_28, chumby_icons_42;

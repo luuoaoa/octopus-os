@@ -1,7 +1,7 @@
 Nimbus bitmap fonts from Rockbox (https://github.com/Rockbox/rockbox,
-fonts/), unmodified: 14-Nimbus.bdf, 19-Nimbus.bdf, 35-Nimbus.bdf.
-Rockbox is GPL-2.0-or-later; the BDFs' own notices: 14 "Public domain
-font. Share and enjoy.", 19 and 35 "Copyright (c) 2006/2010 Alexander
+fonts/), unmodified: 12-Nimbus.bdf (captions), 14-Nimbus.bdf,
+19-Nimbus.bdf, 35-Nimbus.bdf. Rockbox is GPL-2.0-or-later; the BDFs' own
+notices: 12 and 14 "Public domain font. Share and enjoy.", 19 and 35 "Copyright (c) 2006/2010 Alexander
 Levin". Bitmap renderings of URW's Nimbus Sans.
 
 bdf2lvgl.py turns them into LVGL fonts at build time (see ../Makefile);

@@ -209,7 +209,7 @@ mute
 lit
 front() { say "launch $1"; sleep ${2:-12}; }
 saver() {
-	say idle; sleep 4
+	say saver; sleep 4
 	ls -l /proc/[0-9]*/exe 2>/dev/null | grep -q /usr/lib/chumby/savers/ || echo "   (no saver: see the journal, \"no screen saver: ...\")"
 }
 
