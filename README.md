@@ -1,239 +1,165 @@
-# pifansrf
+# Chumby One, reborn
 
-A minimal Raspberry Pi Zero / Zero W image whose rootfs lives
-**entirely in RAM**. The SD card holds the kernel + a compressed
-cpio.lz4 initramfs on a small read-only FAT, plus a 512 MiB ext4
-partition for the few daemons that genuinely need persistence.
-Everything else is tmpfs.
+A new firmware for the **Chumby One** (2009): the Wi-Fi bedside clock and
+internet radio with a 320x240 touchscreen, a volume knob and a snooze bar
+on top. Everything is replaced except the stock bootloader: a mainline
+**Linux 6.19** kernel, a buildroot userland with systemd, a Wayland
+compositor, and a set of apps written for the little ARM9.
 
-A single image boots both the Pi Zero W and the non-W Pi Zero: both
-`bcm2708-rpi-zero-w.dtb` and `bcm2708-rpi-zero.dtb` are shipped on the
-FAT and the bootloader picks the right one for the detected board.
-Note the non-W Zero has no onboard WiFi — give it a USB WiFi dongle
-(lands on `wl*`, configured exactly like the Zero W) or a USB ethernet
-adapter (lands on `en*`/`eth*` via `40-wired.network`); otherwise it
-boots fine but has no network.
+```
+Freescale i.MX23   one ARM926EJ-S core, 454 MHz, no FPU
+64 MB RAM          320x240 resistive touchscreen, 18-bit panel
+FM tuner (QN8005)  built-in audio codec, speaker + headphones
+microSD            holds everything; USB for Wi-Fi
+```
 
-## Why this is interesting
+## What it does
 
-- **Stateless by default.** Every boot is byte-for-byte identical. There's
-  no `/etc` to drift, no package manager to break, no orphaned config left
-  behind by a half-finished `apt upgrade`. If something feels wrong, power-
-  cycle and you're back to a known-good state.
-- **The SD card barely gets written.** `/boot` is mounted read-only most of
-  the time and only flips to rw during an update. `/var` is 512 MiB of
-  ext4 mounted with `noatime,commit=60` — it sees writes, but only from
-  daemons that explicitly opted into persistence.
-- **A "factory reset" is `rm /dev/mmcblk0p2`.** Delete the partition (or
-  just `mkfs.ext4 /dev/mmcblk0p2` over it), reboot, and `create-var-
-  partition.service` will recreate it on first boot.
-- **OTA upgrade is rsync.** Push a new kernel + rootfs.cpio.lz4 to `/boot`
-  over SSH, reboot — no overlay file system, no A/B partition gymnastics,
-  no mid-flash bricks. The system you wrote into RAM at boot can't be
-  damaged by a botched update of the SD card files it isn't currently
-  reading from.
-- **Boot fast.** lz4-compressed initramfs decompresses ~3× faster than
-  zstd on ARMv6 (the trade is a larger file on the FAT, immaterial with
-  400+ MB free), and there's no rootfs disk mount to fsck.
+- **Clock with alarms.** Big date, alarms in a text file, snooze; night
+  mode with a dim, warm palette. The brightness is remembered per mode.
+- **FM radio** with RDS: station name, programme text, artist and title.
+  The tuner's odd I2C protocol is driven over a bit-banged bus.
+- **Internet radio and podcasts:** Icecast/Shoutcast, HLS, MP3 and AAC
+  (fixed-point decoders: there's no FPU), resumable episodes, a seekable
+  progress bar.
+- **AirPlay speaker** (shairport-sync), with remote control of the phone:
+  play/pause, next/previous.
+- **Flying Toasters,** After Dark's screen saver, flying over a blurred
+  snapshot of the screen.
+- **Buttons:** the power button turns the screen off and on (hold 2 s to
+  shut down); the snooze bar snoozes alarms.
+- **Apps you can install:** bundles built with the SDK, installed from a
+  USB stick or over the network. See [Writing apps](#writing-apps).
 
-The original motivating daemon is `onlyfansd` — a HomeKit bridge for
-Casa Vieja TR301A ceiling fans driven by `librpitx`. That's just an
-example. The interesting thing is the runtime: a Pi 0W that runs a
-long-lived daemon stably and is updateable over the wire, without
-depending on writable rootfs semantics.
+Under the hood:
+- a read-only, zstd-compressed root filesystem on the card;
+- over-the-air updates by rsync;
+- apps run as an unprivileged user, and background apps are closed when
+  memory runs short;
+- a "run overlay" to try builds without reflashing.
 
-## What's in the image
+## Getting started
 
-- Linux 6.12.x (Raspberry Pi fork), bcmrpi defconfig + a fragment that
-  drops every kernel module we don't use on this device (filesystems,
-  DRM/media, netfilter, Bluetooth, exotic sound codecs, etc.). See
-  `board/raspberrypi0fansrf/linux.config.fragment`.
-- systemd init.
-- WiFi: `brcmfmac` firmware, `wpa_supplicant`, `systemd-networkd`
-  (which brings the link up and does DHCP).
-- mDNS: `avahi-daemon` owns UDP/5353; `systemd-resolved` keeps doing DNS
-  but its mDNS responder is disabled to avoid a `SO_REUSEPORT` collision.
-- SSH: `dropbear`, off by default unless `ssh_pwauth: true` is set.
-- Build tooling: `librpitx` + `onlyfansd` (HomeKit bridge for Casa
-  Vieja TR301A fans, fetched from
-  [`luuoaoa/ceiling-fans-control`](https://github.com/luuoaoa/ceiling-fans-control)).
-  Drop the `BR2_PACKAGE_ONLYFANSD=y` line from `configs/pifansrf_defconfig`
-  if you don't need it.
-
-The final compressed image is **~27 MB** of cpio.zst plus a ~7 MB
-zImage on a 512 MB FAT partition.
-
-## Build
-
-You need Docker. The build runs inside a pinned Ubuntu 20.04 container
-because Buildroot's host-tools (`autoreconf`, `pkg-config`, etc.) bake in
-their installation prefix at compile time — building on one host and
-running on another silently breaks once any package needs to
-reconfigure. The container pins that prefix to `/work/output/host`.
+You need Docker, and an image of the stock Chumby One SD card: the stock
+bootloader is reused, and its boot partition comes from that image.
 
 ```sh
 git clone --recurse-submodules git@github.com:luuoaoa/pifansrf.git
 cd pifansrf
-bash docker-build.sh
+board/falconwing/extract-stock.sh /path/to/stock-sdcard.img   # once
+bash docker-build.sh falconwing-mainline
+# -> output-falconwing-mainline/images/sdcard.img
 ```
 
-Output lands in `output/images/`:
+The build runs in a pinned Ubuntu 20.04 container: buildroot's host tools
+bake in their install path, so don't run them outside it. Buildroot is a
+submodule, pinned at release 2026.02.1. If you cloned without
+`--recurse-submodules`, run `git submodule update --init`.
 
-- `sdcard.img` — flash this to an SD card with `dd`/Etcher/Pi Imager.
-- `rootfs.cpio.lz4` + `zImage` + `bcm2708-rpi-zero-w.dtb` +
-  `bcm2708-rpi-zero.dtb` — used by `bin/update-pi.sh` for in-place
-  OTA updates.
+Flash `sdcard.img` to a microSD card. Before the first boot, edit the
+files on its small FAT partition (any desktop mounts it):
 
-If you forgot `--recurse-submodules`, run `git submodule update --init`
-once. Buildroot is pinned at upstream `0141ca3fa5` (release 2026.02.1).
+- **`network-config`:** your Wi-Fi.
 
-## First-boot configuration
+  ```yaml
+  version: 2
+  wifis:
+    wlan0:
+      dhcp4: true
+      access-points:
+        "MySSID":
+          password: "MyPassphrase"
+  ```
+- **`user-data`:** the hostname, the time zone (the clock syncs over NTP),
+  SSH password login, and optionally a new root password.
+- **`authorized_keys`:** SSH keys for root.
 
-The image accepts the same `/boot/network-config` and `/boot/user-data`
-files Pi Imager writes. Drop them on the FAT partition (after flashing,
-before first boot — most desktops auto-mount the FAT) and they're applied
-once on first boot, then mostly ignored thereafter.
+They're applied at every boot, so edit and reboot to change them. The
+Chumby is then reachable over SSH as `root` (default password `root`).
 
-`/boot/network-config`:
-
-```
-country: US
-wifi:
-  access-points:
-    - ssid: 'arendelle-iot'
-      password: '<32-byte-hex-PSK>'
-```
-
-The PSK must be the pre-computed hex output of `wpa_passphrase` — the
-parser doesn't run wpa_passphrase itself.
-
-`/boot/user-data`:
-
-```
-hostname: my-pi
-timezone: America/Los_Angeles
-ssh_pwauth: true        # enable dropbear; default password 'root'
-```
-
-`pi-imager-apply.service` reads these on every boot but only acts the
-first time it sees a changed value. To re-apply (e.g. you changed the
-WiFi network), just edit the file on the FAT and reboot.
-
-## SSH
-
-`dropbear` only starts if `ssh_pwauth: true` is set in `user-data`.
-Default user is `root`, password `root`. Change it with the
-`BR2_TARGET_GENERIC_ROOT_PASSWD` line in `configs/pifansrf_defconfig`
-if you care.
-
-The dropbear host key is generated once on first boot and persists on
-the `/var` partition (`/etc/dropbear` is a symlink to
-`/var/lib/dropbear`), so subsequent reboots reuse the same key and
-your SSH client won't warn about it. Reflashing the image preserves
-`/var` (the FAT-only `sdcard.img` doesn't touch p2), so the key
-survives that too — the only thing that resets it is wiping
-`/dev/mmcblk0p2` or running on a brand-new SD card. `bin/update-pi.sh`
-still passes `StrictHostKeyChecking=no` because the very first OTA
-after a fresh flash sees a key it's never seen.
-
-The image advertises itself over mDNS as `<hostname>.local`.
-
-## OTA updates
-
-`bin/update-pi.sh` rsyncs a fresh kernel + initramfs + DTB onto the
-running Pi's `/boot` and reboots:
+### Updating a running Chumby
 
 ```sh
-sudo apt install sshpass        # one-time, host side
-bash docker-build.sh             # rebuild with your changes
-bin/update-pi.sh my-pi.local     # push and reboot
+bash docker-build.sh falconwing-mainline
+bin/update-chumby.sh <chumby's address>
 ```
 
-What it does, in order:
+This rsyncs only the changed blocks of the root image (typically a few
+hundred KB), the early-boot files and, if it changed, the kernel slot
+(read back and verified). Then it reboots. No reflashing.
 
-1. Open one SSH master connection (sshpass-authed) so subsequent
-   rsync invocations don't re-prompt.
-2. Remount `/boot` rw on the Pi.
-3. rsync `zImage`, both `bcm2708-rpi-zero*.dtb`, `rootfs.cpio.lz4`, and
-   the rpi-firmware contents.
-4. Push any of `customize/{network-config,user-data,onlyfansd.yaml}`
-   that exist locally.
-5. Drop a stale `/boot/rootfs.cpio.gz` if there is one (transition
-   helper from the gzip era).
-6. `sync; remount ro; reboot`.
+## Writing apps
 
-The Pi briefly drops the SSH session during the reboot. After ~10–15
-seconds, mDNS is back and you can SSH in again.
+Apps are C programs on **libchumby**: LVGL 9 plus the Chumby's theme,
+fonts, sound and system helpers.
 
-## Persistent state (`/var`)
+- **[docs/sdk.md](docs/sdk.md):** the SDK. Build apps on any Linux PC with
+  Docker, without buildroot, and see them in a simulator: the Chumby's
+  real compositor, shell and apps, running under QEMU as a window on your
+  desktop. Package them as `.chumbyapp` bundles, installed from a USB stick
+  or with `chumby-app deploy`.
+- **[docs/sdk-tutorial.md](docs/sdk-tutorial.md):** a walk-through building
+  One Song, an app that plays a song from the internet.
+- **[docs/writing-chumby-apps.md](docs/writing-chumby-apps.md):** how the
+  UI and sound fit together, and the traps.
 
-`/dev/mmcblk0p2` is created on first boot by `create-var-partition.service`
-using `busybox fdisk` — 512 MiB starting at the next 1 MiB boundary
-after the FAT partition. systemd-makefs (via the `x-systemd.makefs`
-fstab option) formats it ext4 the first time it's mounted.
+## Working on the firmware
 
-Because the unit has `ConditionPathExists=!/dev/mmcblk0p2`, an existing
-`/var` is never overwritten by a reflash. Conversely, deleting `p2`
-(via `fdisk` or by repartitioning) gives you a clean slate on the next
-boot.
+- **[board/falconwing-mainline/README.md](board/falconwing-mainline/README.md)**
+  is the detailed reference: the boot chain, the read-only root, the
+  kernel patches, FM, the GUI stack, and what's unverified.
+- **`bin/chumby-try`** tries builds without reflashing, through the *run
+  overlay*: a script the early boot runs to bind test files over the image.
+  It disables itself before running, so a broken test build can't run
+  twice, and the compositor frames the screen in magenta while it's
+  active. It also measures CPU on the device (`perf`, and repeatable `bench`
+  scenarios with the sound muted).
+- **Kernel patches** are in `board/falconwing-mainline/patches/linux/`:
+  - the bootloader-armed watchdog;
+  - the LCD panel;
+  - a new driver for the i.MX23's audio codec;
+  - the CPU clock divider;
+  - the touchscreen probe;
+  - recovering from LCD scanout underflow;
+  - the power button and power-off.
 
-The only state that *belongs* on `/var`:
+A few things about this board that cost real time to learn:
+- **The bootloader arms a hardware watchdog,** and systemd feeds it every
+  15 s. Anything that stalls PID 1 that long, such as
+  `systemctl daemon-reload` on 64 MB of RAM, resets the board.
+- **The screen must stay 32-bit:** the LCD controller scrambles 16-bit
+  pixels on this 18-bit panel. Screenshots read the compositor's buffer,
+  not the glass, so they won't show it.
+- **Measure on the device:** QEMU doesn't model the ARM9's caches or
+  timing.
 
-- `systemd-journald` rotated logs (`/var/log/journal/`).
-- Daemons that explicitly opt in via `StateDirectory=` in their unit.
-  `onlyfansd.service` uses `StateDirectory=onlyfansd`, which yields a
-  reboot-surviving `/var/lib/onlyfansd/` for HomeKit pairing data.
-
-Anything that writes to `/etc` or `/usr` is writing to tmpfs and will
-vanish on reboot. That's a feature.
-
-## Build identification
-
-`/etc/motd` is stamped at build time with the git rev and timestamp:
-
-```
-  pifansrf — HomeKit/HA bridge (Casa Vieja TR301A via rpitx)
-  build:  bbf8473
-  date:   2026-04-27T00:50:00Z
-```
-
-A `-dirty` suffix means the working tree had uncommitted changes when
-the image was built. Useful for telling whether you actually flashed
-the build you think you flashed.
-
-## Layout
+## Repository
 
 ```
-/dev/mmcblk0p1  /boot   vfat ro,nofail        ← kernel + initramfs + config files
-/dev/mmcblk0p2  /var    ext4 noatime,commit=60 ← persistent state, 512 MiB
-none            /       tmpfs (rootfs cpio)    ← unpacked from rootfs.cpio.zst
+configs/falconwing_mainline_defconfig   the Chumby image
+board/falconwing-mainline/              its board files, kernel patches, root overlay
+board/falconwing/                       the stock-kernel image (and the shared overlay)
+package/
+  chumby-wm/        the Wayland compositor (wlroots)
+  chumby-shell/     tab bar, Home menu, alarms, buttons, screen saver policy
+  chumby-apps/      clock, FM, internet radio, podcasts, AirPlay, Flying Toasters
+  libchumby/        the app framework (LVGL 9 compiled in), the saver kit
+  qn8005/           the FM tuner tool and RDS decoder
+  wlroots-pixman/   wlroots without a GPU
+sdk/                chumby-app, the SDK's Docker images, examples
+docs/               writing apps, the SDK, the tutorial
+bin/                update-chumby.sh, chumby-try
+buildroot/          submodule
 ```
 
-Repository:
+## Other targets in this repository
 
-```
-configs/pifansrf_defconfig       — buildroot config
-board/raspberrypi0fansrf/
-  config.txt, cmdline.txt        — RPi firmware boot config
-  linux.config.fragment          — kernel-trim overrides on top of bcmrpi
-  rootfs/                        — files copied verbatim into the image
-  post-build.sh                  — runs against TARGET_DIR pre-fakeroot
-  post-fakeroot.sh               — runs after preset-all (service enables)
-  post-image.sh                  — assembles boot.vfat + sdcard.img
-package/                         — buildroot package recipes (onlyfansd, librpitx, rpitx)
-buildroot/                       — submodule, pinned at 2026.02.1
-bin/update-pi.sh                 — rsync-over-SSH OTA helper
-customize/                       — local-only overrides pushed by update-pi.sh
-```
+The repository started as **pifansrf**, and still builds two other images:
 
-## Adding your own daemon
-
-Drop a buildroot package recipe under `package/<your-daemon>/` and a
-systemd unit. Pull the source from a github tarball via
-`$(call github,user,repo,commit-hash)` and pin a hash in
-`<your-daemon>.hash` — the cpio is rebuilt deterministically from
-the pinned source, so you can trust the build identification.
-
-If your daemon needs persistent state, give it a `StateDirectory=foo`
-in the unit; everything else lives in tmpfs and gets a fresh slate
-each boot. That's the contract.
+- **`configs/raspad_defconfig`:** the Chumby's UI and apps on any 64-bit
+  Raspberry Pi, made for a RasPad 3 (a Pi 4 tablet with a 1280x800
+  screen). It renders on the GPU, with see-through blurred popups and
+  saver. See [board/raspad/README.md](board/raspad/README.md).
+- **`configs/pifansrf_defconfig`:** the original image, a Raspberry Pi
+  Zero (W) running from RAM, as a HomeKit bridge for RF ceiling fans. See
+  [board/raspberrypi0fansrf/README.md](board/raspberrypi0fansrf/README.md).
