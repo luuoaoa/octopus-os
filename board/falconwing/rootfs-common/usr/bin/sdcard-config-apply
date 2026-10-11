@@ -23,6 +23,9 @@
 #                                        ssh: true, as cards before "ssh:" had)
 #                              passwd: <crypt hash, e.g. from mkpasswd -m sha-512>
 #   /boot/authorized_keys      installed as /root/.ssh/authorized_keys
+#   /boot/eq.txt               the custom speaker EQ (Room EQ Wizard's filter
+#                              export; where there is one: chumby-sound),
+#                              copied for the apps to read (/boot is root's)
 #
 # Same file formats as pifansrf's pi-imager-apply.sh.
 set -u
@@ -57,6 +60,7 @@ if [ -d /run/systemd/system ]; then
     AUTH_KEYS=$OUT/authorized_keys
     DROPBEAR_DEFAULT=$OUT/dropbear
     LOCATION_FILE=$OUT/location
+    EQ_FILE=$OUT/eq.txt
 else
     WPA=/etc/wpa_supplicant.conf
     HOSTNAME_FILE=/etc/hostname
@@ -67,6 +71,7 @@ else
     AUTH_KEYS=/root/.ssh/authorized_keys
     DROPBEAR_DEFAULT=/etc/default/dropbear
     LOCATION_FILE=/etc/chumby-location
+    EQ_FILE=
 fi
 
 if ! mountpoint -q "$BOOT"; then
@@ -211,6 +216,17 @@ if [ -f "$BOOT/authorized_keys" ]; then
     unix "$BOOT/authorized_keys" > "$AUTH_KEYS"
     chmod 600 "$AUTH_KEYS"
     log "installed $(grep -c . "$AUTH_KEYS") authorized key(s)"
+fi
+
+# === The custom EQ: readable to the apps (the FAT is root's only) ===
+if [ -n "$EQ_FILE" ]; then
+    if [ -f "$BOOT/eq.txt" ]; then
+        unix "$BOOT/eq.txt" > "$EQ_FILE.new" && chmod 644 "$EQ_FILE.new" &&
+            mv "$EQ_FILE.new" "$EQ_FILE"
+        log "custom EQ: $BOOT/eq.txt"
+    else
+        rm -f "$EQ_FILE"
+    fi
 fi
 
 if [ "$SSH_PWAUTH" = true ]; then

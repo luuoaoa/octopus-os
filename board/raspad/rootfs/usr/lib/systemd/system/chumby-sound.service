@@ -1,6 +1,6 @@
 [Unit]
 Description=The speakers' bass and EQ, as set in Settings (chumby-sound)
-After=wireplumber.service
+After=wireplumber.service chumby-config.service
 Wants=wireplumber.service
 
 [Service]

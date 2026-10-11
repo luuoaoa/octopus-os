@@ -9,8 +9,9 @@
  *   Time         the time zone
  *   Network      the SSH server (off by default; the first time on, a
  *                random root password, shown here)
- *   Sound        bass enhancement and an EQ preset - where the system
- *                has them (the RasPad's PipeWire chain: chumby-sound)
+ *   Sound        the bass enhancer's level and an EQ (a preset, or
+ *                custom from eq.txt) - where the system has them (the
+ *                RasPad's PipeWire chain: chumby-sound)
  *
  * Adding a setting: a builder for its category (or a new category in
  * categories[]: a name, an icon, when it applies, its builder). What the
@@ -499,12 +500,39 @@ static void sound_apply(void)
 	chumby_spawn(SOUND_TOOL, argv);	/* (reaped: SIGCHLD ignored) */
 }
 
+static const char *const bass_ids[] = { "off", "low", "medium", "high" };
+static lv_obj_t *custom_note, *custom_info;
+
 static void bass_cb(lv_event_t *e)
 {
-	bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	unsigned i = lv_dropdown_get_selected(lv_event_get_target(e));
 
-	chumby_setting_set("bass", on ? "on" : "off");
-	sound_apply();
+	if (i < sizeof(bass_ids) / sizeof(bass_ids[0])) {
+		chumby_setting_set("bass", bass_ids[i]);
+		sound_apply();
+	}
+}
+
+/* Custom: where its file goes and what it gives; shown only for Custom. */
+static void custom_update(const char *eq)
+{
+	char line[128] = "";
+	FILE *f;
+	bool custom = !strcmp(eq, "custom");
+
+	if (custom && (f = popen(SOUND_TOOL " custom-info", "r"))) {
+		if (fgets(line, sizeof(line), f))
+			line[strcspn(line, "\n")] = '\0';
+		pclose(f);
+		lv_label_set_text(custom_info, line);
+	}
+	if (custom) {
+		lv_obj_remove_flag(custom_note, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_remove_flag(custom_info, LV_OBJ_FLAG_HIDDEN);
+	} else {
+		lv_obj_add_flag(custom_note, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(custom_info, LV_OBJ_FLAG_HIDDEN);
+	}
 }
 
 static void eq_cb(lv_event_t *e)
@@ -513,6 +541,7 @@ static void eq_cb(lv_event_t *e)
 
 	if (i < n_presets) {
 		chumby_setting_set("eq", preset_ids[i]);
+		custom_update(preset_ids[i]);
 		sound_apply();
 	}
 }
@@ -526,10 +555,21 @@ static void sound_build(lv_obj_t *p)
 
 	heading(p, "Speakers");
 	chumby_setting_get("bass", val, sizeof(val));
-	r = row(p, "Bass enhancer");
-	switch_in(r, !strcmp(val, "on"), bass_cb);
+	if (!strcmp(val, "on"))		/* (the old switch) */
+		strcpy(val, "medium");
+	for (unsigned i = 0; i < sizeof(bass_ids) / sizeof(bass_ids[0]); i++)
+		if (!strcmp(val, bass_ids[i]))
+			sel = i;
+	r = row(p, "Bass");
+	dd = lv_dropdown_create(r);
+	lv_dropdown_set_options(dd, "Off\nLow\nMedium\nHigh");
+	lv_dropdown_set_selected(dd, sel);
+	lv_obj_set_width(dd, 110);
+	lv_obj_set_style_text_font(dd, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_add_event_cb(dd, bass_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
 	n_presets = 0;
+	sel = 0;
 	if ((f = popen(SOUND_TOOL " presets", "r"))) {
 		while (n_presets < MAX_PRESETS && fgets(line, sizeof(line), f) &&
 		       sscanf(line, "%15[^\t]\t%31[^\n]", preset_ids[n_presets],
@@ -550,10 +590,20 @@ static void sound_build(lv_obj_t *p)
 	dd = lv_dropdown_create(r);
 	lv_dropdown_set_options(dd, opts);
 	lv_dropdown_set_selected(dd, sel);
-	lv_obj_set_width(dd, 140);	/* "Speaker tuning" */
+	lv_obj_set_width(dd, 110);
 	lv_obj_set_style_text_font(dd, chumby_font(CHUMBY_FONT_BODY), 0);
 	lv_obj_add_event_cb(dd, eq_cb, LV_EVENT_VALUE_CHANGED, NULL);
-	note(p, "Bass enhancer: bass the ear fills in, sparing the small speakers.");
+	custom_note = note(p, "Custom: put eq.txt on the card's config partition "
+			   "(next to user-data) and restart. Format: Room EQ Wizard's "
+			   "File > Export > Filter settings as text (or Equalizer "
+			   "APO's), lines like\n"
+			   "Preamp: -4 dB\n"
+			   "Filter 1: ON PK Fc 200 Hz Gain -3 dB Q 1.5\n"
+			   "Up to 10 PK filters, one LS and one HS.");
+	custom_info = note(p, "");
+	custom_update(n_presets ? preset_ids[sel] : "");
+	note(p, "Bass enhancer: adds the harmonics of bass too low for the small "
+	     "speakers, so the ear hears it; higher is stronger.");
 }
 
 /* ------------------------------------------------------------------ */

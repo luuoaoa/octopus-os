@@ -7,7 +7,7 @@
 # (After pi-radio's pifansrf-pin-speaker.sh.)
 #
 # The default sink itself is left to WirePlumber: the EQ chain's priority
-# makes it the default, until eq-toggle says otherwise (remembered).
+# makes it the default (and chumby-sound apply sets it so).
 set -u
 
 CONF=/etc/pipewire/pipewire.conf.d/30-raspad-eq.conf

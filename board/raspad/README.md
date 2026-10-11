@@ -75,18 +75,22 @@ improved on the way. The setup comes from pifansrf's pi-radio branch.
   opens) are PipeWire; so is the `Master` control, the default sink's
   volume, which the shell's volume slider drives. Players mix (an alarm
   over the radio).
-- `/etc/pipewire/pipewire.conf.d/30-raspad-eq.conf`: the filter chain.
+- `/etc/pipewire/pipewire.conf.d/30-raspad-eq.conf`: the filter chain,
+  always the default sink, every stage neutral until set:
   [bankstown](https://github.com/chadmed/bankstown) (package/bankstown, an
   LV2 plugin) synthesises the harmonics of the bass the speakers can't
-  reproduce, at its reference strength (the Pi 0W on pi-radio had to
-  run it cut down), then a by-ear EQ (+6 dB below 150 Hz, softer treble:
-  -4 dB around 2.5 kHz, -6 dB above 5 kHz, a roll-off above 11 kHz)
-  until the RasPad's
-  speakers are measured: export Room EQ Wizard's filters as text and run
-  `bin/rew-to-pipewire.py --bass export.txt`, whose output replaces the
-  file's `filter.graph` block.
-- `eq-toggle [on|off|toggle|status]` switches the default sink between the
-  chain and the bare HDMI sink (bypass). WirePlumber remembers the choice.
+  reproduce; then per channel a pre-gain, a low shelf, 10 peaking
+  filters, a high shelf and a low-pass. (A filter's type can't change
+  while PipeWire runs it, hence fixed slots.)
+- `chumby-sound apply` sets them live from Settings > Sound
+  (`settings.conf`: `bass = off|low|medium|high`,
+  `eq = off|warm|bright|custom`); `chumby-sound.service` applies them at
+  boot. Custom is `eq.txt` on the boot FAT (`/boot`, next to `user-data`)
+  in Room EQ Wizard's "Filter settings as text" export (or Equalizer
+  APO's): a `Preamp: -4 dB` line, up to 10 `PK` filters, one `LS`, one
+  `HS`, e.g. `Filter 1: ON PK Fc 200 Hz Gain -3 dB Q 1.5`. It's read at
+  boot (`sdcard-config-apply` copies it to `/run/chumby-config/eq.txt`:
+  `/boot` is root's only, for the Wi-Fi password).
 - `raspad-audio-setup.service` puts the HDMI sink at full volume at boot,
   so the UI's volume is the only one that matters.
 
