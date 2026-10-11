@@ -26,8 +26,12 @@ mkdir -p "${TARGET_DIR}/media/sd"
 
 # MediaTek MT7610U USB WiFi (Panda PAU0A; driver mt76x0u): its firmware,
 # which buildroot's linux-firmware has no option for (only the MT7610E's).
-mkdir -p "${TARGET_DIR}/lib/firmware/mediatek"
-cp "${BUILD_DIR}"/linux-firmware-*/mediatek/mt7610u.bin "${TARGET_DIR}/lib/firmware/mediatek/"
+# (Where linux-firmware is built: not the RasPad's, which shares this.)
+for fw in "${BUILD_DIR}"/linux-firmware-*/mediatek/mt7610u.bin; do
+	[ -f "$fw" ] || continue
+	mkdir -p "${TARGET_DIR}/lib/firmware/mediatek"
+	cp "$fw" "${TARGET_DIR}/lib/firmware/mediatek/"
+done
 
 # systemd units replace the shared overlay's sysvinit scripts.
 rm -f "${TARGET_DIR}"/etc/init.d/S[0-9]*
