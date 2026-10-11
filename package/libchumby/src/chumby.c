@@ -926,6 +926,11 @@ int chumby_run(void)
 	struct pollfd pfd[MAX_FDS + 1];
 	int i, n;
 
+	/* CHUMBY_LOOP_DEBUG=1: the loop going round faster than it should
+	 * (a descriptor readable and never read: a spin) says which. */
+	bool loop_debug = getenv("CHUMBY_LOOP_DEBUG") != NULL;
+	uint32_t loop_since = 0, loops = 0;
+
 	for (;;) {
 		uint32_t idle = lv_timer_handler();
 
@@ -943,6 +948,18 @@ int chumby_run(void)
 		}
 		if (poll(pfd, n, idle) <= 0)
 			continue;
+		/* (Once a second at most: a spin goes round ~200,000 times a
+		 * second, and the journal is in the RAM.) */
+		if (loop_debug && ++loops && lv_tick_elaps(loop_since) >= 1000) {
+			if (loops > 1000)
+				for (i = 0; i < n; i++)
+					if (pfd[i].revents)
+						fprintf(stderr, "libchumby: spinning (%u/s): fd %d (%s) "
+							"revents 0x%x, timer idle %u\n", loops, pfd[i].fd,
+							i ? "watched" : "wayland", pfd[i].revents, idle);
+			loops = 0;
+			loop_since = lv_tick_get();
+		}
 		/* The compositor went away (session restart): so do we. */
 		if (pfd[0].revents & (POLLHUP | POLLERR)) {
 			fprintf(stderr, "libchumby: lost the Wayland compositor\n");

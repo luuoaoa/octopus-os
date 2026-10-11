@@ -79,6 +79,7 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/render/pixman.h>
+#include "toasters.h"
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_pointer.h>
@@ -151,6 +152,7 @@ struct server {
 	bool blur_pending;
 	int veil_mode;			/* enum veil_mode */
 	struct view *saver;		/* the screen saver's window, if any */
+	struct toasters *toasters;	/* flying over it (toasters.c) */
 
 	/* Nobody's touched anything for IDLE_MS: the shell is told ("idle",
 	 * then "active" at the next input), and may start the saver. */
@@ -436,6 +438,12 @@ static void view_map(struct wl_listener *l, void *data)
 
 	(void)data;
 	v->mapped = true;
+	/* The screen saver's window holds the screen; we fly the toasters
+	 * over it (25 fps on a GPU, 12.5 on pixman: each frame is the
+	 * ARM9's work). */
+	if (v->kind == VIEW_SAVER && !s->toasters)
+		s->toasters = toasters_start(s->saver_tree, wl_display_get_event_loop(s->display),
+					     s->width, s->height, s->gpu ? 40 : 80, !s->gpu);
 	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU || v->kind == VIEW_SAVER)
 		veil_update(s);
 	if (v->kind != VIEW_APP)
@@ -475,6 +483,10 @@ static void view_unmap(struct wl_listener *l, void *data)
 	}
 	if (v->kind == VIEW_APP)
 		activate(s, top_app(s));
+	if (v->kind == VIEW_SAVER) {
+		toasters_stop(s->toasters);
+		s->toasters = NULL;
+	}
 	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU || v->kind == VIEW_APP ||
 	    v->kind == VIEW_SAVER)
 		veil_update(s);
@@ -1543,6 +1555,56 @@ static const struct wlr_buffer_impl corner_impl = {
 	.end_data_ptr_access = corner_end,
 };
 
+/*
+ * Anything bound over the read-only image (/usr, /etc, /bin, /sbin, /lib:
+ * a run overlay, bin/chumby-try's builds) and the screen gets a magenta
+ * frame over everything: you're not running the image, and an overlay left
+ * behind after the experiments shows. The files go to the journal.
+ */
+#define OVERLAY_FRAME	2	/* UI pixels */
+
+static bool image_overlaid(void)
+{
+	static const char *const image[] = { "/usr/", "/etc/", "/bin/", "/sbin/", "/lib/" };
+	FILE *f = fopen("/proc/self/mountinfo", "r");
+	char line[1024], from[256], where[256];
+	bool any = false;
+	size_t i;
+
+	if (!f)
+		return false;
+	/* A bind from the SD card (its /data: where overlays keep their
+	 * files), not systemd's own (/etc/machine-id, from a tmpfs). */
+	while (fgets(line, sizeof(line), f))
+		if (sscanf(line, "%*s %*s %*s %255s %255s", from, where) == 2 &&
+		    !strncmp(from, "/data/", 6))
+			for (i = 0; i < sizeof(image) / sizeof(image[0]); i++)
+				if (!strncmp(where, image[i], strlen(image[i]))) {
+					wlr_log(WLR_INFO, "run overlay: %s (from the card's %s)", where, from);
+					any = true;
+				}
+	fclose(f);
+	return any;
+}
+
+static void overlay_mark_create(struct server *s)
+{
+	static const float magenta[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
+	int w = s->width, h = s->height, t = OVERLAY_FRAME;
+	struct wlr_scene_rect *r;
+
+	if (!image_overlaid())
+		return;
+	r = wlr_scene_rect_create(s->corner_tree, w, t, magenta);
+	wlr_scene_node_set_position(&r->node, 0, 0);
+	r = wlr_scene_rect_create(s->corner_tree, w, t, magenta);
+	wlr_scene_node_set_position(&r->node, 0, h - t);
+	r = wlr_scene_rect_create(s->corner_tree, t, h - 2 * t, magenta);
+	wlr_scene_node_set_position(&r->node, 0, t);
+	r = wlr_scene_rect_create(s->corner_tree, t, h - 2 * t, magenta);
+	wlr_scene_node_set_position(&r->node, w - t, t);
+}
+
 /* Four of them over everything, the one mask mirrored into each corner. */
 static void corners_create(struct server *s)
 {
@@ -1584,6 +1646,7 @@ static void corners_create(struct server *s)
 	}
 	wlr_buffer_drop(&c->base);	/* the scene buffers hold it now */
 	s->corners = true;
+	overlay_mark_create(s);		/* (once, as the corners) */
 }
 
 /* The screen's own mode, unless it's bigger than we'd want to draw every

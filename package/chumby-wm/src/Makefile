@@ -12,12 +12,13 @@ xdg-shell-protocol.h:
 	$(WAYLAND_SCANNER) server-header \
 		$(WAYLAND_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml $@
 
-chumby-wm.o: chumby-wm.c xdg-shell-protocol.h
+chumby-wm.o: chumby-wm.c xdg-shell-protocol.h toasters.h
+toasters.o: toasters.c toasters.h
 
-chumby-wm: chumby-wm.o
+chumby-wm: chumby-wm.o toasters.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
-	rm -f chumby-wm chumby-wm.o xdg-shell-protocol.h
+	rm -f chumby-wm chumby-wm.o toasters.o xdg-shell-protocol.h
 
 .PHONY: all clean

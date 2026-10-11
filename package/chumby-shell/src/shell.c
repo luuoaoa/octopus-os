@@ -1759,17 +1759,31 @@ static void command(const char *cmd)
 		fprintf(stderr, "chumby-shell: unknown command '%s'\n", cmd);
 }
 
+/* Whole lines only: a read can end mid-line when commands pile up (we
+ * were busy), and the rest comes with the next one ("launch FM Radio"
+ * arrived as "launch " and "FM Radio" - two unknown commands). */
 static void cmd_readable(int fd, void *user)
 {
-	char buf[256], *line, *save;
+	static char buf[512];
+	static size_t len;
+	char *nl, *start;
 	ssize_t n;
 
 	(void)user;
-	while ((n = read(fd, buf, sizeof(buf) - 1)) > 0) {
-		buf[n] = '\0';
-		for (line = strtok_r(buf, "\n", &save); line;
-		     line = strtok_r(NULL, "\n", &save))
-			command(line);
+	while ((n = read(fd, buf + len, sizeof(buf) - 1 - len)) > 0) {
+		len += n;
+		buf[len] = '\0';
+		start = buf;
+		while ((nl = strchr(start, '\n'))) {
+			*nl = '\0';
+			if (*start)
+				command(start);
+			start = nl + 1;
+		}
+		len = strlen(start);
+		memmove(buf, start, len + 1);
+		if (len == sizeof(buf) - 1)
+			len = 0;	/* a line that long isn't one of ours */
 	}
 }
 
