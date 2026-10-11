@@ -29,10 +29,10 @@
 STATION_FILE=/var/lib/chumby/radio.station
 # From the last scan: "#floor <rssi>", then "<MHz> <rssi>" per station.
 STATIONS_FILE=/var/lib/chumby/radio.stations
-PIDFILE=/var/run/radio-loop.pid
+PIDFILE=/run/chumby/radio-loop.pid
 PAUSED=/run/chumby/radio.paused	# paused by chumby-audio: resume to this
 PCM=plughw:0,0
-RDS_PIDFILE=/var/run/radio-rds.pid
+RDS_PIDFILE=/run/chumby/radio-rds.pid
 RDS_FILE=/run/chumby/rds
 
 die() { echo "radio: $*" >&2; exit 1; }

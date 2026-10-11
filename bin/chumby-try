@@ -198,7 +198,10 @@ say() {
 # Silent: the codec's DAC (the UI's volume) muted at 0 and left so; again
 # after anything starts playing (a player may set its level).
 mute() { amixer -q sset DAC 0 mute 2>/dev/null; }
-quiet() { say active; chumby-stream stop 2>/dev/null; radio off >/dev/null 2>&1; mute; }
+# Players as the apps' user, as the apps start them (files they leave in
+# /run/chumby stay the apps'), allowed nice -10 as chumby-shell allows it.
+as_app() { ( ulimit -e 30 2>/dev/null; exec su -s /bin/sh -c 'exec "$@"' chumby as_app "$@" ); }
+quiet() { say active; as_app chumby-stream stop 2>/dev/null; as_app radio off >/dev/null 2>&1; mute; }
 # The screen on (the power button's "screen on": it may have been turned off):
 # a dark screen gets no saver, and draws nothing.
 lit() { [ "$(cat /sys/class/backlight/backlight/bl_power 2>/dev/null)" = 0 ] || { say "screen on"; sleep 2; }; }
@@ -216,13 +219,13 @@ for SC in $SCENARIOS; do
 	case $SC in
 	idle)	front Clock; measure ;;
 	saver)	front "FM Radio"; saver; measure ;;
-	stream)	chumby-stream "$STATION" Bench 2>/dev/null; mute; front Clock 15; mute; measure ;;
+	stream)	as_app chumby-stream "$STATION" Bench 2>/dev/null; mute; front Clock 15; mute; measure ;;
 	podcast)
 		kill $(pidof chumby-podcasts) 2>/dev/null
-		chumby-stream "$EPISODE" Bench 10000000 2>/dev/null; mute; sleep 3
+		as_app chumby-stream "$EPISODE" Bench 10000000 2>/dev/null; mute; sleep 3
 		front Podcasts 15; mute; measure ;;
 	saver-stream)
-		chumby-stream "$STATION" Bench 2>/dev/null; mute; front "FM Radio" 15; mute; saver; measure ;;
+		as_app chumby-stream "$STATION" Bench 2>/dev/null; mute; front "FM Radio" 15; mute; saver; measure ;;
 	*)	echo "== $SC: unknown" ;;
 	esac
 done 2>&1 | grep -v "ALSA lib"

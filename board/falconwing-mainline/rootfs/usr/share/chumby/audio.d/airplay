@@ -24,7 +24,13 @@ case "$1" in
 			chumby-airplay-remote pause
 		fi
 		rm -f "$MARK"
-		systemctl restart shairport-sync
+		# Restarting a service is root's: the shell does it for the
+		# apps' user (we run as whoever plays).
+		if [ "$(id -u)" = 0 ]; then
+			systemctl restart shairport-sync
+		elif [ -p /run/chumby/shell.cmd ]; then
+			echo "restart airplay" > /run/chumby/shell.cmd
+		fi
 		# Not through chumby-audio (nothing else stops): say so.
 		[ "$1" = disconnect ] && chumby-audio stopped airplay
 		[ "$1" != pause ]

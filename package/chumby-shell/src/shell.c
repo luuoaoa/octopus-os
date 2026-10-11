@@ -33,13 +33,16 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <linux/input.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -72,11 +75,21 @@ struct app_info {
 	const char *icon;	/* LV_SYMBOL_* */
 	int starting_pid;	/* launched, no window yet (0 = none) */
 	time_t starting_since;
+	int pid;		/* running (0 = not, as far as we know) */
 };
 
 /* An app takes seconds to map its window on this CPU: don't start it again
  * meanwhile (every tap or snooze press would, filling the 64 MB). */
 #define LAUNCH_TIMEOUT_S	20
+
+/* The kernel's OOM killer, if it comes to that, ends the oldest app in the
+ * background first and the session (-900, chumby-session.service) never:
+ * oom_score_adj per app, kept up to date as apps come to the front. */
+#define OOM_KEEP	(-500)	/* the alarm tone */
+#define OOM_FRONT	0
+#define OOM_SAVER	600
+#define OOM_BACK	300	/* the latest in the background; +100 each further back */
+#define OOM_CLOCK	100	/* the clock in the background: we never evict it */
 
 static struct app_info apps[MAX_APPS];
 static int n_apps;
@@ -186,6 +199,7 @@ static struct toplevel *toplevels;
 static unsigned long seen_seq;
 
 static void tabs_rebuild(void);
+static void oom_update(void);
 
 static void tl_title(void *d, struct zwlr_foreign_toplevel_handle_v1 *h, const char *t)
 {
@@ -231,6 +245,7 @@ static void tl_done(void *d, struct zwlr_foreign_toplevel_handle_v1 *h)
 	if (t->activated && !t->minimized)
 		t->seen = ++seen_seq;
 	tabs_rebuild();
+	oom_update();
 }
 
 static void tl_closed(void *d, struct zwlr_foreign_toplevel_handle_v1 *h)
@@ -353,6 +368,74 @@ static void activate(struct toplevel *t)
 	wl_display_flush(wl);
 }
 
+/* ------------------------------------------------------------------ */
+/* Apps run as "chumby", not root                                     */
+
+/*
+ * The compositor and we are the system UI, as root (the display, every
+ * input device, the backlight, the mixer). Everything we start - apps, the
+ * screen saver, the alarm tone, chumby-audio - runs as the "chumby" user
+ * (groups audio and input, from /etc/group), with HOME its state directory
+ * /var/lib/chumby. Not a sandbox: one user for all of them, so they can
+ * still stop each other's players (chumby-audio); bundles of others' apps
+ * would get users of their own.
+ */
+#define APP_USER	"chumby"
+#define APP_HOME	"/var/lib/chumby"
+/* chumby-stream runs above the UI (nice -10): allowed through RLIMIT_NICE
+ * (20 - 30 = -10), which root can grant and the user can't. */
+#define APP_NICE_LIMIT	30
+
+static uid_t app_uid;
+static gid_t app_gid;
+static bool app_user_ok;
+
+static void app_user_init(void)
+{
+	struct passwd *pw = getpwnam(APP_USER);
+
+	if (!pw) {
+		fprintf(stderr, "chumby-shell: no user \"" APP_USER "\": apps run as root\n");
+		return;
+	}
+	app_uid = pw->pw_uid;
+	app_gid = pw->pw_gid;
+	app_user_ok = true;
+}
+
+/* path as the apps' user, the kernel's OOM killer told how readily to end
+ * it (oom_score_adj, -1000..1000: set before the user drops, so it may be
+ * low). -1 if it couldn't start. */
+static int spawn_app(const char *path, char *const argv[], int oom_adj)
+{
+	struct rlimit nice = { APP_NICE_LIMIT, APP_NICE_LIMIT };
+	char adj[16];
+	pid_t pid = fork();
+	int fd, n;
+
+	if (pid != 0)
+		return pid;
+	/* The child: nothing of ours but what exec keeps. */
+	signal(SIGPIPE, SIG_DFL);
+	signal(SIGCHLD, SIG_DFL);
+	if ((fd = open("/proc/self/oom_score_adj", O_WRONLY)) >= 0) {
+		n = snprintf(adj, sizeof(adj), "%d", oom_adj);
+		if (write(fd, adj, n) < 0)
+			;
+		close(fd);
+	}
+	setrlimit(RLIMIT_NICE, &nice);
+	if (app_user_ok) {
+		if (initgroups(APP_USER, app_gid) < 0 || setgid(app_gid) < 0 ||
+		    setuid(app_uid) < 0)
+			_exit(127);
+		setenv("HOME", APP_HOME, 1);
+		setenv("USER", APP_USER, 1);
+	}
+	execv(path, argv);
+	_exit(127);
+}
+
 static void launch(struct app_info *a)
 {
 	struct toplevel *t = running(a->id);
@@ -365,12 +448,12 @@ static void launch(struct app_info *a)
 	}
 	if (a->starting_pid && time(NULL) - a->starting_since < LAUNCH_TIMEOUT_S)
 		return;		/* already on its way */
-	pid = chumby_spawn(a->exec, argv);
+	pid = spawn_app(a->exec, argv, OOM_FRONT);
 	if (pid < 0) {
 		fprintf(stderr, "chumby-shell: cannot start %s\n", a->exec);
 		return;
 	}
-	a->starting_pid = pid;
+	a->starting_pid = a->pid = pid;
 	a->starting_since = time(NULL);
 }
 
@@ -1168,7 +1251,7 @@ static void media_stop(void)
 {
 	char *argv[] = { "chumby-audio", "stop", NULL };
 
-	chumby_spawn(AUDIO, argv);
+	spawn_app(AUDIO, argv, OOM_FRONT);
 	if (popup_disp) {
 		popup_stop_show(false);	/* nothing plays now */
 		popup_keepalive();
@@ -1446,7 +1529,7 @@ static void saver_maybe_start(bool say)
 			fprintf(stderr, "chumby-shell: no screen saver: %s\n", why);
 		return;
 	}
-	saver_pid = chumby_spawn(saver_path(), argv);
+	saver_pid = spawn_app(saver_path(), argv, OOM_SAVER);
 }
 
 static void saver_timer_cb(lv_timer_t *t)
@@ -1568,14 +1651,14 @@ static void alarm_ring(void)
 	/* Whatever plays (FM, a stream) pauses for the alarm, and resumes
 	 * once it's dismissed (chumby-audio); the tone retries until the
 	 * sound card is free. */
-	chumby_spawn(AUDIO, duck_argv);
+	spawn_app(AUDIO, duck_argv, OOM_FRONT);
 	v = chumby_volume_get();
 	if (v >= 0 && v < p->alarm_volume) {
 		volume_before = v;
 		volume_pct = p->alarm_volume;
 		chumby_volume_set(p->alarm_volume);
 	}
-	tone_pid = chumby_spawn(ALARM_TONE, tone_argv);
+	tone_pid = spawn_app(ALARM_TONE, tone_argv, OOM_KEEP);
 	alarm_publish();
 	show_clock();
 	screen_set(true);	/* and left on: you're up */
@@ -1590,7 +1673,7 @@ static void alarm_snooze(void)
 	tone_stop();
 	/* What played before it, back on until it rings again (which pauses
 	 * it again). */
-	chumby_spawn(AUDIO, release_argv);
+	spawn_app(AUDIO, release_argv, OOM_FRONT);
 	alarm_state = CHUMBY_ALARM_SNOOZED;
 	snooze_until = time(NULL) + chumby_policy()->snooze_minutes * 60;
 	alarm_publish();
@@ -1603,7 +1686,7 @@ static void alarm_stop(void)
 
 	tone_stop();
 	if (was)	/* what played before it, back on */
-		chumby_spawn(AUDIO, release_argv);
+		spawn_app(AUDIO, release_argv, OOM_FRONT);
 	alarm_state = CHUMBY_ALARM_IDLE;
 	snooze_until = 0;
 	alarm_publish();
@@ -1689,7 +1772,7 @@ static void calibrate_start(void)
 	popup_close();
 	menu_close();
 	screen_set(true);
-	calibrate_pid = chumby_spawn(CALIBRATE, argv);
+	calibrate_pid = spawn_app(CALIBRATE, argv, OOM_FRONT);
 }
 
 static void snooze_hold_cb(lv_timer_t *t)
@@ -1801,7 +1884,11 @@ static void command(const char *cmd)
 		snooze_pressed();
 	else if (!strcmp(cmd, "power"))		/* the power button, pressed */
 		power_pressed();
-	else if (!strcmp(cmd, "screen on"))
+	else if (!strcmp(cmd, "restart airplay")) {	/* audio.d/airplay, as the apps' user */
+		char *argv[] = { "systemctl", "restart", "shairport-sync", NULL };
+
+		chumby_spawn("/usr/bin/systemctl", argv);
+	} else if (!strcmp(cmd, "screen on"))
 		screen_set(true);
 	else if (!strcmp(cmd, "screen off"))
 		screen_set(false);
@@ -1888,7 +1975,122 @@ static int cmd_fifo_open(void)
 		fprintf(stderr, "chumby-shell: cannot create %s\n", path);
 		return -1;
 	}
+	/* Writable by the apps (another user: "launch AirPlay" from its hook,
+	 * chumby_shell_command()), whatever our umask made of it. */
+	chmod(path, 0622);
 	return open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+}
+
+/* ------------------------------------------------------------------ */
+/* Memory: background apps go first                                   */
+
+static void oom_set(int pid, int adj)
+{
+	char path[40], v[16];
+	int fd, n;
+
+	if (pid <= 0)
+		return;
+	snprintf(path, sizeof(path), "/proc/%d/oom_score_adj", pid);
+	if ((fd = open(path, O_WRONLY | O_CLOEXEC)) < 0)
+		return;
+	n = snprintf(v, sizeof(v), "%d", adj);
+	if (write(fd, v, n) < 0)
+		;
+	close(fd);
+}
+
+/* The app in front 0; the clock 100; the others 300, 400... the longer
+ * they've been in the background. */
+static void oom_update(void)
+{
+	struct toplevel *t, *cur = tl_current();
+
+	for (t = toplevels; t; t = t->next) {
+		struct app_info *a = app_by_id(t->app_id);
+		struct toplevel *o;
+		int newer = 0;
+
+		if (!a || a->pid <= 0)
+			continue;
+		if (t == cur) {
+			oom_set(a->pid, OOM_FRONT);
+			continue;
+		}
+		if (is_clock(t->app_id)) {
+			oom_set(a->pid, OOM_CLOCK);
+			continue;
+		}
+		for (o = toplevels; o; o = o->next)
+			if (o != cur && o != t && !is_clock(o->app_id) && o->seen > t->seen)
+				newer++;
+		oom_set(a->pid, OOM_BACK + 100 * newer > 1000 ? 1000 : OOM_BACK + 100 * newer);
+	}
+}
+
+/*
+ * Before the kernel has to: every EVICT_EVERY_MS, if less than
+ * EVICT_BELOW_KB is available, the app longest in the background is asked
+ * to close (as holding its tab does), and ended EVICT_GRACE_MS later if it
+ * hasn't. Never the app in front, nor the clock (the home app). What an app
+ * plays goes on (chumby-stream, the FM loop, AirPlay are processes of their
+ * own); its tab comes back when it's started again.
+ */
+#define EVICT_EVERY_MS	2000
+#define EVICT_BELOW_KB	8192
+#define EVICT_GRACE_MS	3000
+
+static int evicting_pid;
+static uint64_t evicting_since;
+
+static long mem_available_kb(void)
+{
+	FILE *f = fopen("/proc/meminfo", "r");
+	char line[80];
+	long kb = -1;
+
+	if (!f)
+		return -1;
+	while (fgets(line, sizeof(line), f))
+		if (sscanf(line, "MemAvailable: %ld kB", &kb) == 1)
+			break;
+	fclose(f);
+	return kb;
+}
+
+static void evict_cb(lv_timer_t *timer)
+{
+	struct toplevel *t, *cur = tl_current(), *victim = NULL;
+	struct app_info *a;
+	long kb;
+
+	(void)timer;
+	if (evicting_pid > 0) {		/* asked to close: still there? */
+		if (kill(evicting_pid, 0) == 0 && mono_ms() - evicting_since < EVICT_GRACE_MS)
+			return;
+		if (kill(evicting_pid, 0) == 0)
+			kill(evicting_pid, SIGKILL);
+		evicting_pid = 0;
+	}
+	kb = mem_available_kb();
+	if (kb < 0 || kb >= EVICT_BELOW_KB)
+		return;
+	for (t = toplevels; t; t = t->next) {
+		a = app_by_id(t->app_id);
+		if (t == cur || is_clock(t->app_id) || !a || a->pid <= 0)
+			continue;
+		if (!victim || t->seen < victim->seen)
+			victim = t;
+	}
+	if (!victim)
+		return;
+	a = app_by_id(victim->app_id);
+	fprintf(stderr, "chumby-shell: memory low (%ld kB available): closing %s\n",
+		kb, victim->app_id);
+	zwlr_foreign_toplevel_handle_v1_close(victim->handle);
+	wl_display_flush(wl);
+	evicting_pid = a->pid;
+	evicting_since = mono_ms();
 }
 
 /* Reap apps we launched once they exit. */
@@ -1904,9 +2106,12 @@ static void reaper_cb(lv_timer_t *t)
 			tone_pid = -1;
 		if (pid == saver_pid)
 			saver_pid = -1;
-		for (i = 0; i < n_apps; i++)
+		for (i = 0; i < n_apps; i++) {
 			if (apps[i].starting_pid == pid)
 				apps[i].starting_pid = 0;	/* died starting */
+			if (apps[i].pid == pid)
+				apps[i].pid = 0;
+		}
 	}
 }
 
@@ -1927,6 +2132,7 @@ int main(void)
 	int resistive_ts;
 
 	chumby_init();
+	app_user_init();
 	load_apps();
 	ftl_init();
 
@@ -1955,6 +2161,7 @@ int main(void)
 	chumby_watch_fd(cmd_fifo_open(), cmd_readable, NULL);
 	lv_timer_ready(lv_timer_create(volume_sync_cb, 2000, NULL));
 	lv_timer_create(reaper_cb, 1000, NULL);
+	lv_timer_create(evict_cb, EVICT_EVERY_MS, NULL);
 	lv_timer_create(saver_timer_cb, 10 * 1000, NULL);
 	/* A stale state file from a previous run: we're idle. */
 	alarm_publish();

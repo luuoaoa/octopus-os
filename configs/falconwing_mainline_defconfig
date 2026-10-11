@@ -36,6 +36,7 @@ BR2_TARGET_LOCALTIME="Etc/UTC"
 BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing/rootfs-common $(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/rootfs"
 BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/post-build.sh"
 BR2_ROOTFS_POST_FAKEROOT_SCRIPT="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/post-fakeroot.sh"
+BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/users.table"
 BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/post-image.sh"
 
 # Kernel: latest mainline buildroot knows, mxs_defconfig + board fragment.

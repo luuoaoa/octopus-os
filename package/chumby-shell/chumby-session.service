@@ -9,8 +9,15 @@ ExecStartPre=/bin/sh -c 'i=0; while [ ! -e /dev/dri/card0 ] && [ $i -lt 30 ]; do
 # input devices directly. wlroots picks its renderer: the GPU where it
 # was built with gles2 and EGL starts (the Pi), else pixman (the Chumby).
 Environment=XDG_RUNTIME_DIR=/run/chumby LIBSEAT_BACKEND=builtin WLR_LIBINPUT_NO_DEVICES=1
-RuntimeDirectory=chumby
-RuntimeDirectoryMode=0700
+# The compositor and the shell are root; the apps the shell starts are the
+# "chumby" user's, and share /run/chumby with them (the Wayland socket,
+# chumby-wm makes it theirs; the shell's FIFO; the state files).
+# (Made here, not with RuntimeDirectory=: systemd would give it back to
+# root for every command it starts.)
+ExecStartPre=/bin/sh -c 'rm -rf /run/chumby && install -d -o chumby -g chumby -m 0775 /run/chumby /run/chumby/audio'
+ExecStopPost=/bin/rm -rf /run/chumby
+# Out of memory, the kernel ends apps (the shell ranks them), never this.
+OOMScoreAdjust=-900
 ExecStart=/usr/bin/chumby-wm -s /usr/bin/chumby-shell
 # The whole cgroup goes on stop/restart: compositor, shell, apps, tone.
 KillMode=control-group

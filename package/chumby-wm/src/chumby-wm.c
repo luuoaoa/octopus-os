@@ -1881,6 +1881,15 @@ int main(int argc, char **argv)
 		wlr_backend_destroy(s.backend);
 		return 1;
 	}
+	/* Apps run as another user than us (chumby-shell starts them as
+	 * "chumby"): the socket is theirs to connect to too. */
+	{
+		char path[256];
+
+		snprintf(path, sizeof(path), "%s/%s", getenv("XDG_RUNTIME_DIR"), socket);
+		if (chmod(path, 0666) < 0)
+			wlr_log(WLR_ERROR, "%s: %s", path, strerror(errno));
+	}
 	if (!wlr_backend_start(s.backend)) {
 		wlr_backend_destroy(s.backend);
 		wl_display_destroy(s.display);

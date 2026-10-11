@@ -6,7 +6,9 @@ After=network.target sound.target
 After=wireplumber.service
 
 [Service]
-# As root: its hooks call chumby-audio and the shell, both root's.
+# As the apps' user (sound through its audio group): its hooks call
+# chumby-audio and the shell's FIFO, as the apps do.
+User=chumby
 # Ahead of the UI, like chumby-stream: redraws mustn't make it late.
 Nice=-10
 RuntimeDirectory=shairport-sync

@@ -40,7 +40,7 @@
 #define ART_DIR		"/var/lib/chumby/art"
 #define ART_TOOL	"/usr/bin/chumby-station-art"
 #define MAX_STATIONS	64
-#define RADIO_PIDFILE	"/var/run/radio-loop.pid"
+#define RADIO_PIDFILE	"/run/chumby/radio-loop.pid"
 #define FREQ_MIN	876	/* tenths of MHz */
 #define FREQ_MAX	1080
 #define ART_SIZE	92	/* the tile */

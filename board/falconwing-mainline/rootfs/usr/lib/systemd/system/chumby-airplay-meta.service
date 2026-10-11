@@ -6,6 +6,7 @@ After=shairport-sync.service
 PartOf=shairport-sync.service
 
 [Service]
+User=chumby
 ExecStart=/usr/bin/chumby-airplay-meta /run/shairport-sync/metadata
 Restart=always
 RestartSec=2
