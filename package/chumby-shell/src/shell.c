@@ -1792,9 +1792,18 @@ static int cmd_fifo_open(void)
 {
 	const char *dir = chumby_run_dir();
 	char path[256];
+	struct stat st;
 
 	mkdir(dir, 0755);
 	snprintf(path, sizeof(path), "%s/shell.cmd", dir);
+	/* Something else there - a plain file, made by a shell's "echo cmd >"
+	 * before we were up - goes: polled, a file is always readable, and
+	 * read at its end gives nothing, so we'd spin (half the ARM9) and
+	 * never hear a command. */
+	if (lstat(path, &st) == 0 && !S_ISFIFO(st.st_mode)) {
+		fprintf(stderr, "chumby-shell: %s wasn't a FIFO: made again\n", path);
+		unlink(path);
+	}
 	if (mkfifo(path, 0622) < 0 && errno != EEXIST) {
 		fprintf(stderr, "chumby-shell: cannot create %s\n", path);
 		return -1;

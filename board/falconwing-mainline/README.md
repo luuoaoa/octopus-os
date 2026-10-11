@@ -218,7 +218,8 @@ the card (`/var/try`: the Chumby has 64 MB of RAM), the sound muted:
 - `push /usr/bin/chumby-wm /usr/lib/libchumby.so.1 ...` stages this build's
   unstripped copies (named functions in perf) in the run overlay; `apply`
   reboots into it (nothing is swapped under a running session: that reset
-  the Chumby); `status` shows it; `reset` removes it and reboots.
+  the Chumby); `push` adds to what's staged, `drop PATH...` un-stages;
+  `status` shows it; `reset` removes it and reboots.
 - `perf [S]` samples the whole system S seconds (perf is in the image, the
   kernel has `CONFIG_PERF_EVENTS`; timer sampling, the ARM926 has no
   counters for it): time by process and library, then by function.
@@ -232,6 +233,18 @@ the card (`/var/try`: the Chumby has 64 MB of RAM), the sound muted:
 descriptor, once a second) log to the journal. `/proc/stat`'s idle ticks
 undercount here (tickless idle): compare shares of the ticks counted, as
 `bench` does.
+
+Don't `systemctl daemon-reload` on the Chumby (e.g. for a drop-in setting
+one of those): systemd feeds the hardware watchdog every 15 s, and a
+reload - every unit re-read from the compressed image, the page cache
+short of RAM - stalls it past that, and the Chumby resets. The journal is
+in RAM: to see why something reset, stream it to the card first.
+
+Without a GPU, chumby-wm runs the screen 16-bit (RGB565, as the apps
+draw): showing a window is then a plain copy, and every copy - pixman's
+into the uncached scanout buffer, the LCD controller's reading it - moves
+half the bytes, most of the cost on this memory. `CHUMBY_WM_32BIT=1`
+keeps it 32-bit.
 
 ## Unverified until it runs on hardware
 
