@@ -403,6 +403,9 @@ static void launch(struct app_info *a)
 #define TAB_TITLE_MAX	80
 #define POPUP_IDLE_MS	4000
 #define STOP_SIZE	36	/* the volume control's stop button */
+/* The menu card and the sliders' plate, a little see-through: under them
+ * chumby-wm dims the app (and blurs it, on a GPU). */
+#define POPUP_OPA	LV_OPA_80
 static void stop_btn_cb(lv_event_t *e);
 
 static lv_obj_t *panel_scr;
@@ -524,8 +527,11 @@ static lv_obj_t *tab_create(lv_obj_t *parent, const char *sym, const char *name,
 static void tray_style(lv_obj_t *b, bool on)
 {
 	tab_style(b, on);
-	if (on)		/* not the accent: that's the app's tab */
+	if (on) {	/* not the accent: that's the app's tab */
 		lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_TEXT), 0);
+		/* As see-through as the plate it joins. */
+		lv_obj_set_style_bg_opa(b, POPUP_OPA, 0);
+	}
 	else	/* plain icon at rest */
 		lv_obj_set_style_border_opa(b, LV_OPA_TRANSP, 0);
 }
@@ -692,7 +698,7 @@ static void menu_open(void)
 	lv_obj_set_size(plate, MENU_W, h);
 	lv_obj_set_scrollable(plate, false);
 	lv_obj_set_style_radius(plate, MENU_RADIUS, 0);
-	lv_obj_set_style_bg_opa(plate, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_opa(plate, POPUP_OPA, 0);
 	lv_obj_set_style_bg_color(plate, chumby_color(CHUMBY_COLOR_TEXT), 0);
 	lv_obj_set_flex_flow(plate, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_all(plate, MENU_PAD, 0);
@@ -1060,6 +1066,9 @@ static void popup_open(enum popup_kind kind)
 	lv_obj_set_style_radius(plate, MENU_RADIUS, 0);
 	lv_obj_set_style_bg_opa(plate, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(plate, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	/* See-through as a whole (one layer): the corner square below would
+	 * show darker where it overlaps the plate if each were. */
+	lv_obj_set_style_opa_layered(plate, POPUP_OPA, 0);
 	/* Square where it joins its button (top right). */
 	sq = lv_obj_create(plate);
 	lv_obj_remove_style_all(sq);

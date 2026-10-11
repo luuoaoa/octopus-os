@@ -134,9 +134,16 @@ struct server {
 	struct wlr_scene_output_layout *scene_layout;
 	struct wlr_output_layout *output_layout;
 
-	/* Stacking: home < apps < popup < panel, all in the UI's tree. */
-	struct wlr_scene_tree *ui_tree, *home_tree, *apps_tree, *popup_tree, *panel_tree,
-		*cal_tree, *corner_tree;
+	/* Stacking: home < apps < veil < popup < panel, all in the UI's tree. */
+	struct wlr_scene_tree *ui_tree, *home_tree, *apps_tree, *veil_tree, *popup_tree,
+		*panel_tree, *cal_tree, *corner_tree;
+	/* Under the shell's popup or menu, over the app (not the bar): the
+	 * app blurred (on a GPU only) and dimmed. */
+	bool gpu;			/* rendering on one (not pixman) */
+	struct wlr_scene_buffer *veil_blur;
+	struct wlr_scene_rect *veil_dim;
+	struct wl_event_source *blur_timer;
+	bool blur_pending;
 	struct wlr_scene_rect *ui_backdrop;
 	bool corners;			/* made (once the output's size is known) */
 
@@ -204,6 +211,9 @@ struct touch_dev {
 
 /* ------------------------------------------------------------------ */
 /* Views                                                              */
+
+static void veil_update(struct server *s);
+static void veil_app_changed(struct server *s);
 
 static void view_configure(struct view *v)
 {
@@ -403,6 +413,8 @@ static void view_map(struct wl_listener *l, void *data)
 
 	(void)data;
 	v->mapped = true;
+	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU)
+		veil_update(s);
 	if (v->kind != VIEW_APP)
 		return;
 
@@ -440,6 +452,8 @@ static void view_unmap(struct wl_listener *l, void *data)
 	}
 	if (v->kind == VIEW_APP)
 		activate(s, top_app(s));
+	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU || v->kind == VIEW_APP)
+		veil_update(s);
 }
 
 static void buffer_nearest(struct wlr_scene_buffer *b, int sx, int sy, void *user)
@@ -463,6 +477,8 @@ static void view_commit(struct wl_listener *l, void *data)
 		wlr_output_schedule_frame(s->output);
 	/* Scaled up (a bigger screen): crisp pixels, not blurred ones. */
 	wlr_scene_node_for_each_buffer(&v->tree->node, buffer_nearest, NULL);
+	if (v->kind == VIEW_APP && v == top_app(s))
+		veil_app_changed(s);
 	if (!v->xdg->base->initial_commit)
 		return;
 
@@ -1174,10 +1190,12 @@ static void output_destroy(struct wl_listener *l, void *data)
 
 /* A read-only pixel buffer: the top-left corner's mask, black outside a
  * quarter circle (premultiplied ARGB, so just alpha). */
-/* A buffer of premultiplied ARGB pixels: the cursor's discs. */
+/* A buffer of premultiplied pixels: the cursor's discs (ARGB), the
+ * veil's blurred app (as the GPU reads it back). */
 struct pix_buf {
 	struct wlr_buffer base;
-	int side;
+	int w, h;
+	uint32_t format;
 	uint32_t px[];
 };
 
@@ -1194,8 +1212,8 @@ static bool pix_begin(struct wlr_buffer *b, uint32_t flags, void **data, uint32_
 	if (flags & WLR_BUFFER_DATA_PTR_ACCESS_WRITE)
 		return false;
 	*data = pb->px;
-	*format = DRM_FORMAT_ARGB8888;
-	*stride = pb->side * 4;
+	*format = pb->format;
+	*stride = pb->w * 4;
 	return true;
 }
 
@@ -1221,7 +1239,8 @@ static struct wlr_buffer *disc_create(int side, double r, double a)
 
 	if (!pb)
 		return NULL;
-	pb->side = side;
+	pb->w = pb->h = side;
+	pb->format = DRM_FORMAT_ARGB8888;
 	wlr_buffer_init(&pb->base, &pix_impl, side, side);
 	for (y = 0; y < side; y++)
 		for (x = 0; x < side; x++) {
@@ -1239,6 +1258,134 @@ static struct wlr_buffer *disc_create(int side, double r, double a)
 					       (uint32_t)(grey * al * 255 + 0.5) * 0x010101u;
 		}
 	return &pb->base;
+}
+
+/* ------------------------------------------------------------------ */
+/* The veil: under the shell's popups, over the app                   */
+
+#define BLUR_R		4	/* box radius, UI pixels; three passes ~ Gaussian */
+#define BLUR_PASSES	3
+#define BLUR_EVERY_MS	250	/* the app changing under it: blurred again, at most (~10 ms each on a Pi 4) */
+#define DIM_GPU		0.22f	/* black over the blur */
+#define DIM_SOFT	0.30f	/* black over the app, no blur (pixman) */
+
+/* One box-blur pass along a line of n pixels, `step` apart, all four
+ * channels: a running sum over 2r+1, the edges repeated. */
+static void blur_line(uint32_t *p, int n, int step, int r, uint32_t *tmp)
+{
+	uint32_t sum[4] = { 0 };
+	int i, c, k = 2 * r + 1;
+
+	for (i = 0; i < n; i++)
+		tmp[i] = p[i * step];
+	for (i = -r; i <= r; i++) {
+		uint32_t v = tmp[i < 0 ? 0 : i >= n ? n - 1 : i];
+
+		for (c = 0; c < 4; c++)
+			sum[c] += v >> (c * 8) & 0xff;
+	}
+	for (i = 0; i < n; i++) {
+		uint32_t out = 0, in = tmp[i + r + 1 < n ? i + r + 1 : n - 1],
+			 gone = tmp[i - r > 0 ? i - r : 0];
+
+		for (c = 0; c < 4; c++) {
+			out |= (sum[c] / k) << (c * 8);
+			sum[c] += (in >> (c * 8) & 0xff) - (gone >> (c * 8) & 0xff);
+		}
+		p[i * step] = out;
+	}
+}
+
+/* The app as it is now, blurred: read back from its texture (a GPU's,
+ * so it's cheap: 320x208), blurred here, shown as the veil's buffer. */
+static void veil_blur_now(struct server *s, struct view *app)
+{
+	struct wlr_texture *tex = wlr_surface_get_texture(app->xdg->base->surface);
+	struct pix_buf *pb;
+	uint32_t *tmp;
+	int w, h, x, y, pass;
+
+	s->blur_pending = false;
+	if (!tex)
+		return;
+	w = tex->width;
+	h = tex->height;
+	pb = calloc(1, sizeof(*pb) + sizeof(uint32_t) * w * h);
+	tmp = malloc(sizeof(uint32_t) * (w > h ? w : h));
+	if (!pb || !tmp)
+		goto fail;
+	pb->w = w;
+	pb->h = h;
+	pb->format = wlr_texture_preferred_read_format(tex);
+	if (pb->format != DRM_FORMAT_XRGB8888 && pb->format != DRM_FORMAT_ARGB8888 &&
+	    pb->format != DRM_FORMAT_XBGR8888 && pb->format != DRM_FORMAT_ABGR8888)
+		pb->format = DRM_FORMAT_ARGB8888;
+	if (!wlr_texture_read_pixels(tex, &(struct wlr_texture_read_pixels_options){
+			.data = pb->px, .format = pb->format, .stride = w * 4 }))
+		goto fail;
+	for (pass = 0; pass < BLUR_PASSES; pass++) {
+		for (y = 0; y < h; y++)
+			blur_line(pb->px + y * w, w, 1, BLUR_R, tmp);
+		for (x = 0; x < w; x++)
+			blur_line(pb->px + x, h, w, BLUR_R, tmp);
+	}
+	for (x = 0; x < w * h; x++)	/* an app is opaque (X formats: undefined) */
+		pb->px[x] |= 0xff000000u;
+	free(tmp);
+	wlr_buffer_init(&pb->base, &pix_impl, w, h);
+	wlr_scene_buffer_set_buffer(s->veil_blur, &pb->base);
+	wlr_buffer_drop(&pb->base);
+	/* Blurred already: smooth when scaled up, not blocky. */
+	wlr_scene_buffer_set_filter_mode(s->veil_blur, WLR_SCALE_FILTER_BILINEAR);
+	wlr_scene_buffer_set_dest_size(s->veil_blur, w, h);
+	return;
+fail:
+	free(tmp);
+	free(pb);
+}
+
+static struct view *top_app(struct server *s);
+static bool shell_popup_up(struct server *s);
+
+static int blur_timer_cb(void *data)
+{
+	struct server *s = data;
+	struct view *app = top_app(s);
+
+	if (s->blur_pending && app && shell_popup_up(s))
+		veil_blur_now(s, app);
+	s->blur_pending = false;
+	return 0;
+}
+
+/* Up with the shell's popup or menu, over the app in front; gone with
+ * them. */
+static void veil_update(struct server *s)
+{
+	struct view *app = top_app(s);
+	bool up = app && shell_popup_up(s);
+	bool was = s->veil_tree->node.enabled;
+
+	wlr_scene_node_set_enabled(&s->veil_tree->node, up);
+	if (!up) {
+		if (s->veil_blur)
+			wlr_scene_buffer_set_buffer(s->veil_blur, NULL);	/* its memory */
+		return;
+	}
+	wlr_scene_node_set_position(&s->veil_tree->node, 0, BAR_H);
+	wlr_scene_rect_set_size(s->veil_dim, s->width, s->height - BAR_H);
+	if (s->gpu && !was)
+		veil_blur_now(s, app);
+}
+
+/* The app drew while the veil is up: blur it again, soon (not at its
+ * every frame). */
+static void veil_app_changed(struct server *s)
+{
+	if (!s->gpu || !s->veil_tree->node.enabled || s->blur_pending)
+		return;
+	s->blur_pending = true;
+	wl_event_source_timer_update(s->blur_timer, BLUR_EVERY_MS);
 }
 
 struct corner_buf {
@@ -1487,6 +1634,15 @@ int main(int argc, char **argv)
 					      (float[4]){ 0.06f, 0.08f, 0.09f, 1.0f });
 	s.home_tree = wlr_scene_tree_create(s.ui_tree);
 	s.apps_tree = wlr_scene_tree_create(s.ui_tree);
+	s.veil_tree = wlr_scene_tree_create(s.ui_tree);
+	s.gpu = !wlr_renderer_is_pixman(s.renderer);
+	if (s.gpu)
+		s.veil_blur = wlr_scene_buffer_create(s.veil_tree, NULL);
+	s.veil_dim = wlr_scene_rect_create(s.veil_tree, UI_W, UI_H - BAR_H,
+					   (float[4]){ 0, 0, 0, s.gpu ? DIM_GPU : DIM_SOFT });
+	wlr_scene_node_set_enabled(&s.veil_tree->node, false);
+	s.blur_timer = wl_event_loop_add_timer(wl_display_get_event_loop(s.display),
+					       blur_timer_cb, &s);
 	s.popup_tree = wlr_scene_tree_create(s.ui_tree);
 	s.panel_tree = wlr_scene_tree_create(s.ui_tree);
 	s.cal_tree = wlr_scene_tree_create(s.ui_tree);
