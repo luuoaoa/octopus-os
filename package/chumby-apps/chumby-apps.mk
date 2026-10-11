@@ -28,6 +28,7 @@ define CHUMBY_APPS_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/chumby-airplay $(TARGET_DIR)/usr/bin/chumby-airplay
 	$(INSTALL) -D -m 0755 $(@D)/chumby-airplay-meta $(TARGET_DIR)/usr/bin/chumby-airplay-meta
 	$(INSTALL) -D -m 0755 $(@D)/chumby-airplay-remote $(TARGET_DIR)/usr/bin/chumby-airplay-remote
+	$(INSTALL) -D -m 0755 $(@D)/chumby-toasters $(TARGET_DIR)/usr/bin/chumby-toasters
 	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/airplay.app \
 		$(TARGET_DIR)/usr/share/chumby/apps/airplay.app
 	$(INSTALL) -D -m 0644 $(CHUMBY_APPS_PKGDIR)/podcasts.app \

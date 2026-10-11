@@ -2,7 +2,7 @@
 PKG_CONFIG ?= pkg-config
 APPS := chumby-clock chumby-fm chumby-netradio chumby-stream chumby-calibrate \
 	chumby-podcasts chumby-podcast-feed chumby-airplay chumby-airplay-meta \
-	chumby-airplay-remote
+	chumby-airplay-remote chumby-toasters
 
 override CFLAGS += -Wall $(shell $(PKG_CONFIG) --cflags libchumby)
 LDLIBS += $(shell $(PKG_CONFIG) --libs libchumby)
@@ -36,6 +36,9 @@ chumby-airplay-meta: airplay-meta.o
 # Remote control of the AirPlay sender (DACP): no UI, no libraries.
 chumby-airplay-remote: airplay-remote.o
 	$(CC) $(LDFLAGS) -o $@ $^
+
+chumby-toasters: toasters.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 chumby-calibrate: calibrate.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) -lm

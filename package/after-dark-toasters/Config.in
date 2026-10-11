@@ -1,0 +1,10 @@
+config BR2_PACKAGE_AFTER_DARK_TOASTERS
+	bool "after-dark-toasters"
+	help
+	  The Flying Toasters' pictures (a toaster's four wing frames,
+	  a slice of toast), as After Dark CSS has them, for the
+	  chumby-toasters screen saver. Downloaded at build time, not
+	  kept in this repository: the pictures are (c) 1989 Berkeley
+	  Systems.
+
+	  https://www.bryanbraun.com/after-dark-css/

@@ -6,6 +6,7 @@ config BR2_PACKAGE_CHUMBY_APPS
 	select BR2_PACKAGE_FAAD2
 	select BR2_PACKAGE_ALSA_LIB
 	select BR2_PACKAGE_EXPAT
+	select BR2_PACKAGE_AFTER_DARK_TOASTERS	# chumby-toasters' pictures
 	help
 	  Chumby One apps on libchumby: Clock (with alarms, rung by
 	  chumby-shell), FM Radio (uses /usr/bin/radio from the
@@ -13,4 +14,5 @@ config BR2_PACKAGE_CHUMBY_APPS
 	  streams, HLS too, played by chumby-stream) and Podcasts (RSS
 	  feeds read by chumby-podcast-feed, episodes played by
 	  chumby-stream) and AirPlay (what shairport-sync receives; the
-	  board selects shairport-sync).
+	  board selects shairport-sync). And Flying Toasters, the screen
+	  saver chumby-shell starts after a while without a touch.

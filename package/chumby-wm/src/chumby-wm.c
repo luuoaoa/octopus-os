@@ -107,6 +107,8 @@
 #define APP_POPUP	"chumby-popup"
 #define APP_MENU	"chumby-menu"
 #define APP_CAL		"chumby-calibrate"
+#define APP_SAVER	"chumby-saver"	/* the screen saver: over everything */
+#define IDLE_MS		(5 * 60 * 1000)	/* no input this long: idle */
 #define CAL_DIR		"/var/lib/chumby"
 #define CAL_NAME	"touch.cal"
 #define CAL_FILE	CAL_DIR "/" CAL_NAME
@@ -123,7 +125,9 @@
 #define CURSOR_IDLE_MS	5000	/* still this long: it goes */
 
 enum view_kind { VIEW_UNKNOWN, VIEW_PANEL, VIEW_HOME, VIEW_POPUP, VIEW_MENU, VIEW_CAL,
-		 VIEW_APP };
+		 VIEW_SAVER, VIEW_APP };
+/* The veil (see veil_update()): off, under a popup, under the saver. */
+enum veil_mode { VEIL_OFF, VEIL_POPUP, VEIL_SAVER };
 
 struct server {
 	struct wl_display *display;
@@ -134,9 +138,10 @@ struct server {
 	struct wlr_scene_output_layout *scene_layout;
 	struct wlr_output_layout *output_layout;
 
-	/* Stacking: home < apps < veil < popup < panel, all in the UI's tree. */
+	/* Stacking: home < apps < veil < popup < panel < saver, all in the
+	 * UI's tree (the veil goes under the saver while that's up). */
 	struct wlr_scene_tree *ui_tree, *home_tree, *apps_tree, *veil_tree, *popup_tree,
-		*panel_tree, *cal_tree, *corner_tree;
+		*panel_tree, *saver_tree, *cal_tree, *corner_tree;
 	/* Under the shell's popup or menu, over the app (not the bar): the
 	 * app blurred (on a GPU only) and dimmed. */
 	bool gpu;			/* rendering on one (not pixman) */
@@ -144,6 +149,13 @@ struct server {
 	struct wlr_scene_rect *veil_dim;
 	struct wl_event_source *blur_timer;
 	bool blur_pending;
+	int veil_mode;			/* enum veil_mode */
+	struct view *saver;		/* the screen saver's window, if any */
+
+	/* Nobody's touched anything for IDLE_MS: the shell is told ("idle",
+	 * then "active" at the next input), and may start the saver. */
+	struct wl_event_source *idle_timer;
+	bool idle;
 	struct wlr_scene_rect *ui_backdrop;
 	bool corners;			/* made (once the output's size is known) */
 
@@ -237,6 +249,7 @@ static void view_configure(struct view *v)
 		break;
 	}
 	case VIEW_CAL:
+	case VIEW_SAVER:
 		wlr_scene_node_set_position(&v->tree->node, 0, 0);
 		wlr_xdg_toplevel_set_size(v->xdg, s->width, s->height);
 		break;
@@ -255,6 +268,16 @@ static void view_configure(struct view *v)
 	default:
 		break;
 	}
+}
+
+static struct view *panel_view(struct server *s)
+{
+	struct view *v;
+
+	wl_list_for_each(v, &s->views, link)
+		if (v->kind == VIEW_PANEL && v->mapped)
+			return v;
+	return NULL;
 }
 
 static struct view *top_app(struct server *s)
@@ -413,7 +436,7 @@ static void view_map(struct wl_listener *l, void *data)
 
 	(void)data;
 	v->mapped = true;
-	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU)
+	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU || v->kind == VIEW_SAVER)
 		veil_update(s);
 	if (v->kind != VIEW_APP)
 		return;
@@ -452,7 +475,8 @@ static void view_unmap(struct wl_listener *l, void *data)
 	}
 	if (v->kind == VIEW_APP)
 		activate(s, top_app(s));
-	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU || v->kind == VIEW_APP)
+	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU || v->kind == VIEW_APP ||
+	    v->kind == VIEW_SAVER)
 		veil_update(s);
 }
 
@@ -477,7 +501,8 @@ static void view_commit(struct wl_listener *l, void *data)
 		wlr_output_schedule_frame(s->output);
 	/* Scaled up (a bigger screen): crisp pixels, not blurred ones. */
 	wlr_scene_node_for_each_buffer(&v->tree->node, buffer_nearest, NULL);
-	if (v->kind == VIEW_APP && v == top_app(s))
+	if ((v->kind == VIEW_APP && v == top_app(s)) ||
+	    (v->kind == VIEW_PANEL && s->veil_mode == VEIL_SAVER))
 		veil_app_changed(s);
 	if (!v->xdg->base->initial_commit)
 		return;
@@ -496,6 +521,10 @@ static void view_commit(struct wl_listener *l, void *data)
 	} else if (!strcmp(id, APP_CAL)) {
 		v->kind = VIEW_CAL;
 		wlr_scene_node_reparent(&v->tree->node, s->cal_tree);
+	} else if (!strcmp(id, APP_SAVER)) {
+		v->kind = VIEW_SAVER;
+		s->saver = v;
+		wlr_scene_node_reparent(&v->tree->node, s->saver_tree);
 	} else if (!strcmp(id, APP_MENU)) {
 		v->kind = VIEW_MENU;
 		wlr_scene_node_reparent(&v->tree->node, s->popup_tree);
@@ -539,6 +568,8 @@ static void view_destroy(struct wl_listener *l, void *data)
 	struct view *v = wl_container_of(l, v, destroy);
 
 	(void)data;
+	if (v->server->saver == v)
+		v->server->saver = NULL;
 	wl_list_remove(&v->map.link);
 	wl_list_remove(&v->unmap.link);
 	wl_list_remove(&v->commit.link);
@@ -685,19 +716,46 @@ static bool in_tree(struct wlr_scene_node *node, struct wlr_scene_tree *tree)
 	return false;
 }
 
-static void shell_dismiss(void)
+/* A line to the shell's command FIFO ("dismiss", "idle", "active"). */
+static void shell_cmd(const char *line)
 {
 	const char *dir = getenv("CHUMBY_RUN_DIR");
-	char path[256];
-	int fd;
+	char path[256], buf[64];
+	int fd, n;
 
 	snprintf(path, sizeof(path), "%s/shell.cmd", dir && *dir ? dir : "/run/chumby");
 	fd = open(path, O_WRONLY | O_NONBLOCK | O_CLOEXEC);
 	if (fd < 0)
 		return;
-	if (write(fd, "dismiss\n", 8) < 0)
+	n = snprintf(buf, sizeof(buf), "%s\n", line);
+	if (write(fd, buf, n) < 0)
 		wlr_log(WLR_ERROR, "%s: %s", path, strerror(errno));
 	close(fd);
+}
+
+static void shell_dismiss(void)
+{
+	shell_cmd("dismiss");
+}
+
+/* Someone's there: the idle clock starts over (and the shell hears they're
+ * back, if it was told they'd gone: it closes the saver). */
+static void input_activity(struct server *s)
+{
+	if (s->idle) {
+		s->idle = false;
+		shell_cmd("active");
+	}
+	wl_event_source_timer_update(s->idle_timer, IDLE_MS);
+}
+
+static int idle_timer_cb(void *data)
+{
+	struct server *s = data;
+
+	s->idle = true;
+	shell_cmd("idle");
+	return 0;
 }
 
 static struct wlr_buffer *disc_create(int side, double r, double a);
@@ -779,6 +837,7 @@ static void cursor_motion(struct wl_listener *l, void *data)
 	struct server *s = wl_container_of(l, s, cursor_motion);
 	struct wlr_pointer_motion_event *ev = data;
 
+	input_activity(s);
 	wlr_cursor_move(s->cursor, &ev->pointer->base, ev->delta_x, ev->delta_y);
 	cursor_moved(s, ev->time_msec);
 }
@@ -788,6 +847,7 @@ static void cursor_motion_abs(struct wl_listener *l, void *data)
 	struct server *s = wl_container_of(l, s, cursor_motion_abs);
 	struct wlr_pointer_motion_absolute_event *ev = data;
 
+	input_activity(s);
 	wlr_cursor_warp_absolute(s->cursor, &ev->pointer->base, ev->x, ev->y);
 	cursor_moved(s, ev->time_msec);
 }
@@ -802,6 +862,7 @@ static void cursor_button(struct wl_listener *l, void *data)
 	struct wlr_pointer_button_event *ev = data;
 	bool down = ev->state == WL_POINTER_BUTTON_STATE_PRESSED;
 
+	input_activity(s);
 	if (screen_dark())
 		return;		/* as for touches: nothing pressed blind */
 	s->cursor_down = down;
@@ -832,6 +893,7 @@ static void cursor_axis(struct wl_listener *l, void *data)
 	struct server *s = wl_container_of(l, s, cursor_axis);
 	struct wlr_pointer_axis_event *ev = data;
 
+	input_activity(s);
 	cursor_show(s);
 	wlr_seat_pointer_notify_axis(s->seat, ev->time_msec, ev->orientation, ev->delta,
 				     ev->delta_discrete, ev->source, ev->relative_direction);
@@ -871,6 +933,7 @@ static void touch_down(struct wl_listener *l, void *data)
 	double lx = ev->x * s->layout_w, ly = ev->y * s->layout_h, sx, sy;
 	struct wlr_surface *surface = surface_at(s, lx, ly, &sx, &sy);
 
+	input_activity(s);
 	/* Not marked active: its motion and up are dropped too. */
 	if (ev->touch_id < 0 || ev->touch_id >= MAX_TOUCH || screen_dark())
 		return;
@@ -1029,6 +1092,7 @@ static void kb_key(struct wl_listener *l, void *data)
 	struct keyboard *k = wl_container_of(l, k, key);
 	struct wlr_keyboard_key_event *ev = data;
 
+	input_activity(k->server);
 	wlr_seat_set_keyboard(k->server->seat, k->wlr_keyboard);
 	wlr_seat_keyboard_notify_key(k->server->seat, ev->time_msec,
 				     ev->keycode, ev->state);
@@ -1261,13 +1325,16 @@ static struct wlr_buffer *disc_create(int side, double r, double a)
 }
 
 /* ------------------------------------------------------------------ */
-/* The veil: under the shell's popups, over the app                   */
+/* The veil: under the shell's popups (over the app), or under the    */
+/* screen saver (over everything)                                     */
 
 #define BLUR_R		4	/* box radius, UI pixels; three passes ~ Gaussian */
 #define BLUR_PASSES	3
-#define BLUR_EVERY_MS	250	/* the app changing under it: blurred again, at most (~10 ms each on a Pi 4) */
+#define BLUR_EVERY_MS	250	/* what's under it changing: blurred again, at most (~10 ms each on a Pi 4) */
 #define DIM_GPU		0.22f	/* black over the blur */
 #define DIM_SOFT	0.30f	/* black over the app, no blur (pixman) */
+#define DIM_SAVER_GPU	0.45f	/* under the screen saver: the toasters stand out */
+#define DIM_SAVER_SOFT	0.60f
 
 /* One box-blur pass along a line of n pixels, `step` apart, all four
  * channels: a running sum over 2r+1, the edges repeated. */
@@ -1296,40 +1363,58 @@ static void blur_line(uint32_t *p, int n, int step, int r, uint32_t *tmp)
 	}
 }
 
-/* The app as it is now, blurred: read back from its texture (a GPU's,
- * so it's cheap: 320x208), blurred here, shown as the veil's buffer. */
-static void veil_blur_now(struct server *s, struct view *app)
+/* A window's picture into pb at row y (read back from its texture: a
+ * GPU's, so it's cheap at our size), in pb's format. */
+static void veil_read(struct pix_buf *pb, struct view *v, int y)
 {
-	struct wlr_texture *tex = wlr_surface_get_texture(app->xdg->base->surface);
+	struct wlr_texture *tex = v && v->mapped ?
+		wlr_surface_get_texture(v->xdg->base->surface) : NULL;
+	int w, h;
+
+	if (!tex || y >= pb->h)
+		return;
+	w = tex->width < (uint32_t)pb->w ? (int)tex->width : pb->w;
+	h = tex->height < (uint32_t)(pb->h - y) ? (int)tex->height : pb->h - y;
+	wlr_texture_read_pixels(tex, &(struct wlr_texture_read_pixels_options){
+		.data = pb->px, .format = pb->format, .stride = pb->w * 4,
+		.dst_x = 0, .dst_y = y, .src_box = { 0, 0, w, h } });
+}
+
+static struct view *top_app(struct server *s);
+static struct view *panel_view(struct server *s);
+
+/* What's under the veil as it is now, blurred, as the veil's buffer:
+ * the app (popups), or the bar and the app (the saver). */
+static void veil_blur_now(struct server *s)
+{
+	struct view *app = top_app(s);
+	struct wlr_texture *tex = app ? wlr_surface_get_texture(app->xdg->base->surface) : NULL;
+	bool saver = s->veil_mode == VEIL_SAVER;
+	int w = s->width, h = saver ? s->height : s->height - BAR_H, x, y, pass;
 	struct pix_buf *pb;
 	uint32_t *tmp;
-	int w, h, x, y, pass;
 
 	s->blur_pending = false;
-	if (!tex)
-		return;
-	w = tex->width;
-	h = tex->height;
 	pb = calloc(1, sizeof(*pb) + sizeof(uint32_t) * w * h);
 	tmp = malloc(sizeof(uint32_t) * (w > h ? w : h));
 	if (!pb || !tmp)
 		goto fail;
 	pb->w = w;
 	pb->h = h;
-	pb->format = wlr_texture_preferred_read_format(tex);
+	pb->format = tex ? wlr_texture_preferred_read_format(tex) : DRM_FORMAT_XRGB8888;
 	if (pb->format != DRM_FORMAT_XRGB8888 && pb->format != DRM_FORMAT_ARGB8888 &&
 	    pb->format != DRM_FORMAT_XBGR8888 && pb->format != DRM_FORMAT_ABGR8888)
 		pb->format = DRM_FORMAT_ARGB8888;
-	if (!wlr_texture_read_pixels(tex, &(struct wlr_texture_read_pixels_options){
-			.data = pb->px, .format = pb->format, .stride = w * 4 }))
-		goto fail;
+	if (saver)
+		veil_read(pb, panel_view(s), 0);
+	veil_read(pb, app, saver ? BAR_H : 0);
 	for (pass = 0; pass < BLUR_PASSES; pass++) {
 		for (y = 0; y < h; y++)
 			blur_line(pb->px + y * w, w, 1, BLUR_R, tmp);
 		for (x = 0; x < w; x++)
 			blur_line(pb->px + x, h, w, BLUR_R, tmp);
 	}
-	for (x = 0; x < w * h; x++)	/* an app is opaque (X formats: undefined) */
+	for (x = 0; x < w * h; x++)	/* opaque (X formats: undefined) */
 		pb->px[x] |= 0xff000000u;
 	free(tmp);
 	wlr_buffer_init(&pb->base, &pix_impl, w, h);
@@ -1344,45 +1429,57 @@ fail:
 	free(pb);
 }
 
-static struct view *top_app(struct server *s);
 static bool shell_popup_up(struct server *s);
 
 static int blur_timer_cb(void *data)
 {
 	struct server *s = data;
-	struct view *app = top_app(s);
 
-	if (s->blur_pending && app && shell_popup_up(s))
-		veil_blur_now(s, app);
+	if (s->blur_pending && s->veil_mode != VEIL_OFF)
+		veil_blur_now(s);
 	s->blur_pending = false;
 	return 0;
 }
 
-/* Up with the shell's popup or menu, over the app in front; gone with
- * them. */
+/* Under the saver while it's up (over the bar too); else under the
+ * shell's popup or menu, over the app in front; else gone. */
 static void veil_update(struct server *s)
 {
 	struct view *app = top_app(s);
-	bool up = app && shell_popup_up(s);
-	bool was = s->veil_tree->node.enabled;
+	enum veil_mode mode = s->saver && s->saver->mapped ? VEIL_SAVER :
+			      app && shell_popup_up(s) ? VEIL_POPUP : VEIL_OFF;
+	bool changed = mode != s->veil_mode;
+	bool gpu = s->gpu;
 
-	wlr_scene_node_set_enabled(&s->veil_tree->node, up);
-	if (!up) {
+	s->veil_mode = mode;
+	wlr_scene_node_set_enabled(&s->veil_tree->node, mode != VEIL_OFF);
+	if (mode == VEIL_OFF) {
 		if (s->veil_blur)
 			wlr_scene_buffer_set_buffer(s->veil_blur, NULL);	/* its memory */
 		return;
 	}
-	wlr_scene_node_set_position(&s->veil_tree->node, 0, BAR_H);
-	wlr_scene_rect_set_size(s->veil_dim, s->width, s->height - BAR_H);
-	if (s->gpu && !was)
-		veil_blur_now(s, app);
+	if (mode == VEIL_SAVER) {
+		wlr_scene_node_place_below(&s->veil_tree->node, &s->saver_tree->node);
+		wlr_scene_node_set_position(&s->veil_tree->node, 0, 0);
+		wlr_scene_rect_set_size(s->veil_dim, s->width, s->height);
+		wlr_scene_rect_set_color(s->veil_dim, (float[4]){ 0, 0, 0,
+					 gpu ? DIM_SAVER_GPU : DIM_SAVER_SOFT });
+	} else {
+		wlr_scene_node_place_above(&s->veil_tree->node, &s->apps_tree->node);
+		wlr_scene_node_set_position(&s->veil_tree->node, 0, BAR_H);
+		wlr_scene_rect_set_size(s->veil_dim, s->width, s->height - BAR_H);
+		wlr_scene_rect_set_color(s->veil_dim, (float[4]){ 0, 0, 0,
+					 gpu ? DIM_GPU : DIM_SOFT });
+	}
+	if (gpu && changed)
+		veil_blur_now(s);
 }
 
-/* The app drew while the veil is up: blur it again, soon (not at its
- * every frame). */
+/* What's under the veil drew: blur it again, soon (not at its every
+ * frame). */
 static void veil_app_changed(struct server *s)
 {
-	if (!s->gpu || !s->veil_tree->node.enabled || s->blur_pending)
+	if (!s->gpu || s->veil_mode == VEIL_OFF || s->blur_pending)
 		return;
 	s->blur_pending = true;
 	wl_event_source_timer_update(s->blur_timer, BLUR_EVERY_MS);
@@ -1651,7 +1748,11 @@ int main(int argc, char **argv)
 					       blur_timer_cb, &s);
 	s.popup_tree = wlr_scene_tree_create(s.ui_tree);
 	s.panel_tree = wlr_scene_tree_create(s.ui_tree);
+	s.saver_tree = wlr_scene_tree_create(s.ui_tree);
 	s.cal_tree = wlr_scene_tree_create(s.ui_tree);
+	s.idle_timer = wl_event_loop_add_timer(wl_display_get_event_loop(s.display),
+					       idle_timer_cb, &s);
+	wl_event_source_timer_update(s.idle_timer, IDLE_MS);
 	s.corner_tree = wlr_scene_tree_create(s.ui_tree);
 
 	wl_list_init(&s.views);

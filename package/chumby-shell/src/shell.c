@@ -55,6 +55,8 @@
 #define ALARM_TONE	"/usr/bin/chumby-alarm-tone"
 #define AUDIO		"/usr/bin/chumby-audio"	/* who plays: see there */
 #define CALIBRATE	"/usr/bin/chumby-calibrate"
+#define SAVER		"/usr/bin/chumby-toasters"	/* the screen saver */
+#define SAVER_IDLE_MS	(5 * 60 * 1000)	/* no input this long (as chumby-wm's) */
 #define CAL_FILE	"/var/lib/chumby/touch.cal"	/* its result */
 #define RING_MAX_S	(10 * 60)	/* give up ringing after this */
 
@@ -1275,6 +1277,9 @@ static int find_input(const char *name)
 
 static void screen_wake(void);
 
+static void shell_activity(void);
+static void saver_stop(void);
+
 static void knob_readable(int fd, void *user)
 {
 	struct input_event ev;
@@ -1286,6 +1291,7 @@ static void knob_readable(int fd, void *user)
 			wheel += ev.value;
 	if (!wheel)
 		return;
+	shell_activity();
 	screen_wake();
 	/* Show the volume popup as feedback while the knob turns. */
 	popup_open(POPUP_VOLUME);
@@ -1346,6 +1352,7 @@ static void screen_update(void)
 	if (!on) {
 		popup_close();
 		menu_close();
+		saver_stop();
 	}
 }
 
@@ -1353,6 +1360,52 @@ static void screen_wake(void)
 {
 	wake_until = mono_ms() + chumby_policy()->wake_seconds * 1000ull;
 	screen_update();
+}
+
+/* ------------------------------------------------------------------ */
+/* Screen saver                                                       */
+
+/*
+ * Flying Toasters (chumby-toasters), over everything, after SAVER_IDLE_MS
+ * without input: chumby-wm says "idle" (touches, the mouse, keys: it sees
+ * those), and the knob and snooze button (ours) have been still as long.
+ * Not over the clock (that's what to look at, idle), a popup or menu, an
+ * alarm, the calibration or a dark screen. Any input ends it ("active",
+ * or ours), as an alarm does.
+ */
+static pid_t saver_pid = -1;
+static bool wm_idle;
+static uint64_t our_input_ms;	/* the knob or snooze button, last (0: never) */
+
+static void saver_stop(void)
+{
+	if (saver_pid > 0)
+		kill(saver_pid, SIGTERM);	/* reaped by reaper_cb */
+}
+
+static void saver_maybe_start(void)
+{
+	char *argv[] = { "chumby-toasters", NULL };
+
+	if (!wm_idle || saver_pid > 0 || clock_front || popup_disp || menu_disp ||
+	    alarm_state == CHUMBY_ALARM_RINGING || screen_applied != 1 ||
+	    (our_input_ms && mono_ms() - our_input_ms < SAVER_IDLE_MS) ||
+	    access(SAVER, X_OK) != 0)
+		return;
+	saver_pid = chumby_spawn(SAVER, argv);
+}
+
+static void saver_timer_cb(lv_timer_t *t)
+{
+	(void)t;
+	saver_maybe_start();
+}
+
+/* The knob or snooze button: someone's there. */
+static void shell_activity(void)
+{
+	our_input_ms = mono_ms();
+	saver_stop();
 }
 
 /* Touches keep a woken screen on (they don't wake a dark one: chumby-wm
@@ -1450,6 +1503,8 @@ static void show_clock(void)
 static void alarm_ring(void)
 {
 	const struct chumby_policy *p = chumby_policy();
+
+	saver_stop();
 	char *tone_argv[] = { "chumby-alarm-tone", NULL };
 	char *duck_argv[] = { "chumby-audio", "duck", "alarm", NULL };
 	int v;
@@ -1616,10 +1671,15 @@ static void snooze_readable(int fd, void *user)
 		if (ev.type != EV_KEY || ev.value == 2)		/* repeats */
 			continue;
 		if (ev.value == 1) {
+			bool saver_up = saver_pid > 0;
+
+			shell_activity();
 			if (alarm_state == CHUMBY_ALARM_RINGING) {
 				snooze_pressed();	/* at once */
 				continue;
 			}
+			if (saver_up)
+				continue;	/* that's what it was for: it's gone */
 			snooze_down = true;
 			snooze_held = false;
 			lv_timer_reset(snooze_hold_timer);
@@ -1667,6 +1727,12 @@ static void command(const char *cmd)
 	} else if (!strcmp(cmd, "dismiss")) {	/* chumby-wm: a tap outside them */
 		popup_close();
 		menu_close();
+	} else if (!strcmp(cmd, "idle")) {	/* chumby-wm: no input a while */
+		wm_idle = true;
+		saver_maybe_start();
+	} else if (!strcmp(cmd, "active")) {	/* chumby-wm: and now some */
+		wm_idle = false;
+		saver_stop();
 	}
 	else if (cmd[0])
 		fprintf(stderr, "chumby-shell: unknown command '%s'\n", cmd);
@@ -1712,6 +1778,8 @@ static void reaper_cb(lv_timer_t *t)
 
 		if (pid == tone_pid)
 			tone_pid = -1;
+		if (pid == saver_pid)
+			saver_pid = -1;
 		for (i = 0; i < n_apps; i++)
 			if (apps[i].starting_pid == pid)
 				apps[i].starting_pid = 0;	/* died starting */
@@ -1761,6 +1829,7 @@ int main(void)
 	chumby_watch_fd(cmd_fifo_open(), cmd_readable, NULL);
 	lv_timer_ready(lv_timer_create(volume_sync_cb, 2000, NULL));
 	lv_timer_create(reaper_cb, 1000, NULL);
+	lv_timer_create(saver_timer_cb, 10 * 1000, NULL);
 	/* A stale state file from a previous run: we're idle. */
 	alarm_publish();
 	lv_timer_ready(lv_timer_create(alarm_tick_cb, 1000, NULL));
