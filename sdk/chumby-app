@@ -83,7 +83,7 @@ sim | sim-shot)
 		shot=${2:-}
 		[ -n "$shot" ] || usage
 		docker rm -f chumby-sim-shot >/dev/null 2>&1 || true
-		docker run -d --name chumby-sim-shot -e CHUMBY_SIM_HEADLESS=1 \
+		docker run -d --init --name chumby-sim-shot -e CHUMBY_SIM_HEADLESS=1 \
 			-v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE" >/dev/null
 		sleep 15
 		docker exec chumby-sim-shot sh -c "echo 'launch $id' > /run/chumby/shell.cmd"
@@ -101,7 +101,7 @@ sim | sim-shot)
 	esac
 	echo "The Chumby's UI in a window: Home (top left) > $(conf Name bundle/app.conf). Ctrl-C ends it."
 	# shellcheck disable=SC2086
-	exec docker run --rm -it --name chumby-sim $sound \
+	exec docker run --rm -it --init --name chumby-sim $sound \
 		-v "$sock:/run/host/wayland-0" -v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE"
 	;;
 deploy)
