@@ -1594,6 +1594,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	s.renderer = wlr_renderer_autocreate(s.backend);
+	/* A GPU that won't start (EGL failing): wlroots doesn't fall back by
+	 * itself where there's a render node, so pixman here. */
+	if (!s.renderer) {
+		wlr_log(WLR_ERROR, "no GPU renderer: falling back to pixman");
+		s.renderer = wlr_pixman_renderer_create();
+	}
 	if (!s.renderer) {
 		wlr_log(WLR_ERROR, "failed to create renderer");
 		return 1;

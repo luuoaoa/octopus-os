@@ -10,7 +10,8 @@
 # uses its (always built) pixman software renderer and DRM dumb buffers.
 # A board with a GPU (the Pi) can add the gles2 renderer and GBM allocator
 # (BR2_PACKAGE_WLROOTS_PIXMAN_GLES2): wlroots then renders on the GPU, and
-# falls back to pixman by itself if EGL won't start.
+# chumby-wm falls back to pixman if EGL won't start (wlroots doesn't,
+# where there's a render node).
 WLROOTS_PIXMAN_VERSION = 0.19.2
 WLROOTS_PIXMAN_SOURCE = wlroots-$(WLROOTS_PIXMAN_VERSION).tar.gz
 WLROOTS_PIXMAN_SITE = https://gitlab.freedesktop.org/wlroots/wlroots/-/releases/$(WLROOTS_PIXMAN_VERSION)/downloads
