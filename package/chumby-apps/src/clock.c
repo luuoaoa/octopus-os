@@ -541,6 +541,13 @@ static void build_ring(void)
 
 /* ------------------------------------------------------------------ */
 
+/* The time zone changed (Settings): the time again, at the next tick. */
+static void zone_changed(void *user)
+{
+	(void)user;
+	shown_minute = -1;
+}
+
 /* Twice a second: the shell's alarm state; the time once a minute. */
 static void tick(lv_timer_t *t)
 {
@@ -615,6 +622,7 @@ int main(void)
 	alarms_load();
 	chumby_on_mode_change(on_mode, NULL);	/* builds the views */
 	lv_timer_create(tick, 500, NULL);
+	chumby_on_zone_change(zone_changed, NULL);
 
 	return chumby_run();
 }

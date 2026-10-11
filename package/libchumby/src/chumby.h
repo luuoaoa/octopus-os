@@ -212,6 +212,14 @@ const struct chumby_policy *chumby_policy(void);
  */
 bool chumby_setting_get(const char *key, char *val, size_t size);
 bool chumby_setting_set(const char *key, const char *val);
+
+/*
+ * The time zone changed (Settings): libchumby has glibc read it again
+ * (localtime_r() follows), within 2 s, and calls cb - to redraw a clock
+ * that only redraws when the minute changes.
+ */
+typedef void (*chumby_zone_cb_t)(void *user);
+void chumby_on_zone_change(chumby_zone_cb_t cb, void *user);
 /* Is the local time now in [start, end) (minutes, may wrap midnight)? */
 bool chumby_in_window(int start, int end);
 /*

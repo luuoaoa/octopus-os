@@ -794,6 +794,46 @@ void chumby_on_mode_change(chumby_mode_cb_t cb, void *user)
 
 static time_t settings_mtime;
 
+/* The time zone: /etc/localtime (Settings relinks it). glibc reads it once
+ * per process for localtime_r(), which every clock here uses: told to read
+ * it again (tzset()) when it's another file, and the apps that asked
+ * (chumby_on_zone_change()) told. */
+#define MAX_ZONE_CBS	4
+static struct {
+	chumby_zone_cb_t cb;
+	void *user;
+} zone_cbs[MAX_ZONE_CBS];
+static int n_zone_cbs;
+static ino_t zone_ino;
+static time_t zone_mtime;
+
+void chumby_on_zone_change(chumby_zone_cb_t cb, void *user)
+{
+	if (n_zone_cbs < MAX_ZONE_CBS) {
+		zone_cbs[n_zone_cbs].cb = cb;
+		zone_cbs[n_zone_cbs].user = user;
+		n_zone_cbs++;
+	}
+}
+
+static void zone_check(void)
+{
+	struct stat st;
+	int i;
+
+	if (stat("/etc/localtime", &st) != 0)
+		return;
+	if (st.st_ino == zone_ino && st.st_mtime == zone_mtime)
+		return;
+	if (zone_ino) {		/* (not at start: just noted) */
+		tzset();
+		for (i = 0; i < n_zone_cbs; i++)
+			zone_cbs[i].cb(zone_cbs[i].user);
+	}
+	zone_ino = st.st_ino;
+	zone_mtime = st.st_mtime;
+}
+
 static void policy_load(void)
 {
 	struct stat st;
@@ -819,6 +859,7 @@ static void settings_timer_cb(lv_timer_t *t)
 	(void)t;
 	if ((stat(SETTINGS_FILE, &st) == 0 ? st.st_mtime : 0) != settings_mtime)
 		policy_timer_cb(NULL);
+	zone_check();
 }
 
 bool chumby_setting_get(const char *key, char *val, size_t size)
@@ -897,6 +938,7 @@ void chumby_init(void)
 	fonts_load();
 	lv_timer_create(policy_timer_cb, 30000, NULL);
 	lv_timer_create(settings_timer_cb, 2000, NULL);
+	zone_check();
 }
 
 /* CHUMBY_REFR_DEBUG=1: each window says, once a second, how often it
