@@ -88,6 +88,24 @@ static int rd(uint8_t reg)
 	return val;
 }
 
+/* n registers from reg on, in one transfer: the chip's register address
+ * moves on by itself through a read (one transaction instead of n, each
+ * a few hundred microseconds of the CPU bit-banging the bus). */
+static int rd_burst(uint8_t reg, uint8_t *buf, int n)
+{
+	struct i2c_msg msgs[2] = {
+		{ .addr = addr, .flags = I2C_M_REV_DIR_ADDR, .len = 1, .buf = &reg },
+		{ .addr = addr, .flags = I2C_M_RD | I2C_M_NOSTART, .len = n, .buf = buf },
+	};
+	struct i2c_rdwr_ioctl_data data = { .msgs = msgs, .nmsgs = 2 };
+
+	if (ioctl(fd, I2C_RDWR, &data) < 0) {
+		fprintf(stderr, "qn8005: read regs 0x%02x+%d: %s\n", reg, n, strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
 /* QNF_SetRegBit: clear `mask`, OR in `val` (val is not masked: matches stock). */
 static int setbits(uint8_t reg, uint8_t mask, uint8_t val)
 {
@@ -337,7 +355,11 @@ static int scan(const char *region)
  * reg 0x00 bit 1 enables it; bit 7 of reg 0x1b flips each time a group
  * is ready in regs 0x10..0x17 (blocks A..D, high byte first), and its
  * bits 3..0 flag blocks A..D received with errors. Groups come
- * every ~88 ms; poll at 20 ms. Decoded state goes to `out` as key=value
+ * every ~88 ms; poll at 40 ms (twice as often: no group missed), the
+ * blocks read in one burst. The bus is bit-banged (the chip's reads
+ * aren't standard I2C), so every transfer is CPU time: nothing is read
+ * while the screen is off (no one to read the text). Decoded state goes
+ * to `out` as key=value
  * lines (ps, rt, title, artist, pty, pi, psdyn = 1 while the PS scrolls
  * text, pstext = those words joined, and the signal strength rssi,
  * sampled about once a second), rewritten atomically on change.
@@ -367,6 +389,20 @@ static void rds_write(const char *out, const struct rds *r)
 	rename(tmp, out);
 }
 
+/* The backlight off (the power button): RDS isn't read meanwhile. */
+static bool screen_dark(void)
+{
+	char c = '0';
+	FILE *f = fopen("/sys/class/backlight/backlight/bl_power", "r");
+
+	if (!f)
+		return false;
+	if (fread(&c, 1, 1, f) != 1)
+		c = '0';
+	fclose(f);
+	return c != '0';
+}
+
 static int rds_run(const char *out)
 {
 	char dir[256], *slash;
@@ -392,9 +428,11 @@ static int rds_run(const char *out)
 		uint8_t raw[8];
 		uint16_t blk[4];
 
-		msleep(20);
-		if (++tick >= 50) {	/* ~1 s */
+		msleep(40);
+		if (++tick >= 25) {	/* ~1 s */
 			tick = 0;
+			while (!rds_quit && screen_dark())
+				msleep(1000);
 			v = rd(0x1c);
 			if (v >= 0 && v != rds_rssi) {
 				rds_rssi = v;
@@ -405,14 +443,7 @@ static int rds_run(const char *out)
 		if (v < 0 || (v & 0x80) == prev)
 			continue;
 		prev = v & 0x80;
-		for (i = 0; i < 8; i++) {
-			int b = rd(0x10 + i);
-
-			if (b < 0)
-				break;
-			raw[i] = b;
-		}
-		if (i < 8)
+		if (rd_burst(0x10, raw, 8) < 0)
 			continue;
 		for (i = 0; i < 4; i++)
 			blk[i] = raw[2 * i] << 8 | raw[2 * i + 1];
@@ -550,6 +581,18 @@ int main(int argc, char **argv)
 			ret = -1;
 		else
 			printf("0x%02x\n", v);
+	} else if (!strcmp(cmd, "rb")) {	/* rb REG N: a burst read */
+		uint8_t buf[0x60];
+		int n, i;
+
+		if (optind + 1 >= argc)
+			usage();
+		n = atoi(argv[optind + 1]);
+		if (n < 1 || n > (int)sizeof(buf))
+			usage();
+		ret = rd_burst(strtol(argv[optind], NULL, 0), buf, n);
+		for (i = 0; !ret && i < n; i++)
+			printf("%02x%s", buf[i], (i & 15) == 15 || i == n - 1 ? "\n" : " ");
 	} else if (!strcmp(cmd, "w")) {
 		if (optind + 1 >= argc)
 			usage();
