@@ -22,6 +22,7 @@
 /* chumby_logo_set() decodes JPEGs by hand. */
 #include "lvgl/src/image/lv_image_decoder_private.h"
 #include "lvgl/src/misc/cache/instance/lv_image_cache.h"
+#include "lvgl/src/drivers/wayland/lv_wayland_private.h"	/* chumby_run() */
 
 extern char **environ;
 
@@ -847,8 +848,8 @@ int chumby_run(void)
 		if (idle > LV_DEF_REFR_PERIOD)
 			idle = LV_DEF_REFR_PERIOD;
 
-		/* The Wayland fd only wakes us early; LVGL reads it from its
-		 * own timer inside lv_timer_handler(). */
+		/* The Wayland fd wakes us early; LVGL reads it from its own
+		 * timer inside lv_timer_handler(), made ready below. */
 		n = 0;
 		pfd[n].fd = lv_wayland_get_fd();
 		pfd[n++].events = POLLIN;
@@ -863,6 +864,13 @@ int chumby_run(void)
 			fprintf(stderr, "libchumby: lost the Wayland compositor\n");
 			exit(0);
 		}
+		/* Its events (a frame done, a buffer back), read now: left
+		 * until LVGL's timer comes round (up to 33 ms), the fd stays
+		 * readable and poll() returns at once, again and again - a
+		 * spin, every frame something moves (~200,000 times a second,
+		 * half a Pi 4's core, measured). */
+		if ((pfd[0].revents & POLLIN) && lv_wl_ctx.read_compositor_events_timer)
+			lv_timer_ready(lv_wl_ctx.read_compositor_events_timer);
 		for (i = 0; i < n_watches; i++)
 			if (pfd[i + 1].revents & (POLLIN | POLLHUP | POLLERR))
 				watches[i].cb(watches[i].fd, watches[i].user);
