@@ -9,10 +9,17 @@ without CLK_SET_RATE_PARENT so CPU frequency changes only touch the
 glitch-free DIV_CPU divider; the rate can then never rise above what
 the bootloader configured ref_cpu for.
 
+Such a divider rounds to the closest rate: cpufreq asks in kHz (x 1000),
+just below the PLL's real rate (454736000 Hz against 454736842), and
+the divider's usual rounding (the fastest rate not above the request)
+picked DIV_CPU 2 for the top OPP. The first time cpufreq moved (the
+screen going off and on), the CPU dropped to half speed for good while
+cpufreq reported full speed (cpuinfo_cur_freq said 227368).
+
 ---
 diff -urN a/drivers/clk/mxs/clk-div.c b/drivers/clk/mxs/clk-div.c
---- a/drivers/clk/mxs/clk-div.c	2026-10-07 05:00:32.009343109 -0700
-+++ b/drivers/clk/mxs/clk-div.c	2026-10-07 05:00:32.025511519 -0700
+--- a/drivers/clk/mxs/clk-div.c	2026-10-10 19:54:54.982812325 -0700
++++ b/drivers/clk/mxs/clk-div.c	2026-10-10 19:55:05.265804363 -0700
 @@ -67,8 +67,9 @@
  	.set_rate = clk_div_set_rate,
  };
@@ -34,7 +41,23 @@ diff -urN a/drivers/clk/mxs/clk-div.c b/drivers/clk/mxs/clk-div.c
  	init.parent_names = (parent_name ? &parent_name: NULL);
  	init.num_parents = (parent_name ? 1 : 0);
  
-@@ -101,3 +102,10 @@
+@@ -91,6 +92,15 @@
+ 	div->divider.shift = shift;
+ 	div->divider.width = width;
+ 	div->divider.flags = CLK_DIVIDER_ONE_BASED;
++	/*
++	 * A divider that can't change its parent (the CPU's) lands on the
++	 * closest rate, not the fastest one at or below: cpufreq asks in
++	 * kHz (x 1000), a hair below the PLL's real rate (454736000 Hz for
++	 * 454736842), and rounding down would take DIV_CPU 2 for the top
++	 * OPP - half speed, while cpufreq reports full.
++	 */
++	if (!(flags & CLK_SET_RATE_PARENT))
++		div->divider.flags |= CLK_DIVIDER_ROUND_CLOSEST;
+ 	div->divider.lock = &mxs_lock;
+ 	div->divider.hw.init = &init;
+ 	div->ops = &clk_divider_ops;
+@@ -101,3 +111,10 @@
  
  	return clk;
  }
@@ -46,8 +69,8 @@ diff -urN a/drivers/clk/mxs/clk-div.c b/drivers/clk/mxs/clk-div.c
 +				 CLK_SET_RATE_PARENT);
 +}
 diff -urN a/drivers/clk/mxs/clk.h b/drivers/clk/mxs/clk.h
---- a/drivers/clk/mxs/clk.h	2026-10-07 05:00:32.013592930 -0700
-+++ b/drivers/clk/mxs/clk.h	2026-10-07 05:00:32.025526478 -0700
+--- a/drivers/clk/mxs/clk.h	2026-10-10 19:54:54.982864563 -0700
++++ b/drivers/clk/mxs/clk.h	2026-10-10 19:54:54.983707408 -0700
 @@ -26,6 +26,9 @@
  
  struct clk *mxs_clk_div(const char *name, const char *parent_name,
@@ -59,8 +82,8 @@ diff -urN a/drivers/clk/mxs/clk.h b/drivers/clk/mxs/clk.h
  struct clk *mxs_clk_frac(const char *name, const char *parent_name,
  			 void __iomem *reg, u8 shift, u8 width, u8 busy);
 diff -urN a/drivers/clk/mxs/clk-imx23.c b/drivers/clk/mxs/clk-imx23.c
---- a/drivers/clk/mxs/clk-imx23.c	2026-10-07 05:00:32.017519172 -0700
-+++ b/drivers/clk/mxs/clk-imx23.c	2026-10-07 05:00:32.025544221 -0700
+--- a/drivers/clk/mxs/clk-imx23.c	2026-10-10 19:54:54.982898337 -0700
++++ b/drivers/clk/mxs/clk-imx23.c	2026-10-10 19:54:54.983724770 -0700
 @@ -122,7 +122,13 @@
  	clks[emi_sel] = mxs_clk_mux("emi_sel", CLKSEQ, 6, 1, emi_sels, ARRAY_SIZE(emi_sels));
  	clks[cpu] = mxs_clk_mux("cpu", CLKSEQ, 7, 1, cpu_sels, ARRAY_SIZE(cpu_sels));

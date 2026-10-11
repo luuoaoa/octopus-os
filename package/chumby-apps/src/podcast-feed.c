@@ -25,7 +25,7 @@
 #include <strings.h>
 #include <time.h>
 
-#define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"	/* mbed TLS: no dirs */
+#define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"
 #define USER_AGENT	"chumby-podcasts/1.0"
 #define MAX_DEFAULT	30
 

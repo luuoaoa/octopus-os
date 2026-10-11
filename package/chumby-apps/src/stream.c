@@ -72,7 +72,7 @@
  * with a soft volume), else the first card, straight. */
 #define PCM_BOARD	"chumby"
 #define PCM		"plughw:0,0"
-#define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"	/* mbed TLS: no dirs */
+#define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"
 #define AUDIO		"/usr/bin/chumby-audio"
 #define USER_AGENT	"chumby-stream/1.0"
 #define BACKOFF_MAX_S	30

@@ -74,11 +74,12 @@ BR2_PACKAGE_CHUMBY_WM=y
 BR2_PACKAGE_CHUMBY_SHELL=y
 BR2_PACKAGE_CHUMBY_APPS=y
 # FM station art: chumby-station-art looks the station up (FCC) and fetches
-# its logo (Wikipedia) over HTTPS.
-BR2_PACKAGE_MBEDTLS=y
+# its logo (Wikipedia) over HTTPS. libcurl on OpenSSL (below), not mbed
+# TLS: OpenSSL's AES/GHASH/ChaCha20 are ARMv4 assembly, mbed TLS's are C,
+# and an HTTPS stream's decryption cost the ARM9 ~5% (an HTTP one, none).
 BR2_PACKAGE_LIBCURL=y
 BR2_PACKAGE_LIBCURL_CURL=y
-BR2_PACKAGE_LIBCURL_MBEDTLS=y
+BR2_PACKAGE_LIBCURL_OPENSSL=y
 BR2_PACKAGE_CA_CERTIFICATES=y
 BR2_PACKAGE_JQ=y
 # AirPlay 1 speaker (the AirPlay app): its own mDNS (tinysvcmdns). With
