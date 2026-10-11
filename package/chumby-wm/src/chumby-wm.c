@@ -1224,9 +1224,27 @@ static void output_frame(struct wl_listener *l, void *data)
 		wlr_scene_get_scene_output(o->server->scene, o->wlr_output);
 	struct timespec now;
 
+	static int debug = -1;
+	static long frames, us;
+	static struct timespec since;
+	struct timespec t0;
+
 	(void)data;
+	if (debug < 0)
+		debug = getenv("CHUMBY_WM_DEBUG") != NULL;
+	clock_gettime(CLOCK_MONOTONIC, &t0);
 	wlr_scene_output_commit(so, NULL);
 	clock_gettime(CLOCK_MONOTONIC, &now);
+	/* CHUMBY_WM_DEBUG=1: frames a second and the time they took. */
+	if (debug) {
+		frames++;
+		us += (now.tv_sec - t0.tv_sec) * 1000000 + (now.tv_nsec - t0.tv_nsec) / 1000;
+		if (now.tv_sec - since.tv_sec >= 1) {
+			wlr_log(WLR_INFO, "frames: %ld/s, %ld us", frames, us);
+			frames = us = 0;
+			since = now;
+		}
+	}
 	wlr_scene_output_send_frame_done(so, &now);
 	frame_done_hidden(o->server, &now);
 }
@@ -1451,6 +1469,12 @@ static void veil_update(struct server *s)
 	bool changed = mode != s->veil_mode;
 	bool gpu = s->gpu;
 
+	/* The app under the saver is out of sight: stopped like one behind
+	 * another (its redraws, and the frames they'd cost us, with it);
+	 * going again when the saver goes. (Its sound plays on: that's
+	 * chumby-stream's, the radio's, not the app's.) */
+	if (app && changed && (mode == VEIL_SAVER || s->veil_mode == VEIL_SAVER))
+		view_freeze(app, mode == VEIL_SAVER);
 	s->veil_mode = mode;
 	wlr_scene_node_set_enabled(&s->veil_tree->node, mode != VEIL_OFF);
 	if (mode == VEIL_OFF) {

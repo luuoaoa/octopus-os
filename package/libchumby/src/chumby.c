@@ -602,7 +602,15 @@ static lv_anim_t scroll_twice;
 
 static int32_t scroll_path_stepped(const lv_anim_t *a)
 {
-	int32_t t = a->act_time - a->act_time % SCROLL_STEP_MS;
+	/* Steps on the clock's 100 ms boundaries, not each animation's own:
+	 * two labels scrolling (a station and its song) step in the same
+	 * redraw, not one each. (As the clock moves on within a step, the
+	 * animation's time does too: their difference stays put.) */
+	int32_t t = a->act_time - (int32_t)(lv_tick_get() % SCROLL_STEP_MS);
+
+	if (t < 0)
+		t = 0;
+	t -= t % SCROLL_STEP_MS;
 
 	if (a->duration <= 0)
 		return a->end_value;
