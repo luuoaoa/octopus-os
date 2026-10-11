@@ -32,7 +32,9 @@
  *
  * State goes to $run_dir/stream for the app ("state=", "url=", "name=",
  * "title=", "codec=" MP3/AAC, "bitrate=" kbit/s as measured over a few
- * seconds) lines, gone once stopped; our pid to $run_dir/stream.pid.
+ * seconds, "start=" the byte this run was started at: the app tells its
+ * own run from the one it replaced) lines, gone once stopped; our pid to
+ * $run_dir/stream.pid.
  * Starting, stopping, pausing and resuming hold $run_dir/stream.lock until
  * the new player's pid is in place: two starts close together (seeks)
  * would otherwise each find nothing to stop yet, and both play.
@@ -83,6 +85,7 @@ static char url[1024], name[128], title[256], state[16];
 /* A file (see above): where in it, how long, how much played. */
 static bool finite;			/* this response is one */
 static long long start_byte;		/* asked for (a range) */
+static long long run_start;		/* what this run was started at ("start="), as asked */
 static long long base_byte;		/* where this response starts */
 static long long fed;			/* bytes of it to the decoders */
 static long long file_len;		/* its whole size */
@@ -129,9 +132,9 @@ static void status_write_locked(void)
 	f = fopen(tmp, "w");
 	if (!f)
 		return;
-	fprintf(f, "state=%s\nurl=%s\nname=%s\ntitle=%s\ncodec=%s\nbitrate=%d\n", state, url,
-		name, title, codec == CODEC_AAC || codec == CODEC_MP4 ? "AAC" :
-		codec == CODEC_MP3 ? "MP3" : "", bitrate);
+	fprintf(f, "state=%s\nurl=%s\nname=%s\ntitle=%s\ncodec=%s\nbitrate=%d\nstart=%lld\n",
+		state, url, name, title, codec == CODEC_AAC || codec == CODEC_MP4 ? "AAC" :
+		codec == CODEC_MP3 ? "MP3" : "", bitrate, run_start);
 	if (finite)
 		fprintf(f, "byte=%lld\nlength=%lld\nplayed=%llu\n", base_byte + fed, file_len,
 			pcm_rate > 0 ? played_frames / (unsigned long long)pcm_rate : 0ULL);
@@ -1756,6 +1759,7 @@ int main(int argc, char **argv)
 			waitpid(pid, NULL, 0);
 	}
 
+	run_start = start_byte;
 	/* Into the background, on our own (closing the app leaves us on). */
 	pid = fork();
 	if (pid < 0)

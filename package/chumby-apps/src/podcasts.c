@@ -102,6 +102,22 @@ static int cur_show, cur_ep = -1;	/* what's selected */
 static bool playing;			/* we want it on (corrected by status) */
 static uint64_t start_grace_until;
 static long long st_byte, st_length;	/* where chumby-stream is, in the episode */
+/* Where playing is, in seconds: where it started (the byte it started
+ * from, at its bitrate: an estimate, made once) plus what chumby-stream
+ * has actually played since ("played=", exact). It only moves on with
+ * the sound, never back. (st_byte is what's been fed to the decoder: a
+ * few seconds ahead, in network-sized steps.) */
+static double play_anchor_s = -1;	/* seconds at played=0; -1: not known */
+static long st_played = -1;		/* seconds played this run */
+/* Runs: chumby-stream's "start=", the byte a run started at. Ours (a
+ * play, a skip, a seek) is req_start; the one the status is about,
+ * run_start. Another (a resume after an alarm) carries on from where
+ * the time was. */
+static long long req_start = -1, run_start = -1;
+/* Bytes per second when the feed doesn't say: the stream's first
+ * measured bitrate, kept for the episode (measurements wander). */
+static double bps_kept;
+static const struct episode *bps_kept_for;
 static char st_state[16];
 static int st_bitrate;
 static time_t last_saved;
@@ -309,8 +325,13 @@ static double bytes_per_s(const struct episode *e)
 {
 	if (e && e->bytes > 0 && e->duration > 0)
 		return (double)e->bytes / e->duration;
-	if (st_bitrate > 0)
-		return st_bitrate * 125.0;
+	if (e && bps_kept_for == e)
+		return bps_kept;
+	if (e && st_bitrate > 0 && playing) {
+		bps_kept = st_bitrate * 125.0;
+		bps_kept_for = e;
+		return bps_kept;
+	}
 	return 16000.0;
 }
 
@@ -325,13 +346,24 @@ static long long episode_length(const struct episode *e)
 	return e ? e->bytes : 0;
 }
 
-/* Where the episode is: playing, from chumby-stream; else where it was left. */
+/* Seconds into the episode as heard (see play_anchor_s), or -1. */
+static double heard_s(void)
+{
+	if (play_anchor_s < 0)
+		return -1;
+	return play_anchor_s + (st_played > 0 ? st_played : 0);
+}
+
+/* Where the episode is: playing, what's been heard (as a byte: for a
+ * seek, or saving the place); else where it was left. */
 static long long episode_byte(const struct episode *e)
 {
 	struct position *p;
 
 	if (!e)
 		return 0;
+	if (playing && heard_s() >= 0)
+		return (long long)(heard_s() * bytes_per_s(e));
 	if (playing && st_byte > 0)
 		return st_byte;
 	p = position_of(e->url, false);
@@ -640,6 +672,9 @@ static void stream_start_at(long long byte)
 	stream_run(argv);
 	start_grace_until = mono_ms() + START_GRACE_MS;
 	snprintf(st_state, sizeof(st_state), "connecting");
+	play_anchor_s = byte / bytes_per_s(e);
+	st_played = 0;
+	req_start = run_start = byte;
 	st_byte = byte;
 	st_length = 0;
 	save_current();
@@ -663,6 +698,7 @@ static void pause_here(void)
 	playing = false;
 	stream_stop();
 	st_byte = st_length = 0;
+	play_anchor_s = -1;
 }
 
 /* What chumby-stream says. */
@@ -671,6 +707,8 @@ static void status_read(void)
 	char path[256], line[1200], state[16] = "", url[1024] = "";
 	long long byte = 0, length = 0;
 	int bitrate = 0;
+	long played = -1;
+	long long start = -1;
 	struct episode *e;
 	FILE *f;
 
@@ -688,11 +726,18 @@ static void status_read(void)
 			length = atoll(line + 7);
 		else if (!strncmp(line, "bitrate=", 8))
 			bitrate = atoi(line + 8);
+		else if (!strncmp(line, "played=", 7))
+			played = atol(line + 7);
+		else if (!strncmp(line, "start=", 6))
+			start = atoll(line + 6);
 	}
 	if (f)
 		fclose(f);
-	if (mono_ms() < start_grace_until && (!f || !stream_is_ours(url)))
-		return;		/* just started or stopped: not up to date yet */
+	/* Just started or stopped: not up to date yet (nothing, another's,
+	 * or the last words of the run ours replaced). */
+	if (mono_ms() < start_grace_until &&
+	    (!f || !stream_is_ours(url) || (start >= 0 && start != req_start)))
+		return;
 
 	if (f && !strcmp(state, "ended") && stream_is_ours(url)) {
 		/* To its end: done, and from the start if played again. */
@@ -701,6 +746,7 @@ static void status_read(void)
 			position_save(e, 0, length, true);
 		playing = false;
 		st_byte = st_length = 0;
+		play_anchor_s = -1;
 		unlink(path);
 		ui_update();
 		return;
@@ -711,9 +757,10 @@ static void status_read(void)
 		 * heard. */
 		if (playing) {
 			e = episode();
-			position_save(e, st_byte, st_length, false);
+			position_save(e, episode_byte(e), st_length, false);
 			playing = false;
 			st_byte = st_length = 0;
+			play_anchor_s = -1;
 			ui_update();
 		}
 		return;
@@ -725,8 +772,25 @@ static void status_read(void)
 	if (length > 0)
 		st_length = length;
 	st_bitrate = bitrate;
+	/* The bitrate known now (no size and length from the feed): our
+	 * run's start, estimated with the 128k guess, estimated again. */
+	e = episode();
+	if (e && bps_kept_for != e && bitrate > 0 && !(e->bytes > 0 && e->duration > 0)) {
+		(void)bytes_per_s(e);	/* keeps it */
+		if (play_anchor_s >= 0 && req_start >= 0 && run_start == req_start)
+			play_anchor_s = req_start / bytes_per_s(e);
+	}
+	if (played >= 0) {
+		if (play_anchor_s < 0)		/* playing already (we just opened) */
+			play_anchor_s = start >= 0 ? start / bytes_per_s(episode()) :
+					st_byte / bytes_per_s(episode()) - played;
+		else if (start != run_start)	/* a run not ours (resumed): carry on */
+			play_anchor_s = heard_s() - played;
+		run_start = start;
+		st_played = played;
+	}
 	if (time(NULL) - last_saved >= SAVE_EVERY_S && st_byte > 0)
-		position_save(episode(), st_byte, st_length, false);
+		position_save(episode(), episode_byte(episode()), st_length, false);
 	if (!skip_s)
 		ui_update();
 }
