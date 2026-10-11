@@ -105,20 +105,26 @@ sim | sim-shot)
 	# never sees an end between one stream and the next.
 	snd=$(mktemp -d)
 	chmod 755 "$snd"	# (the simulator's apps are another user, "chumby")
-	chmod 755 "$snd"	# (the simulator's apps are another user, "chumby")
 	player=
 	if [ "${2:-}" != --no-sound ]; then
 		mkfifo -m 666 "$snd/pcm"
 		if command -v pw-cat >/dev/null; then
-			pw-cat --playback --format s16 --rate 48000 --channels 2 - 0<>"$snd/pcm" &
+			pw-cat --playback --raw --format s16 --rate 48000 --channels 2 - 0<>"$snd/pcm" &
+			player=$!
 		elif command -v paplay >/dev/null; then
 			paplay --raw --format=s16le --rate=48000 --channels=2 0<>"$snd/pcm" &
+			player=$!
 		elif command -v aplay >/dev/null; then
 			aplay -q -t raw -f S16_LE -r 48000 -c 2 0<>"$snd/pcm" &
+			player=$!
 		else
 			echo "chumby-app: no pw-cat, paplay or aplay here: no sound" >&2
 		fi
-		player=$!
+		sleep 1
+		if [ -n "$player" ] && ! kill -0 "$player" 2>/dev/null; then
+			echo "chumby-app: the sound player stopped at once (see above): no sound" >&2
+			player=
+		fi
 	fi
 	trap '[ -n "$player" ] && kill "$player" 2>/dev/null; rm -rf "$snd"' EXIT INT TERM
 	echo "The Chumby's UI in a window: Home (top left) > $(conf Name bundle/app.conf). Ctrl-C ends it."
