@@ -32,10 +32,24 @@ echo "== the build container"
 docker build --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" -t "$BUILDER" "$TOP"
 
 echo "== $BOARD: the image and the SDK (in $OUT/)"
-docker run --rm -v "$TOP:/work" -w /work/buildroot "$BUILDER" bash -c "
+# (This repository's own packages - libchumby, the shell, the apps - are
+# local sources buildroot doesn't watch: rebuilt every time, or a pull's
+# changes to them wouldn't reach the image or the SDK.)
+docker run --rm -v "$TOP:/work" -w /work/buildroot "$BUILDER" bash -c '
 	set -e
-	make O=/work/$OUT BR2_EXTERNAL=/work $DEFCONFIG
-	make O=/work/$OUT
-	make O=/work/$OUT sdk"
+	make O=/work/'"$OUT"' BR2_EXTERNAL=/work '"$DEFCONFIG"'
+	rebuild=
+	for mk in /work/package/*/*.mk; do
+		grep -q "_SITE_METHOD = local" "$mk" || continue
+		pkg=$(basename "$(dirname "$mk")")
+		var=BR2_PACKAGE_$(echo "$pkg" | tr a-z- A-Z_)
+		grep -q "^$var=y" /work/'"$OUT"'/.config || continue
+		# libchumby first: the others build against its headers.
+		if [ "$pkg" = libchumby ]; then rebuild="$pkg-rebuild $rebuild"
+		else rebuild="$rebuild $pkg-rebuild"; fi
+	done
+	make O=/work/'"$OUT"' $rebuild
+	make O=/work/'"$OUT"'
+	make O=/work/'"$OUT"' sdk'
 
 exec sh "$TOP/sdk/make-images.sh" "$BOARD"
