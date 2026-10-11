@@ -1,8 +1,8 @@
 # chumby-apps: one binary per app, all on libchumby.
 PKG_CONFIG ?= pkg-config
-APPS := chumby-clock chumby-fm chumby-netradio chumby-stream chumby-calibrate \
-	chumby-podcasts chumby-podcast-feed chumby-airplay chumby-airplay-meta \
-	chumby-airplay-remote chumby-toasters
+# (Podcasts and Internet Radio are app bundles: apps/, package/chumby-bundled-apps.)
+APPS := chumby-clock chumby-fm chumby-stream chumby-calibrate chumby-airplay \
+	chumby-airplay-meta chumby-airplay-remote chumby-toasters chumby-settings
 
 override CFLAGS += -Wall $(shell $(PKG_CONFIG) --cflags libchumby)
 LDLIBS += $(shell $(PKG_CONFIG) --libs libchumby)
@@ -14,17 +14,6 @@ chumby-clock: clock.o
 
 chumby-fm: fm.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
-
-chumby-netradio: netradio.o
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
-
-chumby-podcasts: podcasts.o
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
-
-# A podcast feed, parsed as it downloads: no UI.
-podcast-feed.o: override CFLAGS += $(shell $(PKG_CONFIG) --cflags libcurl expat)
-chumby-podcast-feed: podcast-feed.o
-	$(CC) $(LDFLAGS) -o $@ $^ $(shell $(PKG_CONFIG) --libs libcurl expat)
 
 chumby-airplay: airplay.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
@@ -40,6 +29,9 @@ chumby-airplay-remote: airplay-remote.o
 # A screen saver, on libchumby's saver kit (pixman, no LVGL).
 chumby-toasters: toasters.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) $(shell $(PKG_CONFIG) --libs pixman-1)
+
+chumby-settings: settings.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 chumby-calibrate: calibrate.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) -lm

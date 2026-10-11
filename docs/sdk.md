@@ -67,7 +67,14 @@ one directory named after the Id. That's the file to hand out.
 - **Apps run as the user `chumby`,** not root, like the Chumby's own apps.
   They can play sound, talk to the shell and use the network; they can't
   change the system.
-- **A bundle can't take the Id of one of the image's apps.**
+- **A bundle can't take the Id of one of the system's apps** (Clock, FM
+  Radio, AirPlay, Settings). It can take the Id of one of the image's
+  preinstalled bundles (Internet Radio is `NetRadio`, Podcasts `Podcasts`,
+  in `/usr/lib/chumby/apps`): the installed one then replaces it - an
+  update.
+- **Settings an app may read or set:** libchumby's `chumby_setting_get()`
+  and `chumby_setting_set()` (`/var/lib/chumby/settings.conf`; `mode` is
+  night mode: `auto`, `day` or `night`).
 
 ### Installing
 

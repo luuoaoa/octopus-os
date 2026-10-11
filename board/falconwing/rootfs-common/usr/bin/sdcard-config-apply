@@ -15,7 +15,12 @@
 #                              timezone: Europe/Berlin  (a tz database name)
 #                              location: 37.77,-122.42  (FM station names/art;
 #                                        default: guessed from the IP address)
-#                              ssh_pwauth: true|false  (default true)
+#                              ssh: true|false  (the SSH server; default false.
+#                                        The Settings app's choice, once made,
+#                                        wins: /var/lib/chumby-root)
+#                              ssh_pwauth: true|false  (password logins; default
+#                                        true. Given at all, it also means
+#                                        ssh: true, as cards before "ssh:" had)
 #                              passwd: <crypt hash, e.g. from mkpasswd -m sha-512>
 #   /boot/authorized_keys      installed as /root/.ssh/authorized_keys
 #
@@ -116,6 +121,7 @@ fi
 
 # === user-data ===
 SSH_PWAUTH=true
+SSH_ON=false
 if [ -f "$BOOT/user-data" ]; then
     USR=$(unix "$BOOT/user-data")
 
@@ -148,6 +154,12 @@ if [ -f "$BOOT/user-data" ]; then
     case "$V" in
         false|False|FALSE|no|0) SSH_PWAUTH=false ;;
     esac
+    [ -n "$V" ] && SSH_ON=true
+    V=$(strip "$(printf '%s\n' "$USR" | sed -nE 's/^ssh:[[:space:]]+(.*)$/\1/p' | head -1)")
+    case "$V" in
+        true|True|TRUE|yes|1) SSH_ON=true ;;
+        false|False|FALSE|no|0) SSH_ON=false ;;
+    esac
 
     PW=$(printf '%s\n' "$USR" | sed -nE 's/^[[:space:]]*passwd:[[:space:]]+"?(\$[0-9a-zA-Z]+\$[^"[:space:]]+)"?[[:space:]]*$/\1/p' | head -1)
     if [ -n "$PW" ]; then
@@ -168,7 +180,32 @@ if [ -f "$BOOT/user-data" ]; then
     fi
 fi
 
+# === What the Settings app set (chumby-setting): over user-data ===
+ROOT_STATE=/var/lib/chumby-root
+if [ -f "$ROOT_STATE/timezone" ]; then
+    TZNAME=$(cat "$ROOT_STATE/timezone")
+    if [ -f "/usr/share/zoneinfo/$TZNAME" ]; then
+        ln -sf "/usr/share/zoneinfo/$TZNAME" "$LOCALTIME"
+        echo "$TZNAME" > "$TIMEZONE_FILE"
+        log "timezone=$TZNAME (Settings)"
+    fi
+fi
+if [ -s "$ROOT_STATE/root.hash" ]; then
+    PW=$(cat "$ROOT_STATE/root.hash")
+    awk -F: -v OFS=: -v h="$PW" '$1=="root"{$2=h} 1' "$SHADOW" > "$SHADOW.new" &&
+        chmod 600 "$SHADOW.new" && mv "$SHADOW.new" "$SHADOW" &&
+        log "root password from Settings"
+fi
+case "$(cat "$ROOT_STATE/ssh" 2>/dev/null)" in
+    on) SSH_ON=true; SSH_PWAUTH=true; log "ssh: on (Settings)" ;;
+    off) SSH_ON=false; log "ssh: off (Settings)" ;;
+esac
+
 # === SSH ===
+# The server runs only when on (dropbear.service: ConditionPathExists).
+if [ -d /run/systemd/system ]; then
+    if [ "$SSH_ON" = true ]; then touch "$OUT/ssh-on"; else rm -f "$OUT/ssh-on"; fi
+fi
 if [ -f "$BOOT/authorized_keys" ]; then
     mkdir -p "$(dirname "$AUTH_KEYS")"
     unix "$BOOT/authorized_keys" > "$AUTH_KEYS"

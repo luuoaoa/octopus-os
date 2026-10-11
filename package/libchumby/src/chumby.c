@@ -27,6 +27,9 @@
 extern char **environ;
 
 #define POLICY_FILE	"/etc/chumby/policy.conf"
+/* What the Settings app (or anyone, chumby_setting_set()) changed: the
+ * apps' user's, over the policy's keys. */
+#define SETTINGS_FILE	"/var/lib/chumby/settings.conf"
 #define ALARMS_FILE	"/var/lib/chumby/alarms.conf"
 #define RUN_DIR		"/run/chumby"
 #define BACKLIGHT	"/sys/class/backlight/backlight/"
@@ -65,9 +68,9 @@ static int parse_hhmm(const char *s, int def)
 	return def;
 }
 
-static void policy_load(void)
+static void policy_load_file(const char *path)
 {
-	FILE *f = fopen(POLICY_FILE, "r");
+	FILE *f = fopen(path, "r");
 	char line[128], key[64], val[64];
 
 	if (!f)
@@ -785,11 +788,86 @@ void chumby_on_mode_change(chumby_mode_cb_t cb, void *user)
 	cb(mode, user);
 }
 
+static time_t settings_mtime;
+
+static void policy_load(void)
+{
+	struct stat st;
+
+	policy_load_file(POLICY_FILE);
+	policy_load_file(SETTINGS_FILE);
+	settings_mtime = stat(SETTINGS_FILE, &st) == 0 ? st.st_mtime : 0;
+}
+
 static void policy_timer_cb(lv_timer_t *t)
 {
 	(void)t;
 	policy_load();
 	mode_set(policy_mode_now(), false);
+}
+
+/* The settings file changed (night mode set in Settings): at once, not at
+ * the next 30 s reload. */
+static void settings_timer_cb(lv_timer_t *t)
+{
+	struct stat st;
+
+	(void)t;
+	if ((stat(SETTINGS_FILE, &st) == 0 ? st.st_mtime : 0) != settings_mtime)
+		policy_timer_cb(NULL);
+}
+
+bool chumby_setting_get(const char *key, char *val, size_t size)
+{
+	FILE *f = fopen(SETTINGS_FILE, "r");
+	char line[256], k[64], v[192];
+	bool found = false;
+
+	while (f && fgets(line, sizeof(line), f))
+		if (line[0] != '#' && sscanf(line, " %63[^= ] = %191[^\n]", k, v) == 2 &&
+		    !strcmp(k, key)) {
+			snprintf(val, size, "%s", v);
+			found = true;
+		}
+	if (f)
+		fclose(f);
+	return found;
+}
+
+bool chumby_setting_set(const char *key, const char *val)
+{
+	char tmp[] = SETTINGS_FILE ".XXXXXX", line[256], k[64];
+	FILE *in = fopen(SETTINGS_FILE, "r"), *out;
+	int fd = mkstemp(tmp);
+	bool done = false;
+
+	if (fd < 0 || !(out = fdopen(fd, "w"))) {
+		if (fd >= 0)
+			close(fd);
+		if (in)
+			fclose(in);
+		return false;
+	}
+	while (in && fgets(line, sizeof(line), in)) {
+		if (line[0] != '#' && sscanf(line, " %63[^= ]", k) == 1 && !strcmp(k, key)) {
+			if (!done && val)
+				fprintf(out, "%s = %s\n", key, val);
+			done = true;
+			continue;
+		}
+		fputs(line, out);
+	}
+	if (!done && val)
+		fprintf(out, "%s = %s\n", key, val);
+	if (in)
+		fclose(in);
+	fchmod(fd, 0644);
+	if (fclose(out) != 0 || rename(tmp, SETTINGS_FILE) != 0) {
+		unlink(tmp);
+		return false;
+	}
+	policy_timer_cb(NULL);
+	return true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -814,6 +892,7 @@ void chumby_init(void)
 	lv_tick_set_cb(tick_ms);
 	fonts_load();
 	lv_timer_create(policy_timer_cb, 30000, NULL);
+	lv_timer_create(settings_timer_cb, 2000, NULL);
 }
 
 /* CHUMBY_REFR_DEBUG=1: each window says, once a second, how often it

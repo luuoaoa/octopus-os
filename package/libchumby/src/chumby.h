@@ -201,6 +201,15 @@ void chumby_scroll_label_set(lv_obj_t *label, const char *text);
 
 /* Policy */
 const struct chumby_policy *chumby_policy(void);
+
+/*
+ * Settings: /var/lib/chumby/settings.conf, "key = value" lines, the apps'
+ * user's. Its keys override the policy's (mode = auto|day|night: night
+ * mode), and every app sees a change within 2 s. get(): false if unset.
+ * set(): replaces the key's line (val NULL: removes it).
+ */
+bool chumby_setting_get(const char *key, char *val, size_t size);
+bool chumby_setting_set(const char *key, const char *val);
 /* Is the local time now in [start, end) (minutes, may wrap midnight)? */
 bool chumby_in_window(int start, int end);
 /*

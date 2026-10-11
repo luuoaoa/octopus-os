@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * chumby-netradio: internet radio, laid out like the FM app:
+ * Internet Radio (an app bundle, apps/netradio), laid out like the FM app:
  *
  *   left        station logo
  *   right       its category, and the stream's codec and bitrate at the
@@ -14,11 +14,11 @@
  * then stop, cut with dots.
  *
  * Stations: "name | stream URL | logo URL" lines under "[Category]"
- * headers in /var/lib/chumby/streams.conf, else the defaults in
- * /usr/share/chumby/streams.conf. The list shows the categories as
- * tiles, then a category's stations: few enough per screen not to
- * scroll much. Logos are fetched once into /var/lib/chumby/art; a note on
- * a gradient tile until then (or when there is none).
+ * headers in streams.conf in the app's data directory
+ * (chumby_app_data_dir()), else the bundle's. The list shows the
+ * categories as tiles, then a category's stations: few enough per screen
+ * not to scroll much. Logos are fetched once into art/ in the data
+ * directory; a note on a gradient tile until then (or when there is none).
  *
  * chumby-stream does the playing, in the background: it carries on when
  * this app closes, and tells us how it's doing through $run_dir/stream.
@@ -34,14 +34,19 @@
 #include <unistd.h>
 #include <chumby.h>
 
-#define STATIONS_USER	"/var/lib/chumby/streams.conf"
-#define STATIONS_DEFAULT "/usr/share/chumby/streams.conf"
-#define STATION_FILE	"/var/lib/chumby/stream.station"	/* last URL */
-#define ART_DIR		"/var/lib/chumby/art"
+#define APP_ID		"NetRadio"	/* = Id in app.conf */
+/* In the bundle (chumby_app_dir()) and the app's data directory
+ * (chumby_app_data_dir()): paths_init(). */
+#define STATIONS_USER	stations_user
+#define STATIONS_DEFAULT stations_default
+#define STATION_FILE	station_file	/* last URL */
+#define ART_DIR		art_dir
 #define STREAM_TOOL	"/usr/bin/chumby-stream"
 #define CURL		"/usr/bin/curl"
 #define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"
 #define MAX_STATIONS	64
+
+static char stations_user[256], stations_default[256], station_file[256], art_dir[256];
 #define MAX_CATS	16
 #define ART_X		14
 #define ART_SIZE	92
@@ -217,14 +222,14 @@ static void logo_base(const struct station *s, char *out, size_t size)
 
 	for (p = s->logo; *p; p++)
 		h = h * 33 + (unsigned char)*p;
-	snprintf(out, size, ART_DIR "/stream-%08lx", h & 0xffffffffUL);
+	snprintf(out, size, "%s/stream-%08lx", ART_DIR, h & 0xffffffffUL);
 }
 
 /* The cached logo file, if there is one. */
 static bool logo_path(const struct station *s, char *out, size_t size)
 {
 	static const char *exts[] = { ".png", ".jpg" };
-	char base[200];
+	char base[300];
 	size_t i;
 
 	if (!s->logo[0])
@@ -241,7 +246,7 @@ static bool logo_path(const struct station *s, char *out, size_t size)
 static void logo_fetch(int i)
 {
 	struct station *s = &stations[i];
-	char base[200];
+	char base[300];
 	char *argv[] = { "curl", "-sfL", "-m", "20", "--cacert", CA_BUNDLE,
 			 "-A", "chumby-netradio/1.0", "-o", logo_tmp, s->logo, NULL };
 
@@ -260,7 +265,7 @@ static void logo_fetched(bool ok)
 {
 	struct station *s = &stations[logo_station];
 	unsigned char magic[4] = { 0 };
-	char base[200], path[220];
+	char base[300], path[320];
 	const char *ext = NULL;
 	FILE *f = ok ? fopen(logo_tmp, "rb") : NULL;
 
@@ -693,12 +698,42 @@ static void on_mode(chumby_mode_t mode, void *user)
 		list_close();
 }
 
+/* The bundle's files and the app's own directory (see podcasts.c). What
+ * it kept before it was a bundle - its stations, the last one played - is
+ * moved in, once. */
+static void paths_init(void)
+{
+	const char *app = chumby_app_dir(), *data = chumby_app_data_dir();
+	static const char *const old[][2] = {
+		{ "/var/lib/chumby/streams.conf", "streams.conf" },
+		{ "/var/lib/chumby/stream.station", "stream.station" },
+	};
+	char to[300];
+	unsigned int i;
+
+	if (!app)
+		app = "/usr/lib/chumby/apps/" APP_ID;
+	if (!data)
+		data = "/var/lib/chumby/apps/" APP_ID;
+	snprintf(stations_default, sizeof(stations_default), "%s/streams.conf", app);
+	snprintf(stations_user, sizeof(stations_user), "%s/streams.conf", data);
+	snprintf(station_file, sizeof(station_file), "%s/stream.station", data);
+	snprintf(art_dir, sizeof(art_dir), "%s/art", data);
+	mkdir(data, 0755);
+	for (i = 0; i < sizeof(old) / sizeof(old[0]); i++) {
+		snprintf(to, sizeof(to), "%s/%s", data, old[i][1]);
+		if (access(to, F_OK) != 0 && rename(old[i][0], to) == 0)
+			fprintf(stderr, "chumby-netradio: moved %s to %s\n", old[i][0], to);
+	}
+}
+
 int main(void)
 {
 	lv_obj_t *row;
 	int32_t art_y, name_y;
 
-	scr = chumby_app_init("Internet Radio");
+	paths_init();
+	scr = chumby_app_init(APP_ID);
 	lv_obj_set_scrollable(scr, false);
 
 	/* Bottom: the station list (small), previous, play/stop, next. */

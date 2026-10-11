@@ -74,6 +74,7 @@ BR2_PACKAGE_SEATD_BUILTIN=y
 BR2_PACKAGE_CHUMBY_WM=y
 BR2_PACKAGE_CHUMBY_SHELL=y
 BR2_PACKAGE_CHUMBY_APPS=y
+BR2_PACKAGE_CHUMBY_BUNDLED_APPS=y
 # FM station art: chumby-station-art looks the station up (FCC) and fetches
 # its logo (Wikipedia) over HTTPS. libcurl on OpenSSL (below), not mbed
 # TLS: OpenSSL's AES/GHASH/ChaCha20 are ARMv4 assembly, mbed TLS's are C,

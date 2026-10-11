@@ -174,9 +174,12 @@ players, and the LVGL traps we hit.
 - **libchumby** (package/libchumby): the framework every app links: LVGL
   9.6 on Wayland, Rockbox's Nimbus bitmap fonts, the day/night theme,
   layout and label helpers, and a main loop that can watch extra fds.
-- **Apps** (package/chumby-apps): Clock (with alarms), FM Radio (RDS,
-  station art), Internet Radio (MP3/AAC/HLS via `chumby-stream`). An app
-  is a binary plus `/usr/share/chumby/apps/<name>.app`.
+- **System apps** (package/chumby-apps): Clock (with alarms), FM Radio
+  (RDS, station art), AirPlay, Settings, and the stream player
+  `chumby-stream`; a binary plus `/usr/share/chumby/apps/<name>.app` each.
+  **App bundles** (apps/, package/chumby-bundled-apps): Internet Radio and
+  Podcasts, preinstalled in `/usr/lib/chumby/apps/<Id>/`, built and run
+  like any bundle (docs/sdk.md).
 
 **Night mode** is policy, not per-app: `/etc/chumby/policy.conf` (night
 window, `mode = auto|day|night`, `snooze_minutes`, `alarm_volume`, and

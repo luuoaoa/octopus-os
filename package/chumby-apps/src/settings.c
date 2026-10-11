@@ -1,0 +1,572 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
+ * chumby-settings: the system's settings, by category - down the left, a
+ * category's options to the right of it.
+ *
+ *   Appearance   night mode: auto (by the policy's hours), on, off
+ *   Time         the time zone
+ *   Network      the SSH server (off by default; the first time on, a
+ *                random root password, shown here)
+ *   Sound        bass enhancement and an EQ preset - where the system
+ *                has them (the RasPad's PipeWire chain: chumby-sound)
+ *
+ * Adding a setting: a builder for its category (or a new category in
+ * categories[]: a name, an icon, when it applies, its builder). What the
+ * apps' user may set goes in libchumby's settings file
+ * (chumby_setting_set(): night mode, the sound); what only root may (the
+ * SSH server, the time zone) goes through the shell, which runs
+ * /usr/libexec/chumby-setting for its "setting <name> <value>" command.
+ */
+
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <unistd.h>
+#include <chumby.h>
+
+#define APP_ID		"Settings"	/* = Id in settings.app */
+#define SOUND_TOOL	"/usr/bin/chumby-sound"
+#define SSH_ON_FILE	"/run/chumby-config/ssh-on"
+#define SSH_PW_FILE	"/var/lib/chumby-root/ssh-password"
+#define TZ_FILE		"/etc/timezone"
+#define CAT_W		118		/* the category list */
+#define CAT_H		40
+#define PAD		8
+#define PANEL_W		(CHUMBY_APP_W - CAT_W)
+
+struct category {
+	const char *name;
+	const char *icon;		/* LV_SYMBOL_* or CHUMBY_ICON_* */
+	bool (*applies)(void);		/* NULL: always */
+	void (*build)(lv_obj_t *panel);
+};
+
+static void appearance_build(lv_obj_t *panel);
+static void time_build(lv_obj_t *panel);
+static void network_build(lv_obj_t *panel);
+static void sound_build(lv_obj_t *panel);
+static bool sound_applies(void);
+
+static const struct category categories[] = {
+	{ "Appearance", CHUMBY_ICON_SUN, NULL, appearance_build },
+	{ "Time", CHUMBY_ICON_CLOCK, NULL, time_build },
+	{ "Network", LV_SYMBOL_WIFI, NULL, network_build },
+	{ "Sound", LV_SYMBOL_AUDIO, sound_applies, sound_build },
+};
+#define N_CATEGORIES	(int)(sizeof(categories) / sizeof(categories[0]))
+
+static lv_obj_t *scr, *panel;
+static int cur_cat;
+/* Shown and kept up to date (refresh_cb) by the category on screen. */
+static lv_obj_t *ssh_switch, *ssh_info, *tz_label;
+
+/* ------------------------------------------------------------------ */
+/* Building blocks                                                    */
+
+static lv_obj_t *heading(lv_obj_t *parent, const char *text)
+{
+	lv_obj_t *l = lv_label_create(parent);
+
+	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_label_set_text(l, text);
+	return l;
+}
+
+static lv_obj_t *note(lv_obj_t *parent, const char *text)
+{
+	lv_obj_t *l = lv_label_create(parent);
+
+	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_SMALL), 0);
+	lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_width(l, LV_PCT(100));
+	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
+	lv_label_set_text(l, text);
+	return l;
+}
+
+/* A row: a label at the left, a control at the right. */
+static lv_obj_t *row(lv_obj_t *parent, const char *text)
+{
+	lv_obj_t *r = lv_obj_create(parent), *l;
+
+	lv_obj_remove_style_all(r);
+	lv_obj_set_size(r, LV_PCT(100), 36);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	l = lv_label_create(r);
+	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_label_set_text(l, text);
+	return r;
+}
+
+static lv_obj_t *switch_in(lv_obj_t *r, bool on, lv_event_cb_t cb)
+{
+	lv_obj_t *sw = lv_switch_create(r);
+
+	lv_obj_set_size(sw, 52, 28);
+	lv_obj_set_style_bg_color(sw, chumby_color(CHUMBY_COLOR_ACCENT),
+				  LV_PART_INDICATOR | LV_STATE_CHECKED);
+	if (on)
+		lv_obj_add_state(sw, LV_STATE_CHECKED);
+	lv_obj_add_event_cb(sw, cb, LV_EVENT_VALUE_CHANGED, NULL);
+	return sw;
+}
+
+/* A choice of a few: buttons side by side, the chosen one filled. The
+ * event's user data is the choice's index; its button's text, its name. */
+static void choice_buttons(lv_obj_t *parent, const char *const *names, int n, int chosen,
+			   lv_event_cb_t cb)
+{
+	lv_obj_t *r = lv_obj_create(parent);
+	int i;
+
+	lv_obj_remove_style_all(r);
+	lv_obj_set_size(r, LV_PCT(100), 38);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_style_pad_column(r, 4, 0);
+	for (i = 0; i < n; i++) {
+		lv_obj_t *b = lv_button_create(r), *l;
+
+		lv_obj_set_height(b, 36);
+		lv_obj_set_flex_grow(b, 1);
+		lv_obj_set_style_radius(b, 8, 0);
+		lv_obj_set_style_shadow_width(b, 0, 0);
+		if (i == chosen)
+			chumby_glossy(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+		else
+			lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+		l = lv_label_create(b);
+		lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_BODY), 0);
+		lv_obj_set_style_text_color(l, i == chosen ? chumby_on_accent() :
+					    chumby_color(CHUMBY_COLOR_TEXT), 0);
+		lv_label_set_text(l, names[i]);
+		lv_obj_center(l);
+		lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+	}
+}
+
+static void panel_show(int cat);
+
+/* ------------------------------------------------------------------ */
+/* Appearance                                                         */
+
+static const char *const mode_names[] = { "Auto", "On", "Off" };
+static const char *const mode_values[] = { "auto", "night", "day" };
+
+/* After the tap's event: the theme follows the setting (on_mode rebuilds
+ * the screen, the button tapped with it - not while it's handling it). */
+static void mode_apply(void *choice)
+{
+	int i = (int)(intptr_t)choice;
+	chumby_mode_t before = chumby_mode();
+
+	chumby_setting_set("mode", mode_values[i]);
+	if (chumby_mode() == before)
+		panel_show(cur_cat);	/* (no switch, no rebuild: the buttons again) */
+}
+
+static void mode_cb(lv_event_t *e)
+{
+	lv_async_call(mode_apply, lv_event_get_user_data(e));
+}
+
+static void appearance_build(lv_obj_t *p)
+{
+	char val[16] = "";
+	int chosen = 0, i;
+
+	if (!chumby_setting_get("mode", val, sizeof(val)))
+		snprintf(val, sizeof(val), "%s", chumby_policy()->force == CHUMBY_MODE_NIGHT ?
+			 "night" : chumby_policy()->force == CHUMBY_MODE_DAY ? "day" : "auto");
+	for (i = 0; i < 3; i++)
+		if (!strcmp(val, mode_values[i]))
+			chosen = i;
+	heading(p, "Night mode");
+	choice_buttons(p, mode_names, 3, chosen, mode_cb);
+	note(p, "Auto: dark and warm at night, by the hours in /etc/chumby/policy.conf.");
+}
+
+/* ------------------------------------------------------------------ */
+/* Time                                                               */
+
+/* A choice of zones (the tz database has hundreds): a city each. */
+static const char *const zones[] = {
+	"Pacific/Honolulu", "America/Anchorage", "America/Los_Angeles", "America/Denver",
+	"America/Phoenix", "America/Chicago", "America/New_York", "America/Halifax",
+	"America/Mexico_City", "America/Bogota", "America/Lima", "America/Santiago",
+	"America/Sao_Paulo", "America/Argentina/Buenos_Aires", "Atlantic/Reykjavik",
+	"Europe/London", "Europe/Dublin", "Europe/Lisbon", "Europe/Paris", "Europe/Madrid",
+	"Europe/Berlin", "Europe/Amsterdam", "Europe/Rome", "Europe/Stockholm",
+	"Europe/Warsaw", "Europe/Athens", "Europe/Helsinki", "Europe/Istanbul",
+	"Europe/Moscow", "Africa/Lagos", "Africa/Cairo", "Africa/Johannesburg",
+	"Africa/Nairobi", "Asia/Dubai", "Asia/Karachi", "Asia/Kolkata", "Asia/Dhaka",
+	"Asia/Bangkok", "Asia/Ho_Chi_Minh", "Asia/Jakarta", "Asia/Shanghai",
+	"Asia/Hong_Kong", "Asia/Singapore", "Asia/Taipei", "Asia/Manila", "Asia/Seoul",
+	"Asia/Tokyo", "Australia/Perth", "Australia/Adelaide", "Australia/Brisbane",
+	"Australia/Sydney", "Pacific/Auckland", "UTC",
+};
+#define N_ZONES		(int)(sizeof(zones) / sizeof(zones[0]))
+
+static lv_obj_t *tz_roller;
+
+static void tz_current(char *out, size_t size)
+{
+	FILE *f = fopen(TZ_FILE, "r");
+
+	out[0] = '\0';
+	if (f) {
+		if (fgets(out, size, f))
+			out[strcspn(out, "\n")] = '\0';
+		fclose(f);
+	}
+	if (!out[0])
+		snprintf(out, size, "UTC");
+}
+
+static void tz_label_update(void)
+{
+	char tz[64], text[96];
+
+	tz_current(tz, sizeof(tz));
+	snprintf(text, sizeof(text), "Now: %s", tz);
+	if (strcmp(lv_label_get_text(tz_label), text))
+		lv_label_set_text(tz_label, text);
+}
+
+static void tz_set_cb(lv_event_t *e)
+{
+	char cmd[96];
+
+	(void)e;
+	snprintf(cmd, sizeof(cmd), "setting timezone %s", zones[lv_roller_get_selected(tz_roller)]);
+	chumby_shell_command(cmd);	/* the shell runs chumby-setting (root's) */
+}
+
+static void time_build(lv_obj_t *p)
+{
+	char tz[64], *opts, *o;
+	lv_obj_t *r, *b, *l;
+	int i, len = 0, sel = 0;
+
+	heading(p, "Time zone");
+	tz_label = note(p, "");
+	tz_label_update();
+	tz_current(tz, sizeof(tz));
+	for (i = 0; i < N_ZONES; i++)
+		len += strlen(zones[i]) + 1;
+	opts = o = malloc(len + 1);
+	for (i = 0; i < N_ZONES; i++) {	/* "America/Los_Angeles" shown as "Los Angeles" */
+		const char *city = strrchr(zones[i], '/');
+		int j;
+
+		city = city ? city + 1 : zones[i];
+		for (j = 0; city[j]; j++)
+			*o++ = city[j] == '_' ? ' ' : city[j];
+		*o++ = i < N_ZONES - 1 ? '\n' : '\0';
+		if (!strcmp(zones[i], tz))
+			sel = i;
+	}
+	r = lv_obj_create(p);
+	lv_obj_remove_style_all(r);
+	lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	tz_roller = lv_roller_create(r);
+	lv_roller_set_options(tz_roller, opts, LV_ROLLER_MODE_NORMAL);
+	free(opts);
+	lv_roller_set_visible_row_count(tz_roller, 3);
+	lv_roller_set_selected(tz_roller, sel, LV_ANIM_OFF);
+	lv_obj_set_width(tz_roller, 104);
+	lv_obj_set_style_text_font(tz_roller, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_style_bg_color(tz_roller, chumby_color(CHUMBY_COLOR_ACCENT), LV_PART_SELECTED);
+	lv_obj_set_style_text_color(tz_roller, chumby_on_accent(), LV_PART_SELECTED);
+	b = lv_button_create(r);
+	lv_obj_set_size(b, 64, 40);
+	lv_obj_set_style_radius(b, 8, 0);
+	lv_obj_set_style_shadow_width(b, 0, 0);
+	chumby_glossy(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
+	l = lv_label_create(b);
+	lv_obj_set_style_text_color(l, chumby_on_accent(), 0);
+	lv_label_set_text(l, "Set");
+	lv_obj_center(l);
+	lv_obj_add_event_cb(b, tz_set_cb, LV_EVENT_CLICKED, NULL);
+}
+
+/* ------------------------------------------------------------------ */
+/* Network                                                            */
+
+static bool ssh_on(void)
+{
+	return access(SSH_ON_FILE, F_OK) == 0;
+}
+
+/* The Chumby's address, for "ssh root@...": its first IPv4 one. */
+static void my_address(char *out, size_t size)
+{
+	struct ifaddrs *ifs, *i;
+
+	snprintf(out, size, "(no network)");
+	if (getifaddrs(&ifs) < 0)
+		return;
+	for (i = ifs; i; i = i->ifa_next)
+		if (i->ifa_addr && i->ifa_addr->sa_family == AF_INET &&
+		    !(i->ifa_flags & IFF_LOOPBACK)) {
+			inet_ntop(AF_INET, &((struct sockaddr_in *)i->ifa_addr)->sin_addr, out, size);
+			break;
+		}
+	freeifaddrs(ifs);
+}
+
+static void ssh_info_update(void)
+{
+	char text[160], pw[32] = "", addr[48];
+	FILE *f;
+
+	if (!ssh_info)
+		return;
+	if (!ssh_on()) {
+		snprintf(text, sizeof(text), "Off: nothing can log in over the network.");
+	} else {
+		if ((f = fopen(SSH_PW_FILE, "r"))) {
+			if (fgets(pw, sizeof(pw), f))
+				pw[strcspn(pw, "\n")] = '\0';
+			fclose(f);
+		}
+		my_address(addr, sizeof(addr));
+		snprintf(text, sizeof(text), "ssh root@%s\nPassword: %s", addr,
+			 pw[0] ? pw : "(as set on the card)");
+	}
+	if (strcmp(lv_label_get_text(ssh_info), text))
+		lv_label_set_text(ssh_info, text);
+	if (ssh_on() != lv_obj_has_state(ssh_switch, LV_STATE_CHECKED)) {
+		if (ssh_on())
+			lv_obj_add_state(ssh_switch, LV_STATE_CHECKED);
+		else
+			lv_obj_remove_state(ssh_switch, LV_STATE_CHECKED);
+	}
+}
+
+static void ssh_cb(lv_event_t *e)
+{
+	bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+
+	chumby_shell_command(on ? "setting ssh on" : "setting ssh off");
+}
+
+static void network_build(lv_obj_t *p)
+{
+	lv_obj_t *r;
+
+	heading(p, "SSH server");
+	r = row(p, "Allow logins");
+	ssh_switch = switch_in(r, ssh_on(), ssh_cb);
+	ssh_info = note(p, "");
+	lv_obj_set_style_text_font(ssh_info, chumby_font(CHUMBY_FONT_BODY), 0);
+	ssh_info_update();
+}
+
+/* ------------------------------------------------------------------ */
+/* Sound (where the system has processing to set: chumby-sound)        */
+
+#define MAX_PRESETS	8
+
+static char preset_ids[MAX_PRESETS][16], preset_names[MAX_PRESETS][32];
+static int n_presets;
+
+static bool sound_applies(void)
+{
+	return access(SOUND_TOOL, X_OK) == 0;
+}
+
+static void sound_apply(void)
+{
+	char *argv[] = { "chumby-sound", "apply", NULL };
+
+	chumby_spawn(SOUND_TOOL, argv);	/* (reaped: SIGCHLD ignored) */
+}
+
+static void bass_cb(lv_event_t *e)
+{
+	bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+
+	chumby_setting_set("bass", on ? "on" : "off");
+	sound_apply();
+}
+
+static void eq_cb(lv_event_t *e)
+{
+	int i = lv_dropdown_get_selected(lv_event_get_target(e));
+
+	if (i < n_presets) {
+		chumby_setting_set("eq", preset_ids[i]);
+		sound_apply();
+	}
+}
+
+static void sound_build(lv_obj_t *p)
+{
+	char val[16] = "", line[64], opts[MAX_PRESETS * 32] = "";
+	lv_obj_t *r, *dd;
+	FILE *f;
+	int sel = 0;
+
+	heading(p, "Speakers");
+	chumby_setting_get("bass", val, sizeof(val));
+	r = row(p, "Bass enhancer");
+	switch_in(r, !strcmp(val, "on"), bass_cb);
+
+	n_presets = 0;
+	if ((f = popen(SOUND_TOOL " presets", "r"))) {
+		while (n_presets < MAX_PRESETS && fgets(line, sizeof(line), f) &&
+		       sscanf(line, "%15[^\t]\t%31[^\n]", preset_ids[n_presets],
+			      preset_names[n_presets]) == 2)
+			n_presets++;
+		pclose(f);
+	}
+	val[0] = '\0';
+	chumby_setting_get("eq", val, sizeof(val));
+	for (int i = 0; i < n_presets; i++) {
+		strcat(opts, preset_names[i]);
+		if (i < n_presets - 1)
+			strcat(opts, "\n");
+		if (!strcmp(val, preset_ids[i]))
+			sel = i;
+	}
+	r = row(p, "EQ");
+	dd = lv_dropdown_create(r);
+	lv_dropdown_set_options(dd, opts);
+	lv_dropdown_set_selected(dd, sel);
+	lv_obj_set_width(dd, 128);
+	lv_obj_set_style_text_font(dd, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_add_event_cb(dd, eq_cb, LV_EVENT_VALUE_CHANGED, NULL);
+	note(p, "Bass enhancer: bass the ear fills in, sparing the small speakers.");
+}
+
+/* ------------------------------------------------------------------ */
+/* The screen: categories, a category's panel                          */
+
+static void panel_show(int cat)
+{
+	cur_cat = cat;
+	ssh_info = ssh_switch = tz_label = NULL;
+	lv_obj_clean(panel);
+	categories[cat].build(panel);
+}
+
+static lv_obj_t *cat_list;
+
+static void cat_cb(lv_event_t *e)
+{
+	int i = (int)(intptr_t)lv_event_get_user_data(e);
+	uint32_t c;
+
+	for (c = 0; c < lv_obj_get_child_count(cat_list); c++) {
+		lv_obj_t *b = lv_obj_get_child(cat_list, c);
+
+		if (b == lv_event_get_target(e))
+			lv_obj_add_state(b, LV_STATE_CHECKED);
+		else
+			lv_obj_remove_state(b, LV_STATE_CHECKED);
+	}
+	panel_show(i);
+}
+
+/* Everything, in the mode's colours (again at a switch: night mode is one
+ * of ours). */
+static void build(void)
+{
+	int i;
+
+	lv_obj_clean(scr);
+	lv_obj_set_style_bg_color(scr, chumby_color(CHUMBY_COLOR_BG), 0);
+
+	cat_list = lv_obj_create(scr);
+	lv_obj_remove_style_all(cat_list);
+	lv_obj_set_size(cat_list, CAT_W, CHUMBY_APP_H);
+	lv_obj_set_style_bg_opa(cat_list, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(cat_list, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_pad_all(cat_list, 4, 0);
+	lv_obj_set_style_pad_row(cat_list, 2, 0);
+	lv_obj_set_flex_flow(cat_list, LV_FLEX_FLOW_COLUMN);
+	for (i = 0; i < N_CATEGORIES; i++) {
+		lv_obj_t *b, *l;
+
+		if (categories[i].applies && !categories[i].applies())
+			continue;
+		b = lv_button_create(cat_list);
+		lv_obj_set_size(b, LV_PCT(100), CAT_H);
+		lv_obj_set_style_radius(b, 8, 0);
+		lv_obj_set_style_shadow_width(b, 0, 0);
+		lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
+		lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_CHECKED);
+		lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_ACCENT), LV_STATE_CHECKED);
+		lv_obj_set_style_pad_left(b, 6, 0);
+		lv_obj_set_flex_flow(b, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(b, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+				      LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_column(b, 6, 0);
+		l = lv_label_create(b);
+		lv_obj_set_style_text_font(l, chumby_icon_font(20), 0);
+		lv_label_set_text(l, categories[i].icon);
+		l = lv_label_create(b);
+		lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_BODY), 0);
+		lv_label_set_text(l, categories[i].name);
+		lv_obj_set_style_text_color(b, chumby_color(CHUMBY_COLOR_TEXT), 0);
+		lv_obj_set_style_text_color(b, chumby_on_accent(), LV_STATE_CHECKED);
+		if (i == cur_cat)
+			lv_obj_add_state(b, LV_STATE_CHECKED);
+		lv_obj_add_event_cb(b, cat_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+	}
+
+	panel = lv_obj_create(scr);
+	lv_obj_remove_style_all(panel);
+	lv_obj_set_size(panel, PANEL_W, CHUMBY_APP_H);
+	lv_obj_set_pos(panel, CAT_W, 0);
+	lv_obj_set_style_pad_all(panel, PAD, 0);
+	lv_obj_set_style_pad_row(panel, 6, 0);
+	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_scroll_dir(panel, LV_DIR_VER);
+	panel_show(cur_cat);
+}
+
+static void on_mode(chumby_mode_t mode, void *user)
+{
+	(void)mode; (void)user;
+	build();
+}
+
+/* What changes by itself (the SSH server turned on through the shell, its
+ * password made; the time zone set): kept up to date. */
+static void refresh_cb(lv_timer_t *t)
+{
+	(void)t;
+	ssh_info_update();
+	if (tz_label)
+		tz_label_update();
+}
+
+/* chumby-settings [CATEGORY]: open at that category (its name, any case). */
+int main(int argc, char **argv)
+{
+	int i;
+
+	for (i = 0; argc > 1 && i < N_CATEGORIES; i++)
+		if (!strcasecmp(argv[1], categories[i].name) &&
+		    (!categories[i].applies || categories[i].applies()))
+			cur_cat = i;
+	signal(SIGCHLD, SIG_IGN);	/* chumby-sound: nothing to wait for */
+	scr = chumby_app_init(APP_ID);
+	lv_obj_set_scrollable(scr, false);
+	chumby_on_mode_change(on_mode, NULL);	/* builds it */
+	lv_timer_create(refresh_cb, 1000, NULL);
+	return chumby_run();
+}

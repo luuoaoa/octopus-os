@@ -28,6 +28,9 @@ microSD            holds everything; USB for Wi-Fi
   snapshot of the screen.
 - **Buttons:** the power button turns the screen off and on (hold 2 s to
   shut down); the snooze bar snoozes alarms.
+- **Settings**, by category: night mode, the time zone, the SSH server
+  (off by default; turning it on makes a random root password, shown
+  there), and the speakers' bass and EQ where there are any (the RasPad).
 - **Apps you can install:** bundles built with the SDK, installed from a
   USB stick or over the network. See [Writing apps](#writing-apps).
 
@@ -74,8 +77,12 @@ files on its small FAT partition (any desktop mounts it):
   SSH password login, and optionally a new root password.
 - **`authorized_keys`:** SSH keys for root.
 
-They're applied at every boot, so edit and reboot to change them. The
-Chumby is then reachable over SSH as `root` (default password `root`).
+They're applied at every boot, so edit and reboot to change them.
+
+SSH is off by default. Turn it on in **Settings > Network** (it makes a
+random root password and shows it), or put `ssh: true` in `user-data` to
+have it on from the first boot (then log in with keys from
+`authorized_keys`, or the default password `root`).
 
 ### Updating a running Chumby
 
@@ -142,10 +149,13 @@ board/falconwing/                       the stock-kernel image (and the shared o
 package/
   chumby-wm/        the Wayland compositor (wlroots)
   chumby-shell/     tab bar, Home menu, alarms, buttons, screen saver policy
-  chumby-apps/      clock, FM, internet radio, podcasts, AirPlay, Flying Toasters
+  chumby-apps/      the system apps: clock, FM, AirPlay, Settings, the stream
+                    player, Flying Toasters
+  chumby-bundled-apps/  builds apps/ as preinstalled app bundles
   libchumby/        the app framework (LVGL 9 compiled in), the saver kit
   qn8005/           the FM tuner tool and RDS decoder
   wlroots-pixman/   wlroots without a GPU
+apps/               Internet Radio, Podcasts: app bundles, built like anyone's
 sdk/                chumby-app, the SDK's Docker images, examples
 docs/               writing apps, the SDK, the tutorial
 bin/                update-chumby.sh, chumby-try

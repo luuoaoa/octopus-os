@@ -9,9 +9,12 @@ this before writing an app; the headers it points at have the details.
 ```
 chumby-wm (wlroots compositor, package/chumby-wm)
  ├── chumby-shell  (package/chumby-shell)  tab bar, Home menu, volume /
- │                  brightness sliders, alarms, snooze button, screen power
- └── apps          (package/chumby-apps)  chumby-clock, chumby-fm,
-                    chumby-netradio, ...: one Wayland client each
+ │                  brightness sliders, alarms, buttons, screen power
+ ├── system apps   (package/chumby-apps)  Clock, FM Radio, AirPlay,
+ │                  Settings; the stream player chumby-stream
+ └── app bundles   Internet Radio, Podcasts (apps/, preinstalled in
+                    /usr/lib/chumby/apps), and anyone's (the SDK, installed
+                    in /var/apps): one Wayland client each
 libchumby (package/libchumby)  LVGL 9.6 compiled in, plus the Chumby
                     framework every app and the shell link against
 ```
@@ -85,12 +88,18 @@ Color = #3a9a5c
   copy while the first is coming up (`LAUNCH_TIMEOUT_S`). An app exits
   when its window is closed (holding its tab) or the compositor goes.
 
-To make it part of the image, add it to `package/chumby-apps`
-(`src/Makefile`: one line per binary, linking `pkg-config --libs
-libchumby`; `chumby-apps.mk`: install the binary and the `.app`). To make
-it an app people install on their Chumby (a bundle from a USB stick or
-over the network), without buildroot, use the SDK: [sdk.md](sdk.md), and
-the walk-through in [sdk-tutorial.md](sdk-tutorial.md).
+An app is a **bundle** (a directory: `app.conf` like the above, with
+`Exec` relative to it, plus the program and its files): build it with the
+SDK ([sdk.md](sdk.md), the walk-through in
+[sdk-tutorial.md](sdk-tutorial.md)) and install it from a USB stick or
+over the network. To ship one in the image, put it in `apps/<name>/` (a
+Makefile making `bundle/`, as the SDK's examples do):
+`package/chumby-bundled-apps` builds every app there and preinstalls it,
+read-only, in `/usr/lib/chumby/apps/<Id>/` - Internet Radio and Podcasts
+are made so, and are no different from anyone's. Only the system's own
+apps (Clock, FM, AirPlay, Settings: tied to the hardware, the alarms or
+root's settings) are in `package/chumby-apps`, with `.app` descriptors in
+`/usr/share/chumby/apps`.
 
 ## libchumby (package/libchumby/src/chumby.h)
 
@@ -109,7 +118,7 @@ Everything below is declared in `chumby.h`, with comments.
 **Never block the UI.** Anything slow (network, the tuner's 2.5 s init,
 `chumby-stream` stopping a stream) runs as a child process via
 `chumby_spawn`, reaped from an LVGL timer (see `child_poll` in `fm.c`,
-`poll_cb` in `netradio.c`).
+`poll_cb` in `apps/netradio/netradio.c`).
 
 ### Theme
 

@@ -3,8 +3,8 @@
 CC ?= cc
 PKG_CONFIG ?= pkg-config
 
-CFLAGS += -O2 -Wall $(shell $(PKG_CONFIG) --cflags libchumby)
-LDLIBS += $(shell $(PKG_CONFIG) --libs libchumby)
+override CFLAGS += -O2 -Wall $(shell $(PKG_CONFIG) --cflags libchumby)
+override LDLIBS += $(shell $(PKG_CONFIG) --libs libchumby)
 
 all: bundle/hello bundle/app.conf
 

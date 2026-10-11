@@ -163,8 +163,8 @@ bench)
 export XDG_RUNTIME_DIR=/run/chumby WAYLAND_DISPLAY=wayland-0
 C=/run/chumby/shell.cmd
 T=15
-STATION=$(grep -v '^[#[]' /usr/share/chumby/streams.conf | grep -m1 '|' | cut -d'|' -f2 | tr -d ' ')
-EPISODE=$(head -1 "$(ls /var/lib/chumby/podcasts/*.feed 2>/dev/null | head -1)" 2>/dev/null | cut -f4)
+STATION=$(grep -v '^[#[]' /usr/lib/chumby/apps/NetRadio/streams.conf | grep -m1 '|' | cut -d'|' -f2 | tr -d ' ')
+EPISODE=$(head -1 "$(ls /var/lib/chumby/apps/Podcasts/*.feed 2>/dev/null | head -1)" 2>/dev/null | cut -f4)
 
 snap() {	# pid ticks name
 	for p in /proc/[0-9]*; do

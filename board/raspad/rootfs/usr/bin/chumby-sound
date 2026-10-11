@@ -1,0 +1,66 @@
+#!/bin/sh
+# chumby-sound: the RasPad's speaker processing, as the Settings app sets
+# it (Sound; it runs this as the apps' user, in the pipewire group).
+#
+#   chumby-sound apply      bass and EQ from /var/lib/chumby/settings.conf
+#                           ("bass = on|off", "eq = <preset>"; both off by
+#                           default) onto the "raspad-eq" chain, live
+#   chumby-sound presets    the EQ presets: id, a tab, its name
+#
+# The chain (/etc/pipewire/pipewire.conf.d/30-raspad-eq.conf) is always
+# the default sink: bankstown bypassed and the EQ flat, it passes the
+# sound through. Its controls are set with pw-cli, by node:control name.
+set -eu
+
+export PIPEWIRE_RUNTIME_DIR="${PIPEWIRE_RUNTIME_DIR:-/run/pipewire}"
+SETTINGS=/var/lib/chumby/settings.conf
+EQ_NAME=raspad-eq
+
+# id|name|pre gain|low shelf dB|2.5 kHz dB|high shelf dB|low-pass Hz
+PRESETS='off|Off|1.0|0|0|0|20000
+speaker|Speaker tuning|0.56|6|-4|-6|11000
+warm|Warm|0.56|6|-4|-9|9000
+light|Light|0.75|3|-2|-3|16000'
+
+setting() {
+	sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$SETTINGS" 2>/dev/null | tail -1
+}
+
+node_id() {
+	pw-cli ls Node 2>/dev/null | awk -v target="node.name = \"$1\"" '
+		/^	id [0-9]+/          { id = $2; gsub(",", "", id) }
+		index($0, target) > 0   { print id; exit }'
+}
+
+case "${1:-}" in
+presets)
+	printf '%s\n' "$PRESETS" | awk -F'|' '{ print $1 "\t" $2 }'
+	;;
+apply)
+	id=$(node_id "$EQ_NAME")
+	[ -n "$id" ] || { echo "chumby-sound: no $EQ_NAME node" >&2; exit 1; }
+	eq=$(setting eq); [ -n "$eq" ] || eq=off
+	line=$(printf '%s\n' "$PRESETS" | grep "^$eq|" || printf '%s\n' "$PRESETS" | head -1)
+	IFS='|' read -r _ _ pre low mid high lp <<EOF
+$line
+EOF
+	if [ "$(setting bass)" = on ]; then
+		bypass=0.0
+		pre=$(awk -v p="$pre" 'BEGIN { printf "%.2f", p * 0.8 }')	# its harmonics' headroom
+	else
+		bypass=1.0
+	fi
+	params="\"bass:bypass\" $bypass"
+	for ch in L R; do
+		params="$params \"pre_$ch:Gain 1\" $pre \"eq_${ch}_1:Gain\" $low \"eq_${ch}_2:Gain\" $mid"
+		params="$params \"eq_${ch}_3:Gain\" $high \"eq_${ch}_4:Freq\" $lp"
+	done
+	pw-cli set-param "$id" Props "{ params = [ $params ] }" >/dev/null
+	wpctl set-default "$id"
+	echo "bass $( [ "$bypass" = 0.0 ] && echo on || echo off ), eq $eq"
+	;;
+*)
+	sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2
+	exit 2
+	;;
+esac

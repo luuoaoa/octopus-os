@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * chumby-podcasts: podcast episodes, laid out like Internet Radio:
+ * Podcasts (an app bundle, apps/podcasts): episodes, laid out like
+ * Internet Radio:
  *
  *   left        the show's artwork
  *   right       the show's name, small, level with the art's top; under it
@@ -11,15 +12,16 @@
  *   bottom      episode list, back 10 s, play/pause, ahead 30 s
  *
  * Shows: "name | RSS feed URL | artwork URL" lines in /boot/podcasts.conf
- * (the config partition), else the defaults in /usr/share/chumby. Their
- * feeds are read by chumby-podcast-feed (the newest 30 episodes) into
- * /var/lib/chumby/podcasts, again once an hour old, one at a time, in the
- * background. Artwork is fetched once into /var/lib/chumby/art.
+ * (the config partition), else podcasts.conf in the bundle. Their feeds
+ * are read by the bundle's chumby-podcast-feed (the newest 30 episodes)
+ * into the app's data directory (chumby_app_data_dir()), again once an
+ * hour old, one at a time, in the background. Artwork is fetched once into
+ * art/ there.
  *
  * chumby-stream plays (in the background: it carries on when this app
  * closes, and takes the sound from other sources through chumby-audio),
  * starting an episode where it was left: its status gives the byte it's
- * at, kept per episode in /var/lib/chumby/podcasts/positions, with the
+ * at, kept per episode in "positions" in the data directory, with the
  * finished ones marked. Pause stops it, remembering where; the skip
  * buttons restart it a little before or after (taps in a row add up).
  */
@@ -34,14 +36,18 @@
 #include <unistd.h>
 #include <chumby.h>
 
+#define APP_ID		"Podcasts"	/* = Id in app.conf */
 #define CONF_USER	"/boot/podcasts.conf"
-#define CONF_DEFAULT	"/usr/share/chumby/podcasts.conf"
-#define DATA_DIR	"/var/lib/chumby/podcasts"
-#define POSITIONS_FILE	DATA_DIR "/positions"
-#define CURRENT_FILE	DATA_DIR "/current"
-#define ART_DIR		"/var/lib/chumby/art"
+/* In the bundle (chumby_app_dir()) and the app's data directory
+ * (chumby_app_data_dir()): paths_init(). */
+#define CONF_DEFAULT	conf_default
+#define DATA_DIR	data_dir
+#define POSITIONS_FILE	positions_file
+#define CURRENT_FILE	current_file
+#define ART_DIR		art_dir
+#define FEED_TOOL	feed_tool
+#define OLD_DATA_DIR	"/var/lib/chumby/podcasts"	/* before it was a bundle */
 #define STREAM_TOOL	"/usr/bin/chumby-stream"
-#define FEED_TOOL	"/usr/bin/chumby-podcast-feed"
 #define CURL		"/usr/bin/curl"
 #define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"
 #define MAX_SHOWS	16
@@ -194,11 +200,42 @@ static void fmt_date(char *out, size_t size, long long t)
 }
 
 /* ------------------------------------------------------------------ */
+/* Where things are                                                   */
+
+static char conf_default[256], data_dir[256], positions_file[280], current_file[280],
+	    art_dir[280], feed_tool[256];
+
+/* The bundle's files and the app's own directory - set by the shell for
+ * a bundle; as installed in the image if run some other way. What the app
+ * kept before it was a bundle (/var/lib/chumby/podcasts) is moved in, once. */
+static void paths_init(void)
+{
+	const char *app = chumby_app_dir(), *data = chumby_app_data_dir();
+	struct stat st;
+
+	if (!app)
+		app = "/usr/lib/chumby/apps/" APP_ID;
+	if (!data)
+		data = "/var/lib/chumby/apps/" APP_ID;
+	snprintf(conf_default, sizeof(conf_default), "%s/podcasts.conf", app);
+	snprintf(feed_tool, sizeof(feed_tool), "%s/chumby-podcast-feed", app);
+	snprintf(data_dir, sizeof(data_dir), "%s", data);
+	snprintf(positions_file, sizeof(positions_file), "%s/positions", data);
+	snprintf(current_file, sizeof(current_file), "%s/current", data);
+	snprintf(art_dir, sizeof(art_dir), "%s/art", data);
+	if (stat(positions_file, &st) != 0 && stat(OLD_DATA_DIR, &st) == 0) {
+		rmdir(data_dir);	/* (made empty by the shell) */
+		if (rename(OLD_DATA_DIR, data_dir) == 0)
+			fprintf(stderr, "chumby-podcasts: moved " OLD_DATA_DIR " to %s\n", data_dir);
+	}
+}
+
+/* ------------------------------------------------------------------ */
 /* Shows, their episodes, and where we are in them                    */
 
 static void cache_path(int s, char *out, size_t size)
 {
-	snprintf(out, size, DATA_DIR "/%08lx.feed", hash(shows[s].feed));
+	snprintf(out, size, "%s/%08lx.feed", DATA_DIR, hash(shows[s].feed));
 }
 
 static void load_shows(void)
@@ -305,18 +342,20 @@ static void load_positions(void)
 
 static void save_positions(void)
 {
+	char tmp[300];
 	FILE *f;
 	int i;
 
 	mkdir(DATA_DIR, 0755);
-	f = fopen(POSITIONS_FILE ".tmp", "w");
+	snprintf(tmp, sizeof(tmp), "%s.tmp", POSITIONS_FILE);
+	f = fopen(tmp, "w");
 	if (!f)
 		return;
 	for (i = 0; i < n_positions; i++)
 		fprintf(f, "%08lx %lld %lld %d\n", positions[i].key, positions[i].byte,
 			positions[i].length, positions[i].done);
 	fclose(f);
-	rename(POSITIONS_FILE ".tmp", POSITIONS_FILE);
+	rename(tmp, POSITIONS_FILE);
 }
 
 /* The episode's bytes per second: from the feed (its size over its
@@ -454,7 +493,7 @@ static void feed_next(void)
 
 static void art_base(const struct show *sh, char *out, size_t size)
 {
-	snprintf(out, size, ART_DIR "/podcast-%08lx", hash(sh->art));
+	snprintf(out, size, "%s/podcast-%08lx", ART_DIR, hash(sh->art));
 }
 
 static bool art_path(const struct show *sh, char *out, size_t size)
@@ -1225,7 +1264,8 @@ int main(void)
 	int32_t art_y, title_y, line_large, line_body;
 	int s;
 
-	scr = chumby_app_init("Podcasts");
+	paths_init();
+	scr = chumby_app_init(APP_ID);
 	lv_obj_set_scrollable(scr, false);
 	line_large = lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE));
 	line_body = lv_font_get_line_height(chumby_font(CHUMBY_FONT_BODY));

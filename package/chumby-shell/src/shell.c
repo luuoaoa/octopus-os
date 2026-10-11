@@ -55,6 +55,7 @@
 
 #define APPS_DIR	"/usr/share/chumby/apps"	/* the image's: <name>.app each */
 #define BUNDLES_DIR	"/var/apps"	/* installed bundles: <id>/app.conf (chumby-install) */
+#define IMAGE_BUNDLES_DIR "/usr/lib/chumby/apps"	/* the image's bundles (read-only) */
 #define APP_DATA_DIR	"/var/lib/chumby/apps"	/* a bundle's data: <id>/, the apps' user's */
 #define MAX_APPS	16
 #define CLOCK_ID	"Clock"		/* app the snooze button brings up */
@@ -166,8 +167,35 @@ static bool load_app(const char *path, const char *dir, struct app_info *a)
 	return true;
 }
 
-/* The image's apps, then the installed bundles (one per Id: the image's
- * win). What's running stays known across a reload (an install, a removal). */
+/* Every bundle in dir (<id>/app.conf each) not listed yet (by Id). */
+static void load_bundles(const char *bundles)
+{
+	char path[300], dir[96];
+	struct dirent *e;
+	DIR *d = opendir(bundles);
+	int i;
+
+	while (d && (e = readdir(d)) && n_apps < MAX_APPS) {
+		if (e->d_name[0] == '.' || strlen(e->d_name) > 40)
+			continue;
+		snprintf(dir, sizeof(dir), "%s/%s", bundles, e->d_name);
+		snprintf(path, sizeof(path), "%s/app.conf", dir);
+		if (!load_app(path, dir, &apps[n_apps]))
+			continue;
+		for (i = 0; i < n_apps && strcmp(apps[i].id, apps[n_apps].id); i++)
+			;
+		if (i == n_apps)
+			n_apps++;
+	}
+	if (d)
+		closedir(d);
+}
+
+/* The image's system apps; the installed bundles; the image's bundles
+ * (Internet Radio, Podcasts: apps like any, but for being preinstalled).
+ * One per Id, the first found: a system app's Id can't be taken, and an
+ * installed bundle replaces the image's of its Id (an update). What's
+ * running stays known across a reload (an install, a removal). */
 static void load_apps(void)
 {
 	static struct app_info old[MAX_APPS];
@@ -190,23 +218,8 @@ static void load_apps(void)
 		}
 		closedir(d);
 	}
-	if ((d = opendir(BUNDLES_DIR))) {
-		while ((e = readdir(d)) && n_apps < MAX_APPS) {
-			char dir[96];
-
-			if (e->d_name[0] == '.' || strlen(e->d_name) > 40)
-				continue;
-			snprintf(dir, sizeof(dir), BUNDLES_DIR "/%s", e->d_name);
-			snprintf(path, sizeof(path), "%s/app.conf", dir);
-			if (!load_app(path, dir, &apps[n_apps]))
-				continue;
-			for (i = 0; i < n_apps && strcmp(apps[i].id, apps[n_apps].id); i++)
-				;
-			if (i == n_apps)
-				n_apps++;
-		}
-		closedir(d);
-	}
+	load_bundles(BUNDLES_DIR);
+	load_bundles(IMAGE_BUNDLES_DIR);
 	for (i = 0; i < n_apps; i++)
 		for (j = 0; j < n_old; j++)
 			if (!strcmp(apps[i].id, old[j].id)) {
@@ -2011,7 +2024,13 @@ static void command(const char *cmd)
 		snooze_pressed();
 	else if (!strcmp(cmd, "power"))		/* the power button, pressed */
 		power_pressed();
-	else if (!strcmp(cmd, "restart airplay")) {	/* audio.d/airplay, as the apps' user */
+	else if (!strncmp(cmd, "setting ", 8)) {	/* the Settings app: what's root's */
+		char key[16] = "", val[64] = "";
+		char *argv[] = { "chumby-setting", key, val, NULL };
+
+		if (sscanf(cmd + 8, "%15s %63s", key, val) == 2)
+			chumby_spawn("/usr/libexec/chumby-setting", argv);	/* (it checks them) */
+	} else if (!strcmp(cmd, "restart airplay")) {	/* audio.d/airplay, as the apps' user */
 		char *argv[] = { "systemctl", "restart", "shairport-sync", NULL };
 
 		chumby_spawn("/usr/bin/systemctl", argv);
