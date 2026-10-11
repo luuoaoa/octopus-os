@@ -1707,11 +1707,13 @@ static void new_output(struct wl_listener *l, void *data)
 	if (scale < 1)
 		scale = 1;
 	wlr_output_state_set_scale(&state, scale);
-	/* Without a GPU, a 16-bit screen, if it takes one: the apps draw
-	 * 16-bit, so showing them is a plain copy, and every copy (pixman's,
-	 * the LCD controller's scanning out) moves half the bytes - which,
-	 * through the ARM9's slow, uncached memory, is most of the cost. */
-	if (!s->gpu && !getenv("CHUMBY_WM_32BIT")) {
+	/* CHUMBY_WM_16BIT=1, without a GPU: a 16-bit screen, if it takes one
+	 * (the apps draw 16-bit: showing them is a plain copy of half the
+	 * bytes). Not by default: the Chumby's LCD controller (i.MX23 LCDIF)
+	 * doesn't widen 16-bit pixels for its 18-bit panel - it scrambles the
+	 * colours - and a screenshot (the buffer, not the glass) doesn't show
+	 * it. */
+	if (!s->gpu && getenv("CHUMBY_WM_16BIT")) {
 		wlr_output_state_set_render_format(&state, DRM_FORMAT_RGB565);
 		if (!wlr_output_test_state(wo, &state))
 			wlr_output_state_set_render_format(&state, DRM_FORMAT_XRGB8888);

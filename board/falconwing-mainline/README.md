@@ -240,11 +240,10 @@ reload - every unit re-read from the compressed image, the page cache
 short of RAM - stalls it past that, and the Chumby resets. The journal is
 in RAM: to see why something reset, stream it to the card first.
 
-Without a GPU, chumby-wm runs the screen 16-bit (RGB565, as the apps
-draw): showing a window is then a plain copy, and every copy - pixman's
-into the uncached scanout buffer, the LCD controller's reading it - moves
-half the bytes, most of the cost on this memory. `CHUMBY_WM_32BIT=1`
-keeps it 32-bit.
+The screen stays 32-bit: a 16-bit one (`CHUMBY_WM_16BIT=1`) would halve
+every copy, but the i.MX23's LCD controller doesn't widen RGB565 for the
+18-bit panel and the colours come out scrambled - on the glass only, not
+in a screenshot.
 
 ## Unverified until it runs on hardware
 
