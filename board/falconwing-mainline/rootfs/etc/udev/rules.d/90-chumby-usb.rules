@@ -1,0 +1,4 @@
+# USB storage plugged in: install the app bundles on it (FAT, a chumby-apps
+# folder at its top; chumby-usb-install). Each partition, and the whole disk
+# for a stick formatted without a partition table.
+ACTION=="add", SUBSYSTEM=="block", KERNEL=="sd[a-z]*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="chumby-usb-install@%k.service"

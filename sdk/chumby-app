@@ -1,0 +1,122 @@
+#!/bin/sh
+# chumby-app: build, try and install Chumby apps (docs/sdk.md).
+#
+#   chumby-app new NAME          a new app in ./NAME, from the template
+#   chumby-app build             cross-compile the app in this directory
+#                                (its Makefile, into bundle/)
+#   chumby-app pack              bundle/ -> <Id>.chumbyapp, to install
+#   chumby-app sim [--sound]     the Chumby's UI as a window on this PC's
+#                                desktop, with this app installed (Home menu)
+#   chumby-app sim-shot FILE     the same headless, a screenshot after 25 s
+#                                (FILE.ppm), the app brought to the front
+#   chumby-app deploy HOST       install <Id>.chumbyapp on a Chumby (SSH)
+#   chumby-app shell             a shell with the SDK, in this directory
+#
+# On the PC it needs Docker (and SSH for deploy): build, pack and new run in
+# the chumby-sdk image, sim in chumby-sim (the device's own software, ARM,
+# through QEMU: register it once with
+#   docker run --privileged --rm tonistiigi/binfmt --install arm
+# if "chumby-app sim" says "exec format error").
+set -eu
+
+SDK_IMAGE=${CHUMBY_SDK_IMAGE:-chumby-sdk}
+SIM_IMAGE=${CHUMBY_SIM_IMAGE:-chumby-sim}
+
+usage() { sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+die() { echo "chumby-app: $*" >&2; exit 1; }
+conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$2" | head -1; }
+
+# In the SDK image, or on the PC (then: into it, for what needs the SDK).
+in_sdk() { [ -n "${CHUMBY_SDK:-}" ] && [ -d "$CHUMBY_SDK" ]; }
+sdk_run() {
+	docker run --rm -i $( [ -t 0 ] && echo -t ) -u "$(id -u):$(id -g)" \
+		-v "$PWD:/work" -w /work "$SDK_IMAGE" chumby-app "$@"
+}
+
+app_id() {
+	[ -f bundle/app.conf ] || die "no bundle/app.conf: chumby-app build first"
+	conf Id bundle/app.conf
+}
+
+cmd=${1:-}
+[ -n "$cmd" ] || usage
+shift
+
+case "$cmd" in
+new)
+	name=${1:-}
+	[ -n "$name" ] || usage
+	echo "$name" | grep -qE '^[A-Za-z][A-Za-z0-9_]{0,30}$' ||
+		die "NAME: letters, digits and _, starting with a letter"
+	in_sdk || { sdk_run new "$name"; exit; }
+	[ ! -e "$name" ] || die "$name is already there"
+	cp -r "$CHUMBY_SDK/examples/hello" "$name"
+	lower=$(echo "$name" | tr 'A-Z' 'a-z')
+	mv "$name/hello.c" "$name/$lower.c"
+	# The Id (and name) and the file names; the label's text stays.
+	sed -i "s/^\(Id\|Name\) = Hello\$/\1 = $name/; s/hello/$lower/g" "$name/app.conf"
+	sed -i "s/\"Hello\"/\"$name\"/" "$name/$lower.c"
+	sed -i "s/hello/$lower/g" "$name/Makefile"
+	echo "$name/: $lower.c, app.conf, Makefile. Next: cd $name && chumby-app build"
+	;;
+build)
+	in_sdk || { sdk_run build "$@"; exit; }
+	make CC="$CHUMBY_SDK/bin/arm-linux-gcc" \
+		PKG_CONFIG="$CHUMBY_SDK/bin/pkg-config" "$@"
+	;;
+pack)
+	in_sdk || { sdk_run pack; exit; }
+	id=$(app_id)
+	[ -n "$id" ] || die "no Id in bundle/app.conf"
+	tmp=$(mktemp -d)
+	cp -r bundle "$tmp/$id"
+	tar -C "$tmp" --owner=0 --group=0 -czf "$id.chumbyapp" "$id"
+	rm -rf "$tmp"
+	echo "$id.chumbyapp ($(du -h "$id.chumbyapp" | cut -f1))"
+	;;
+sim | sim-shot)
+	id=$(app_id)
+	set -- "$cmd" "$@"
+	sound=; shot=
+	[ "$cmd" = sim ] && [ "${2:-}" = --sound ] && sound="--device /dev/snd --group-add audio"
+	if [ "$cmd" = sim-shot ]; then
+		shot=${2:-}
+		[ -n "$shot" ] || usage
+		docker rm -f chumby-sim-shot >/dev/null 2>&1 || true
+		docker run -d --name chumby-sim-shot -e CHUMBY_SIM_HEADLESS=1 \
+			-v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE" >/dev/null
+		sleep 15
+		docker exec chumby-sim-shot sh -c "echo 'launch $id' > /run/chumby/shell.cmd"
+		sleep 10
+		docker exec -e XDG_RUNTIME_DIR=/run/chumby -e WAYLAND_DISPLAY=wayland-0 \
+			chumby-sim-shot chumby-screenshot > "$shot.ppm"
+		docker rm -f chumby-sim-shot >/dev/null
+		echo "$shot.ppm"
+		exit
+	fi
+	[ -n "${WAYLAND_DISPLAY:-}" ] || die "needs a Wayland desktop (WAYLAND_DISPLAY)"
+	case "$WAYLAND_DISPLAY" in
+		/*) sock=$WAYLAND_DISPLAY ;;
+		*) sock=${XDG_RUNTIME_DIR:?}/$WAYLAND_DISPLAY ;;
+	esac
+	echo "The Chumby's UI in a window: Home (top left) > $(conf Name bundle/app.conf). Ctrl-C ends it."
+	# shellcheck disable=SC2086
+	exec docker run --rm -it --name chumby-sim $sound \
+		-v "$sock:/run/host/wayland-0" -v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE"
+	;;
+deploy)
+	host=${1:-}
+	[ -n "$host" ] || usage
+	id=$(app_id)
+	[ -f "$id.chumbyapp" ] || die "no $id.chumbyapp: chumby-app pack first"
+	case "$host" in *@*) ;; *) host="root@$host" ;; esac
+	ssh "$host" chumby-install - < "$id.chumbyapp"
+	;;
+shell)
+	in_sdk || { sdk_run shell; exit; }
+	exec "${SHELL:-/bin/sh}"
+	;;
+*)
+	usage
+	;;
+esac

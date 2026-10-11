@@ -219,37 +219,52 @@ void chumby_glossy(lv_obj_t *obj, lv_color_t c, lv_style_selector_t sel)
 	lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, sel);
 }
 
-/* The app's hue: "Color = #rrggbb" in the .app whose Id is ours. */
+/* "Color = #rrggbb" from a descriptor whose Id is ours, into accent_day. */
+static bool accent_from_file(const char *path, const char *app_id)
+{
+	char line[256], id[64] = "";
+	unsigned int rgb = 0;
+	bool has = false;
+	FILE *f = fopen(path, "r");
+
+	if (!f)
+		return false;
+	while (fgets(line, sizeof(line), f)) {
+		if (sscanf(line, " Id = %63[^\n]", id) == 1)
+			continue;
+		if (sscanf(line, " Color = #%x", &rgb) == 1)
+			has = true;
+	}
+	fclose(f);
+	if (!has || strcmp(id, app_id))
+		return false;
+	accent_day = rgb;
+	return true;
+}
+
+/* The app's hue: its bundle's app.conf, else the image's .app whose Id is
+ * ours. */
 static void accent_from_app(const char *app_id)
 {
-	DIR *d = opendir("/usr/share/chumby/apps");
+	DIR *d;
 	struct dirent *e;
+	char path[300];
 
-	while (d && (e = readdir(d))) {
-		char path[300], line[256], id[64] = "";
-		unsigned int rgb = 0;
-		bool has = false;
-		FILE *f;
-
+	if (chumby_app_dir()) {
+		snprintf(path, sizeof(path), "%s/app.conf", chumby_app_dir());
+		if (accent_from_file(path, app_id))
+			return;
+	}
+	if (!(d = opendir("/usr/share/chumby/apps")))
+		return;
+	while ((e = readdir(d))) {
 		if (!strstr(e->d_name, ".app"))
 			continue;
 		snprintf(path, sizeof(path), "/usr/share/chumby/apps/%s", e->d_name);
-		f = fopen(path, "r");
-		while (f && fgets(line, sizeof(line), f)) {
-			if (sscanf(line, " Id = %63[^\n]", id) == 1)
-				continue;
-			if (sscanf(line, " Color = #%x", &rgb) == 1)
-				has = true;
-		}
-		if (f)
-			fclose(f);
-		if (has && !strcmp(id, app_id)) {
-			accent_day = rgb;
+		if (accent_from_file(path, app_id))
 			break;
-		}
 	}
-	if (d)
-		closedir(d);
+	closedir(d);
 }
 
 chumby_mode_t chumby_mode(void)
@@ -1368,6 +1383,96 @@ chumby_alarm_state_t chumby_alarm_state(time_t *until)
 	if (until)
 		*until = (time_t)t;
 	return st;
+}
+
+const char *chumby_app_dir(void)
+{
+	const char *d = getenv("CHUMBY_APP_DIR");
+
+	return d && *d ? d : NULL;
+}
+
+const char *chumby_app_data_dir(void)
+{
+	const char *d = getenv("CHUMBY_APP_DATA");
+
+	return d && *d ? d : NULL;
+}
+
+/* ------------------------------------------------------------------ */
+/* The stream player                                                  */
+
+#define STREAM_TOOL	"/usr/bin/chumby-stream"
+
+/* chumby-stream with these arguments, detached (a grandchild: nothing for
+ * the app to reap). Its start or stop goes on in the background. */
+static bool stream_run(char *const argv[])
+{
+	pid_t pid = fork();
+	int status;
+
+	if (pid < 0)
+		return false;
+	if (pid == 0) {
+		if (fork() == 0) {
+			execv(STREAM_TOOL, argv);
+			_exit(127);
+		}
+		_exit(0);
+	}
+	waitpid(pid, &status, 0);
+	return true;
+}
+
+bool chumby_stream_play(const char *url, const char *name)
+{
+	char *argv[] = { "chumby-stream", (char *)url, (char *)(name ? name : ""), NULL };
+
+	return url && *url && stream_run(argv);
+}
+
+bool chumby_stream_stop(void)
+{
+	char *argv[] = { "chumby-stream", "stop", NULL };
+
+	return stream_run(argv);
+}
+
+bool chumby_stream_status(struct chumby_stream_status *st)
+{
+	char path[256], line[320];
+	FILE *f;
+
+	memset(st, 0, sizeof(*st));
+	snprintf(path, sizeof(path), "%s/stream", chumby_run_dir());
+	if (!(f = fopen(path, "r")))
+		return false;
+	while (fgets(line, sizeof(line), f)) {
+		char *v = strchr(line, '=');
+
+		if (!v)
+			continue;
+		*v++ = '\0';
+		v[strcspn(v, "\n")] = '\0';
+		if (!strcmp(line, "state"))
+			snprintf(st->state, sizeof(st->state), "%s", v);
+		else if (!strcmp(line, "url"))
+			snprintf(st->url, sizeof(st->url), "%s", v);
+		else if (!strcmp(line, "name"))
+			snprintf(st->name, sizeof(st->name), "%s", v);
+		else if (!strcmp(line, "title"))
+			snprintf(st->title, sizeof(st->title), "%s", v);
+		else if (!strcmp(line, "bitrate"))
+			st->bitrate = atoi(v);
+		else if (!strcmp(line, "played"))
+			st->played_s = atoi(v);
+		else if (!strcmp(line, "length"))
+			st->length = atol(v);
+		else if (!strcmp(line, "byte"))
+			st->byte = atol(v);
+	}
+	fclose(f);
+	return st->state[0] && strcmp(st->state, "ended") != 0;
 }
 
 bool chumby_shell_command(const char *cmd)

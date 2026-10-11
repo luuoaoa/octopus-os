@@ -275,9 +275,11 @@ chumby_alarm_state_t chumby_alarm_state(time_t *until);
 /*
  * Runtime directory shared with the shell (/run/chumby, or
  * $CHUMBY_RUN_DIR). The shell reads commands from its "shell.cmd" FIFO:
- * "snooze" (= the snooze button), "stop" (dismiss the alarm), "ring"
- * (ring now, for testing), "volume" / "brightness" (open the popup),
- * "menu" (the app menu), "calibrate" (the touchscreen calibration).
+ * "snooze" (= the snooze button: snoozes a ringing alarm), "power" (= the
+ * power button: the screen off or on), "screen on" / "screen off",
+ * "stop" (dismiss the alarm), "ring" (ring now, for testing), "volume" /
+ * "brightness" (open the popup), "menu" (the app menu), "calibrate" (the
+ * touchscreen calibration), "launch <Id>" (an app to the front).
  */
 const char *chumby_run_dir(void);
 bool chumby_shell_command(const char *cmd);
@@ -291,6 +293,42 @@ bool chumby_shell_command(const char *cmd);
  * Alarms don't need it: the shell rings them, and brings the clock up.
  */
 void chumby_stay_awake(bool on);
+
+/*
+ * An installed bundle (chumby-install, /var/apps/<id>): its directory
+ * (read-only: its pictures, sounds, data files), and one of its own to
+ * write in (/var/lib/chumby/apps/<id>, kept across updates and launches).
+ * NULL for the image's own apps.
+ */
+const char *chumby_app_dir(void);
+const char *chumby_app_data_dir(void);
+
+/*
+ * The stream player, chumby-stream: one stream for the whole Chumby (as
+ * there's one speaker), playing in its own process - so it goes on while
+ * the app is frozen, closed or evicted. A URL can be an Icecast/Shoutcast
+ * stream, an HLS playlist, a .pls/.m3u, or a file (MP3, .m4a).
+ *
+ * play(): starts it (stopping whatever played: FM, AirPlay, another
+ * stream), in the background, the call returning at once; name is what to
+ * call it (shown by the volume control's stop button). stop(): stops it.
+ * status(): false if nothing plays (or played to its end: state "ended");
+ * else what plays.
+ */
+struct chumby_stream_status {
+	char state[16];		/* "connecting", "playing", "error", "ended" */
+	char url[256];
+	char name[64];		/* as given to play() */
+	char title[128];	/* what plays now, from the stream ("" if it says nothing) */
+	int bitrate;		/* kbit/s, measured (0 until known) */
+	int played_s;		/* a file: seconds played (0 for a live stream) */
+	long length;		/* a file: its size in bytes (0 for a live stream) */
+	long byte;		/* a file: how far in, in bytes */
+};
+
+bool chumby_stream_play(const char *url, const char *name);
+bool chumby_stream_stop(void);
+bool chumby_stream_status(struct chumby_stream_status *st);
 
 #ifdef __cplusplus
 }

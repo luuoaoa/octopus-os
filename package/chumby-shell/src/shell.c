@@ -52,7 +52,9 @@
 #include <chumby.h>
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 
-#define APPS_DIR	"/usr/share/chumby/apps"
+#define APPS_DIR	"/usr/share/chumby/apps"	/* the image's: <name>.app each */
+#define BUNDLES_DIR	"/var/apps"	/* installed bundles: <id>/app.conf (chumby-install) */
+#define APP_DATA_DIR	"/var/lib/chumby/apps"	/* a bundle's data: <id>/, the apps' user's */
 #define MAX_APPS	16
 #define CLOCK_ID	"Clock"		/* app the snooze button brings up */
 #define ALARM_TONE	"/usr/bin/chumby-alarm-tone"
@@ -76,6 +78,7 @@ struct app_info {
 	int starting_pid;	/* launched, no window yet (0 = none) */
 	time_t starting_since;
 	int pid;		/* running (0 = not, as far as we know) */
+	char dir[96];		/* a bundle's directory ("": the image's app) */
 };
 
 /* An app takes seconds to map its window on this CPU: don't start it again
@@ -122,52 +125,119 @@ static const char *icon_symbol(const char *name)
 /* .app files: "key = value" lines with Id, Name, Exec, Icon, Short (a
  * name for its tab, when Name is too long for one) and Color (#rrggbb,
  * its hue: its tab, its active things). */
+/* One descriptor into *a: "Key = value" lines (Id, Name, Short, Color,
+ * Exec, Icon). A bundle's (dir set) Exec is relative to its directory. */
+static bool load_app(const char *path, const char *dir, struct app_info *a)
+{
+	char line[256], key[32], val[200];
+	FILE *f = fopen(path, "r");
+
+	if (!f)
+		return false;
+	memset(a, 0, sizeof(*a));
+	a->icon = LV_SYMBOL_FILE;
+	a->color = CHUMBY_ACCENT_DEFAULT;
+	if (dir)
+		snprintf(a->dir, sizeof(a->dir), "%s", dir);
+	while (fgets(line, sizeof(line), f)) {
+		if (sscanf(line, " %31[^= ] = %199[^\n]", key, val) != 2)
+			continue;
+		if (!strcmp(key, "Id"))
+			snprintf(a->id, sizeof(a->id), "%.31s", val);
+		else if (!strcmp(key, "Name"))
+			snprintf(a->name, sizeof(a->name), "%.31s", val);
+		else if (!strcmp(key, "Short"))
+			snprintf(a->short_name, sizeof(a->short_name), "%.15s", val);
+		else if (!strcmp(key, "Color") && val[0] == '#')
+			a->color = (uint32_t)strtoul(val + 1, NULL, 16);
+		else if (!strcmp(key, "Exec") && (val[0] == '/' || !dir))
+			snprintf(a->exec, sizeof(a->exec), "%.127s", val);
+		else if (!strcmp(key, "Exec") && !strstr(val, ".."))
+			snprintf(a->exec, sizeof(a->exec), "%.90s/%.36s", dir, val);
+		else if (!strcmp(key, "Icon"))
+			a->icon = icon_symbol(val);
+	}
+	fclose(f);
+	if (!a->id[0] || !a->exec[0])
+		return false;
+	if (!a->name[0])
+		snprintf(a->name, sizeof(a->name), "%s", a->id);
+	return true;
+}
+
+/* The image's apps, then the installed bundles (one per Id: the image's
+ * win). What's running stays known across a reload (an install, a removal). */
 static void load_apps(void)
 {
-	DIR *d = opendir(APPS_DIR);
+	static struct app_info old[MAX_APPS];
+	int n_old = n_apps, i, j;
+	char path[300];
 	struct dirent *e;
+	DIR *d;
 
-	if (!d)
-		return;
-	while ((e = readdir(d)) && n_apps < MAX_APPS) {
-		char path[300], line[256], key[32], val[200];
-		struct app_info *a = &apps[n_apps];
-		size_t len = strlen(e->d_name);
-		FILE *f;
+	memcpy(old, apps, sizeof(apps[0]) * n_old);
+	n_apps = 0;
+	if ((d = opendir(APPS_DIR))) {
+		while ((e = readdir(d)) && n_apps < MAX_APPS) {
+			size_t len = strlen(e->d_name);
 
-		if (len < 5 || strcmp(e->d_name + len - 4, ".app"))
-			continue;
-		snprintf(path, sizeof(path), APPS_DIR "/%s", e->d_name);
-		f = fopen(path, "r");
-		if (!f)
-			continue;
-		memset(a, 0, sizeof(*a));
-		a->icon = LV_SYMBOL_FILE;
-		a->color = CHUMBY_ACCENT_DEFAULT;
-		while (fgets(line, sizeof(line), f)) {
-			if (sscanf(line, " %31[^= ] = %199[^\n]", key, val) != 2)
+			if (len < 5 || strcmp(e->d_name + len - 4, ".app"))
 				continue;
-			if (!strcmp(key, "Id"))
-				snprintf(a->id, sizeof(a->id), "%.31s", val);
-			else if (!strcmp(key, "Name"))
-				snprintf(a->name, sizeof(a->name), "%.31s", val);
-			else if (!strcmp(key, "Short"))
-				snprintf(a->short_name, sizeof(a->short_name), "%.15s", val);
-			else if (!strcmp(key, "Color") && val[0] == '#')
-				a->color = (uint32_t)strtoul(val + 1, NULL, 16);
-			else if (!strcmp(key, "Exec"))
-				snprintf(a->exec, sizeof(a->exec), "%.127s", val);
-			else if (!strcmp(key, "Icon"))
-				a->icon = icon_symbol(val);
+			snprintf(path, sizeof(path), APPS_DIR "/%s", e->d_name);
+			if (load_app(path, NULL, &apps[n_apps]))
+				n_apps++;
 		}
-		fclose(f);
-		if (a->id[0] && a->exec[0]) {
-			if (!a->name[0])
-				snprintf(a->name, sizeof(a->name), "%s", a->id);
-			n_apps++;
-		}
+		closedir(d);
 	}
-	closedir(d);
+	if ((d = opendir(BUNDLES_DIR))) {
+		while ((e = readdir(d)) && n_apps < MAX_APPS) {
+			char dir[96];
+
+			if (e->d_name[0] == '.' || strlen(e->d_name) > 40)
+				continue;
+			snprintf(dir, sizeof(dir), BUNDLES_DIR "/%s", e->d_name);
+			snprintf(path, sizeof(path), "%s/app.conf", dir);
+			if (!load_app(path, dir, &apps[n_apps]))
+				continue;
+			for (i = 0; i < n_apps && strcmp(apps[i].id, apps[n_apps].id); i++)
+				;
+			if (i == n_apps)
+				n_apps++;
+		}
+		closedir(d);
+	}
+	for (i = 0; i < n_apps; i++)
+		for (j = 0; j < n_old; j++)
+			if (!strcmp(apps[i].id, old[j].id)) {
+				apps[i].pid = old[j].pid;
+				apps[i].starting_pid = old[j].starting_pid;
+				apps[i].starting_since = old[j].starting_since;
+			}
+}
+
+/* A bundle installed or removed (chumby-install): the list again. */
+static void bundles_readable(int fd, void *user)
+{
+	char buf[1024] __attribute__((aligned(__alignof__(struct inotify_event))));
+
+	(void)user;
+	while (read(fd, buf, sizeof(buf)) > 0)
+		;
+	load_apps();
+	fprintf(stderr, "chumby-shell: apps: %d\n", n_apps);
+}
+
+static void bundles_watch(void)
+{
+	int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+
+	if (fd < 0 || inotify_add_watch(fd, BUNDLES_DIR, IN_CREATE | IN_DELETE |
+					IN_MOVED_TO | IN_MOVED_FROM) < 0) {
+		if (fd >= 0)
+			close(fd);
+		return;		/* (no /var/apps: no bundles) */
+	}
+	chumby_watch_fd(fd, bundles_readable, NULL);
 }
 
 static struct app_info *app_by_id(const char *id)
@@ -406,7 +476,8 @@ static void app_user_init(void)
 /* path as the apps' user, the kernel's OOM killer told how readily to end
  * it (oom_score_adj, -1000..1000: set before the user drops, so it may be
  * low). -1 if it couldn't start. */
-static int spawn_app(const char *path, char *const argv[], int oom_adj)
+static int spawn_app_in(const struct app_info *app, const char *path, char *const argv[],
+			int oom_adj)
 {
 	struct rlimit nice = { APP_NICE_LIMIT, APP_NICE_LIMIT };
 	char adj[16];
@@ -432,8 +503,22 @@ static int spawn_app(const char *path, char *const argv[], int oom_adj)
 		setenv("HOME", APP_HOME, 1);
 		setenv("USER", APP_USER, 1);
 	}
+	/* A bundle: where it is (read-only), and a directory of its own for
+	 * its data (libchumby: chumby_app_dir(), chumby_app_data_dir()). */
+	if (app && app->dir[0]) {
+		char data[96];
+
+		snprintf(data, sizeof(data), APP_DATA_DIR "/%s", app->id);
+		setenv("CHUMBY_APP_DIR", app->dir, 1);
+		setenv("CHUMBY_APP_DATA", data, 1);
+	}
 	execv(path, argv);
 	_exit(127);
+}
+
+static int spawn_app(const char *path, char *const argv[], int oom_adj)
+{
+	return spawn_app_in(NULL, path, argv, oom_adj);
 }
 
 static void launch(struct app_info *a)
@@ -448,7 +533,17 @@ static void launch(struct app_info *a)
 	}
 	if (a->starting_pid && time(NULL) - a->starting_since < LAUNCH_TIMEOUT_S)
 		return;		/* already on its way */
-	pid = spawn_app(a->exec, argv, OOM_FRONT);
+	if (a->dir[0]) {	/* a bundle's data directory, the apps' user's */
+		char data[96];
+
+		mkdir(APP_DATA_DIR, 0755);
+		snprintf(data, sizeof(data), APP_DATA_DIR "/%s", a->id);
+		mkdir(data, 0755);
+		if (app_user_ok && (chown(APP_DATA_DIR, app_uid, app_gid) < 0 ||
+				    chown(data, app_uid, app_gid) < 0))
+			fprintf(stderr, "chumby-shell: %s: %s\n", data, strerror(errno));
+	}
+	pid = spawn_app_in(a, a->exec, argv, OOM_FRONT);
 	if (pid < 0) {
 		fprintf(stderr, "chumby-shell: cannot start %s\n", a->exec);
 		return;
@@ -2134,6 +2229,7 @@ int main(void)
 	chumby_init();
 	app_user_init();
 	load_apps();
+	bundles_watch();
 	ftl_init();
 
 	panel = chumby_window_create("chumby-panel", CHUMBY_SCREEN_W, CHUMBY_BAR_H);

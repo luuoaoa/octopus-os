@@ -85,9 +85,12 @@ Color = #3a9a5c
   copy while the first is coming up (`LAUNCH_TIMEOUT_S`). An app exits
   when its window is closed (holding its tab) or the compositor goes.
 
-To package it, add it to `package/chumby-apps` (`src/Makefile`: one line
-per binary, linking `pkg-config --libs libchumby`; `chumby-apps.mk`:
-install the binary and the `.app`).
+To make it part of the image, add it to `package/chumby-apps`
+(`src/Makefile`: one line per binary, linking `pkg-config --libs
+libchumby`; `chumby-apps.mk`: install the binary and the `.app`). To make
+it an app people install on their Chumby (a bundle from a USB stick or
+over the network), without buildroot, use the SDK: [sdk.md](sdk.md), and
+the walk-through in [sdk-tutorial.md](sdk-tutorial.md).
 
 ## libchumby (package/libchumby/src/chumby.h)
 
