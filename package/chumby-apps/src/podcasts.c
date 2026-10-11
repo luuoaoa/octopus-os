@@ -586,6 +586,12 @@ static void busy_show(bool busy)
 	lv_anim_start(&a);
 }
 
+static void label_set(lv_obj_t *l, const char *text)
+{
+	if (strcmp(lv_label_get_text(l), text))
+		lv_label_set_text(l, text);
+}
+
 static void ui_update(void)
 {
 	struct episode *e = episode();
@@ -618,7 +624,9 @@ static void ui_update(void)
 
 	busy_show(playing && strcmp(st_state, "playing") && strcmp(st_state, "error") &&
 		  !skip_s);
-	lv_label_set_text(lbl_show, n_shows ? shows[cur_show].name : "No podcasts");
+	/* Only what changed: a label set redraws, and twice a second adds up
+	 * on the Chumby. */
+	label_set(lbl_show, n_shows ? shows[cur_show].name : "No podcasts");
 	if (strcmp(lv_label_get_text(lbl_elapsed), now))
 		lv_label_set_text(lbl_elapsed, now);
 	if (strcmp(lv_label_get_text(lbl_total), total))
@@ -626,11 +634,13 @@ static void ui_update(void)
 	chumby_scroll_label_set(lbl_title, e ? e->title : n_shows ? "Fetching episodes..." : "");
 	if (strcmp(lv_label_get_text(lbl_sub), sub))
 		lv_label_set_text(lbl_sub, sub);
-	lv_label_set_text(lv_obj_get_child(btn_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
-	if (playing)
-		lv_obj_add_state(btn_play, LV_STATE_CHECKED);
-	else
-		lv_obj_remove_state(btn_play, LV_STATE_CHECKED);
+	label_set(lv_obj_get_child(btn_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+	if (playing != lv_obj_has_state(btn_play, LV_STATE_CHECKED)) {
+		if (playing)
+			lv_obj_add_state(btn_play, LV_STATE_CHECKED);
+		else
+			lv_obj_remove_state(btn_play, LV_STATE_CHECKED);
+	}
 }
 
 /* chumby-stream stops the old stream, then forks into the background:

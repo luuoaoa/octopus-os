@@ -1,0 +1,30 @@
+From: chumby <chumby@localhost>
+Subject: [PATCH] label: take the scroll animation's path from its template too
+
+A label's scroll animation takes its delay, repeats and completed
+callback from the "anim" style's template, but not its path, so the
+offset always moves smoothly, a pixel at a time: on a slow CPU each
+pixel is a redraw of the whole label (~20 a second at 20 px/s), the
+text rendered again each time. With the template's path (e.g. one that
+steps every 100 ms) the label can scroll in fewer, bigger steps.
+
+--- a/src/widgets/label/lv_label.c
++++ b/src/widgets/label/lv_label.c
+@@ -1112,6 +1112,8 @@
+             dest->repeat_delay = src->repeat_delay;
+             dest->completed_cb = src->completed_cb;
+             dest->reverse_delay = src->reverse_delay;
++            if(src->path_cb)
++                dest->path_cb = src->path_cb;
+             break;
+         case LV_LABEL_LONG_MODE_SCROLL_CIRCULAR:
+             /* If the dest animation is already running, overwrite is not allowed */
+@@ -1120,6 +1122,8 @@
+             dest->repeat_cnt = src->repeat_cnt;
+             dest->repeat_delay = src->repeat_delay;
+             dest->completed_cb = src->completed_cb;
++            if(src->path_cb)
++                dest->path_cb = src->path_cb;
+             break;
+         default:
+             break;

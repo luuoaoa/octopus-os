@@ -593,6 +593,25 @@ void chumby_label_scroll_speed(lv_obj_t *label, const char *text, int px_per_s)
  * first), switched to dots once done. */
 static lv_anim_t scroll_twice;
 
+/* Scrolling in steps, every SCROLL_STEP_MS, not a pixel at a time: each
+ * step redraws the label (its text rendered again), and on the Chumby a
+ * smooth scroll (~20 redraws a second) took 15-20% of the CPU, measured.
+ * (LVGL calls the setter only when the value changes.) Linear, as the
+ * default path. */
+#define SCROLL_STEP_MS	100
+
+static int32_t scroll_path_stepped(const lv_anim_t *a)
+{
+	int32_t t = a->act_time - a->act_time % SCROLL_STEP_MS;
+
+	if (a->duration <= 0)
+		return a->end_value;
+	if (t > a->duration)
+		t = a->duration;
+	return a->start_value + (int32_t)((int64_t)(a->end_value - a->start_value) * t /
+					   a->duration);
+}
+
 static void scroll_done_async(void *label)
 {
 	lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
@@ -619,6 +638,8 @@ void chumby_scroll_label_init(lv_obj_t *l)
 		lv_anim_set_repeat_count(&scroll_twice, 2);
 		lv_anim_set_delay(&scroll_twice, 1500);		/* read the start first */
 		lv_anim_set_completed_cb(&scroll_twice, scroll_done);
+		/* (Taken over by the label: package/lvgl's patch 0003.) */
+		lv_anim_set_path_cb(&scroll_twice, scroll_path_stepped);
 	}
 	/* One line, always: dots need a fixed height (else it wraps). */
 	lv_obj_set_height(l, lv_font_get_line_height(lv_obj_get_style_text_font(l, 0)));
@@ -769,6 +790,53 @@ void chumby_init(void)
 	lv_timer_create(policy_timer_cb, 30000, NULL);
 }
 
+/* CHUMBY_REFR_DEBUG=1: each window says, once a second, how often it
+ * redrew, how much (pixels flushed) and how long that took. To find
+ * what keeps an app busy. */
+struct refr_stats {
+	long refr, px, us;
+	lv_area_t box;		/* everything flushed, together */
+	uint32_t since;
+	struct timespec t0;
+	char name[32];
+};
+
+static void refr_debug_cb(lv_event_t *e)
+{
+	struct refr_stats *st = lv_event_get_user_data(e);
+	lv_event_code_t code = lv_event_get_code(e);
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	if (code == LV_EVENT_REFR_START) {
+		st->t0 = now;
+	} else if (code == LV_EVENT_REFR_READY) {
+		st->refr++;
+		st->us += (now.tv_sec - st->t0.tv_sec) * 1000000 +
+			  (now.tv_nsec - st->t0.tv_nsec) / 1000;
+	} else if (code == LV_EVENT_FLUSH_START && lv_event_get_param(e)) {
+		const lv_area_t *a = lv_event_get_param(e);
+
+		if (!st->px) {
+			st->box = *a;
+		} else {
+			st->box.x1 = LV_MIN(st->box.x1, a->x1);
+			st->box.y1 = LV_MIN(st->box.y1, a->y1);
+			st->box.x2 = LV_MAX(st->box.x2, a->x2);
+			st->box.y2 = LV_MAX(st->box.y2, a->y2);
+		}
+		st->px += lv_area_get_size(a);
+	}
+	if (lv_tick_elaps(st->since) >= 1000) {
+		if (st->refr)
+			fprintf(stderr, "%s: %ld redraws/s, %ld px, %ld us, within (%d,%d)-(%d,%d)\n",
+				st->name, st->refr, st->px, st->us, (int)st->box.x1,
+				(int)st->box.y1, (int)st->box.x2, (int)st->box.y2);
+		st->refr = st->px = st->us = 0;
+		st->since = lv_tick_get();
+	}
+}
+
 lv_display_t *chumby_window_create(const char *app_id, int width, int height)
 {
 	lv_display_t *disp;
@@ -781,6 +849,14 @@ lv_display_t *chumby_window_create(const char *app_id, int width, int height)
 		return NULL;
 	windows[n_windows++] = disp;
 	theme_apply(disp);
+	if (getenv("CHUMBY_REFR_DEBUG")) {
+		struct refr_stats *st = calloc(1, sizeof(*st));
+
+		if (st) {
+			snprintf(st->name, sizeof(st->name), "%s", app_id);
+			lv_display_add_event_cb(disp, refr_debug_cb, LV_EVENT_ALL, st);
+		}
+	}
 	/* A window with alpha (a popup with rounded corners): its bottom layer
 	 * stays clear. lv_display_set_theme() themes screens[0], which is that
 	 * layer, so it would get the theme's opaque screen grey and the corners
