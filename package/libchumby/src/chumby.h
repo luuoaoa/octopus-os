@@ -81,11 +81,11 @@ struct chumby_policy {
 	int night_start;	/* minutes after midnight, default 19:00 */
 	int night_end;		/* minutes after midnight, default 07:00 */
 	int force;		/* -1 auto, else a chumby_mode_t */
-	int day_brightness;	/* percent */
-	int night_brightness;	/* percent */
-	int screen_off_start;	/* backlight off from here, default 21:00 */
-	int screen_off_end;	/* ... to here, default 07:00 (same = never) */
-	int wake_seconds;	/* snooze button lights it this long, default 10 */
+	int day_brightness;	/* percent, until the popup sets the day's */
+	int night_brightness;	/* percent, until the popup sets the night's */
+	int screen_off_start;	/* unused: the power button turns the screen */
+	int screen_off_end;	/* on and off (kept so old policy files parse) */
+	int wake_seconds;	/* unused, likewise */
 	int snooze_minutes;	/* default 9 */
 	int alarm_volume;	/* minimum volume while ringing, percent */
 };

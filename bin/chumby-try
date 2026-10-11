@@ -199,9 +199,9 @@ say() {
 # after anything starts playing (a player may set its level).
 mute() { amixer -q sset DAC 0 mute 2>/dev/null; }
 quiet() { say active; chumby-stream stop 2>/dev/null; radio off >/dev/null 2>&1; mute; }
-# The screen on (the snooze button's way: past the screen-off hours too):
+# The screen on (the power button's "screen on": it may have been turned off):
 # a dark screen gets no saver, and draws nothing.
-lit() { [ "$(cat /sys/class/backlight/backlight/bl_power 2>/dev/null)" = 0 ] || { say snooze; sleep 2; }; }
+lit() { [ "$(cat /sys/class/backlight/backlight/bl_power 2>/dev/null)" = 0 ] || { say "screen on"; sleep 2; }; }
 mute
 lit
 front() { say "launch $1"; sleep ${2:-12}; }

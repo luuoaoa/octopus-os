@@ -908,6 +908,47 @@ static void popup_keepalive(void)
 	lv_timer_resume(popup_timer);
 }
 
+/* The brightness, remembered per mode: set in the popup, it's the mode's
+ * from then on (the policy's day_/night_brightness until first set), kept
+ * on the card for the next start. */
+#define BRIGHTNESS_FILE	"/var/lib/chumby/brightness"
+static int brightness_saved[2] = { -1, -1 };	/* per chumby_mode_t */
+static bool brightness_dirty;
+
+static void brightness_load(void)
+{
+	FILE *f = fopen(BRIGHTNESS_FILE, "r");
+	char line[64];
+	int v;
+
+	if (!f)
+		return;
+	while (fgets(line, sizeof(line), f)) {
+		if (sscanf(line, "day %d", &v) == 1 && v >= 5 && v <= 100)
+			brightness_saved[CHUMBY_MODE_DAY] = v;
+		else if (sscanf(line, "night %d", &v) == 1 && v >= 5 && v <= 100)
+			brightness_saved[CHUMBY_MODE_NIGHT] = v;
+	}
+	fclose(f);
+}
+
+static void brightness_save(void)
+{
+	FILE *f;
+
+	if (!brightness_dirty)
+		return;
+	brightness_dirty = false;
+	if (!(f = fopen(BRIGHTNESS_FILE ".new", "w")))
+		return;
+	if (brightness_saved[CHUMBY_MODE_DAY] >= 0)
+		fprintf(f, "day %d\n", brightness_saved[CHUMBY_MODE_DAY]);
+	if (brightness_saved[CHUMBY_MODE_NIGHT] >= 0)
+		fprintf(f, "night %d\n", brightness_saved[CHUMBY_MODE_NIGHT]);
+	if (fclose(f) == 0)
+		rename(BRIGHTNESS_FILE ".new", BRIGHTNESS_FILE);
+}
+
 static void popup_set(int v)
 {
 	int min = popup_kind == POPUP_BRIGHTNESS ? 5 : 0;
@@ -921,6 +962,8 @@ static void popup_set(int v)
 		chumby_volume_set(v);
 	} else {
 		chumby_brightness_set(v);
+		brightness_saved[chumby_mode() == CHUMBY_MODE_NIGHT] = v;
+		brightness_dirty = true;	/* written when the popup closes */
 	}
 	if (popup_bar)
 		lv_slider_set_value(popup_bar, v, LV_ANIM_OFF);
@@ -929,6 +972,7 @@ static void popup_set(int v)
 
 static void popup_close(void)
 {
+	brightness_save();
 	if (!popup_disp)
 		return;
 	chumby_window_close(popup_disp);
@@ -1241,10 +1285,13 @@ static void on_mode(chumby_mode_t mode, void *user)
 	(void)user;
 	if (panel_scr)
 		build_panel(panel_scr);
-	/* Apply the policy brightness on each switch (and at start); the
-	 * brightness popup can override it until the next switch. */
-	chumby_brightness_set(mode == CHUMBY_MODE_NIGHT ? p->night_brightness
-							 : p->day_brightness);
+	/* The mode's brightness, as last set for it (else the policy's). */
+	{
+		int saved = brightness_saved[mode == CHUMBY_MODE_NIGHT];
+
+		chumby_brightness_set(saved >= 0 ? saved : mode == CHUMBY_MODE_NIGHT ?
+				      p->night_brightness : p->day_brightness);
+	}
 	/* Rebuild an open popup in the new colors. */
 	if (popup_disp) {
 		enum popup_kind kind = popup_kind;
@@ -1275,8 +1322,6 @@ static int find_input(const char *name)
 	return -1;
 }
 
-static void screen_wake(void);
-
 static void shell_activity(void);
 static void saver_stop(void);
 
@@ -1292,7 +1337,6 @@ static void knob_readable(int fd, void *user)
 	if (!wheel)
 		return;
 	shell_activity();
-	screen_wake();
 	/* Show the volume popup as feedback while the knob turns. */
 	popup_open(POPUP_VOLUME);
 	popup_set(volume_pct + wheel * 2);
@@ -1301,14 +1345,8 @@ static void knob_readable(int fd, void *user)
 /* ------------------------------------------------------------------ */
 /* Screen power                                                       */
 
-static uint64_t wake_until;	/* monotonic ms: lit until then at night */
 static int screen_applied = -1;	/* what we last wrote, -1 = nothing yet */
-
-/* The snooze button turns the screen on or off for good, overriding the
- * schedule until it next changes (21:00 / 07:00 by default). */
-enum { OVERRIDE_NONE, OVERRIDE_ON, OVERRIDE_OFF };
-static int screen_override;
-static int policy_on_last = -1;
+static bool screen_on = true;	/* the power button's say */
 
 static chumby_alarm_state_t alarm_state;
 
@@ -1320,30 +1358,11 @@ static uint64_t mono_ms(void)
 	return ts.tv_sec * 1000ull + ts.tv_nsec / 1000000;
 }
 
-/*
- * On outside the screen-off hours (and always while the clock isn't set:
- * we can't tell if it's night), unless the snooze button turned it off;
- * on at night when the snooze button turned it on or the knob woke it;
- * always while an alarm rings.
- */
+/* On or off as the power button left it - no schedule, no timeouts - and
+ * on while an alarm rings (which leaves it on: you're up). */
 static void screen_update(void)
 {
-	const struct chumby_policy *p = chumby_policy();
-	bool policy_on = !chumby_time_valid() ||
-			 p->screen_off_start == p->screen_off_end ||
-			 !chumby_in_window(p->screen_off_start, p->screen_off_end);
-	bool on;
-
-	if (policy_on != policy_on_last) {	/* the schedule moved on */
-		policy_on_last = policy_on;
-		screen_override = OVERRIDE_NONE;
-	}
-	if (alarm_state == CHUMBY_ALARM_RINGING || mono_ms() < wake_until)
-		on = true;	/* ringing, or the knob woke it briefly */
-	else if (screen_override != OVERRIDE_NONE)
-		on = screen_override == OVERRIDE_ON;
-	else
-		on = policy_on;
+	bool on = screen_on || alarm_state == CHUMBY_ALARM_RINGING;
 
 	if (on == screen_applied)
 		return;
@@ -1356,9 +1375,9 @@ static void screen_update(void)
 	}
 }
 
-static void screen_wake(void)
+static void screen_set(bool on)
 {
-	wake_until = mono_ms() + chumby_policy()->wake_seconds * 1000ull;
+	screen_on = on;
 	screen_update();
 }
 
@@ -1429,18 +1448,15 @@ static void shell_activity(void)
 	saver_stop();
 }
 
-/* Touches keep a woken screen on (they don't wake a dark one: chumby-wm
- * drops those, so nothing gets pressed blind). */
+/* Touches: chumby-wm has them (and drops those on a dark screen, so nothing
+ * gets pressed blind); ours only to be read. */
 static void touch_readable(int fd, void *user)
 {
 	struct input_event ev;
-	bool any = false;
 
 	(void)user;
 	while (read(fd, &ev, sizeof(ev)) == sizeof(ev))
-		any = true;
-	if (any && mono_ms() < wake_until)
-		screen_wake();
+		;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1548,7 +1564,7 @@ static void alarm_ring(void)
 	tone_pid = chumby_spawn(ALARM_TONE, tone_argv);
 	alarm_publish();
 	show_clock();
-	screen_update();
+	screen_set(true);	/* and left on: you're up */
 }
 
 static void alarm_snooze(void)
@@ -1577,8 +1593,6 @@ static void alarm_stop(void)
 	alarm_state = CHUMBY_ALARM_IDLE;
 	snooze_until = 0;
 	alarm_publish();
-	/* You're up: keep the screen on (until the schedule next changes). */
-	screen_override = OVERRIDE_ON;
 	screen_update();
 }
 
@@ -1629,23 +1643,14 @@ static void alarm_tick_cb(lv_timer_t *t)
 /* ------------------------------------------------------------------ */
 /* Snooze button                                                      */
 
-/* Ringing: snooze. Otherwise toggle the screen; turning it on brings up
- * the clock. No timeout either way. */
+/* Ringing: snooze. Otherwise nothing, for now (the screen is the power
+ * button's). */
 static void snooze_pressed(void)
 {
-	if (alarm_state == CHUMBY_ALARM_RINGING) {
-		alarm_snooze();
-		show_clock();
-		screen_update();
+	if (alarm_state != CHUMBY_ALARM_RINGING)
 		return;
-	}
-	wake_until = 0;
-	if (screen_applied == 1) {
-		screen_override = OVERRIDE_OFF;
-	} else {
-		screen_override = OVERRIDE_ON;
-		show_clock();
-	}
+	alarm_snooze();
+	show_clock();
 	screen_update();
 }
 
@@ -1669,8 +1674,7 @@ static void calibrate_start(void)
 		return;		/* already up */
 	popup_close();
 	menu_close();
-	screen_override = OVERRIDE_ON;	/* lit, even at night */
-	screen_update();
+	screen_set(true);
 	calibrate_pid = chumby_spawn(CALIBRATE, argv);
 }
 
@@ -1708,12 +1712,68 @@ static void snooze_readable(int fd, void *user)
 		} else if (snooze_down) {
 			snooze_down = false;
 			lv_timer_pause(snooze_hold_timer);
-			if (snooze_held)
-				continue;
-			if (popup_disp && popup_kind == POPUP_VOLUME)
-				media_stop();	/* the volume control's stop, too */
-			else
+			if (!snooze_held)
 				snooze_pressed();
+		}
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* Power button                                                       */
+
+/*
+ * The i.MX23's power switch (the "mxs-pswitch" key, KEY_POWER): a press
+ * turns the screen off, or on (with the clock); held POWER_HOLD_MS it
+ * shuts the Chumby down - before the chip's own hard power-off on a long
+ * hold.
+ */
+#define POWER_HOLD_MS	2000
+
+static bool power_down, power_held;
+static lv_timer_t *power_hold_timer;
+
+static void power_pressed(void)
+{
+	if (screen_applied == 1) {
+		screen_set(false);
+	} else {
+		screen_set(true);
+		show_clock();
+	}
+}
+
+static void power_hold_cb(lv_timer_t *t)
+{
+	char *argv[] = { "systemctl", "poweroff", NULL };
+
+	lv_timer_pause(t);
+	if (!power_down)
+		return;
+	power_held = true;
+	fprintf(stderr, "chumby-shell: power button held: shutting down\n");
+	screen_set(false);
+	chumby_spawn("/usr/bin/systemctl", argv);
+}
+
+static void power_readable(int fd, void *user)
+{
+	struct input_event ev;
+
+	(void)user;
+	while (read(fd, &ev, sizeof(ev)) == sizeof(ev)) {
+		if (ev.type != EV_KEY || ev.code != KEY_POWER || ev.value == 2)
+			continue;
+		if (ev.value == 1) {
+			shell_activity();
+			power_down = true;
+			power_held = false;
+			lv_timer_reset(power_hold_timer);
+			lv_timer_resume(power_hold_timer);
+		} else if (power_down) {
+			power_down = false;
+			lv_timer_pause(power_hold_timer);
+			if (!power_held)
+				power_pressed();
 		}
 	}
 }
@@ -1725,6 +1785,12 @@ static void command(const char *cmd)
 {
 	if (!strcmp(cmd, "snooze"))
 		snooze_pressed();
+	else if (!strcmp(cmd, "power"))		/* the power button, pressed */
+		power_pressed();
+	else if (!strcmp(cmd, "screen on"))
+		screen_set(true);
+	else if (!strcmp(cmd, "screen off"))
+		screen_set(false);
 	else if (!strcmp(cmd, "stop"))
 		alarm_stop();
 	else if (!strcmp(cmd, "ring"))
@@ -1862,11 +1928,13 @@ int main(void)
 	menu_timer = lv_timer_create(menu_timer_cb, MENU_IDLE_MS, NULL);
 	lv_timer_pause(menu_timer);
 	/* Builds the bar, sets the brightness. */
+	brightness_load();
 	chumby_on_mode_change(on_mode, NULL);
 	lv_timer_create(bar_clock_cb, 1000, NULL);
 
 	chumby_watch_fd(find_input("rotary"), knob_readable, NULL);
 	chumby_watch_fd(find_input("snooze"), snooze_readable, NULL);
+	chumby_watch_fd(find_input("mxs-pswitch"), power_readable, NULL);
 	audio_watch();
 	resistive_ts = find_input("mxs-lradc-ts");
 	chumby_watch_fd(resistive_ts, touch_readable, NULL);
@@ -1880,6 +1948,8 @@ int main(void)
 
 	snooze_hold_timer = lv_timer_create(snooze_hold_cb, CALIBRATE_HOLD_MS, NULL);
 	lv_timer_pause(snooze_hold_timer);
+	power_hold_timer = lv_timer_create(power_hold_cb, POWER_HOLD_MS, NULL);
+	lv_timer_pause(power_hold_timer);
 	/* Never calibrated: that first (chumby-wm shows it over everything).
 	 * Only the Chumby's resistive touchscreen needs it; a capacitive one
 	 * (the RasPad's) is right as it comes. */

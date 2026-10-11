@@ -178,13 +178,20 @@ players, and the LVGL traps we hit.
   station art), Internet Radio (MP3/AAC/HLS via `chumby-stream`). An app
   is a binary plus `/usr/share/chumby/apps/<name>.app`.
 
-**Night mode and screen off** are policy, not per-app:
-`/etc/chumby/policy.conf` (night window, `mode = auto|day|night`,
-brightness per mode, `screen_off_start/end`, `wake_seconds`,
-`snooze_minutes`, `alarm_volume`), re-read every 30 s by every process.
-At night the palette turns black/warm-red and the backlight dims; in the
-screen-off hours it's powered down, and chumby-wm drops touches that start
-on the dark screen.
+**Night mode** is policy, not per-app: `/etc/chumby/policy.conf` (night
+window, `mode = auto|day|night`, `snooze_minutes`, `alarm_volume`, and
+`day_/night_brightness` as the defaults), re-read every 30 s by every
+process. At night the palette turns black/warm-red. The brightness is
+remembered per mode: set in the popup, it's that mode's from then on
+(`/var/lib/chumby/brightness`), restored at each switch.
+
+**Buttons**: the power button (the i.MX23's PSWITCH, kernel patch 0007:
+`mxs-pswitch`, KEY_POWER) turns the screen off, or on with the clock;
+held 2 s it shuts the Chumby down. Nothing else turns the screen on or off
+- no schedule - except an alarm ringing, which turns it on. chumby-wm
+drops touches that start on the dark screen. The snooze button snoozes a
+ringing alarm, and held 4 s starts the touch calibration; otherwise it
+does nothing, for now.
 
 **Clock**: HH:MM (one redraw a minute), date, the next alarm; alarms in
 `/var/lib/chumby/alarms.conf` (`06:30 MTWTF-- on`, editable by hand).

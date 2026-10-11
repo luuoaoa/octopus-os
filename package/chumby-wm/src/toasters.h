@@ -11,11 +11,12 @@ struct wlr_scene_tree;
 struct wl_event_loop;
 
 /* Flying over a w x h area, in a tree of their own under parent, moved
- * every tick_ms, over black (else over what's under them: format, the
- * screen's DRM format, matters only over black); NULL if the pictures
- * can't be read. */
+ * every tick_ms: over what's under them, or (canvas: no GPU) drawn onto
+ * one canvas in format (the screen's DRM format) over backdrop (XRGB8888,
+ * w x h, ours to free; NULL: black). NULL if the pictures can't be read. */
 struct toasters *toasters_start(struct wlr_scene_tree *parent, struct wl_event_loop *loop,
-				int w, int h, int tick_ms, bool black, uint32_t format);
+				int w, int h, int tick_ms, bool canvas, uint32_t format,
+				uint32_t *backdrop);
 void toasters_stop(struct toasters *t);
 
 #endif

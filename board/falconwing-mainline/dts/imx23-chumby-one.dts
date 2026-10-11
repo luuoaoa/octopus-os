@@ -420,3 +420,9 @@
 	clocks = <&clks 11>;	/* "cpu" */
 	operating-points-v2 = <&cpu_opp_table>;
 };
+
+/* The power button (PSWITCH) as KEY_POWER, and power-off: patch 0007. */
+&{/apb@80000000/apbx-bus@80040000/power@80044000} {
+	compatible = "fsl,imx23-power";
+	status = "okay";
+};

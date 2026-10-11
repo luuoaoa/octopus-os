@@ -9,11 +9,14 @@
  * the toast) made once. Over the app (the GPU's way: see-through), each
  * sprite is a scene node showing one of them; a frame moves the nodes and
  * swaps the wing pictures, and wlroots composites the squares that
- * changed. Over black (no GPU), one screen-sized canvas instead: a frame
- * blacks out where the sprites were and draws them where they are
- * (pixman), and hands wlroots the canvas with just those squares damaged -
- * a dozen moving nodes cost the ARM9 more in wlroots' scene bookkeeping
- * (each move re-walks the tree, in soft floating point) than in pixels. As an LVGL app the same saver cost the Chumby's ARM9 ~40%
+ * changed. Without a GPU, one screen-sized canvas instead, over a
+ * backdrop - the screen as the saver came up, blurred and dimmed once
+ * (chumby-wm), else black: a frame puts the backdrop back where the
+ * sprites were and draws them where they are (pixman), and hands wlroots
+ * the canvas with just those squares damaged. A dozen moving nodes cost
+ * the ARM9 more in wlroots' scene bookkeeping (each move re-walks the
+ * tree, in soft floating point) than in pixels. As an LVGL app the same
+ * saver cost the Chumby's ARM9 ~40%
  * (LVGL's per-object, per-area bookkeeping; its 16-bit window converted for
  * the 32-bit screen; the two processes' frames). The chumby-toasters app
  * only holds the screen (its window, see-through or black) and ends at a
@@ -413,8 +416,10 @@ struct toasters {
 	struct wl_event_source *timer;
 	int w, h, tick_ms;
 	struct sprite s[N];
-	struct canvas *canvas;		/* over black */
+	struct canvas *canvas;		/* no GPU */
 	struct wlr_scene_buffer *canvas_node;
+	uint32_t *backdrop_px;		/* XRGB, w x h; NULL: black */
+	pixman_image_t *backdrop;
 	uint64_t last_ms;
 };
 
@@ -471,8 +476,8 @@ static struct wlr_buffer *picture(const struct sprite *s)
 	return s->toaster ? wings[s->frame] : toast;
 }
 
-/* The canvas: black where the sprites were, them where they are, and
- * wlroots told just that much changed. */
+/* The canvas: the backdrop (or black) where the sprites were, them where
+ * they are, and wlroots told just that much changed. */
 static void canvas_draw(struct toasters *t)
 {
 	static const pixman_color_t black = { 0, 0, 0, 0xffff };
@@ -494,7 +499,13 @@ static void canvas_draw(struct toasters *t)
 	/* (Clipped first: pixman fills boxes as given, off the canvas too.) */
 	pixman_region32_intersect_rect(&was, &was, 0, 0, t->w, t->h);
 	box = pixman_region32_rectangles(&was, &n);
-	pixman_image_fill_boxes(PIXMAN_OP_SRC, dst, &black, n, box);
+	if (!t->backdrop)
+		pixman_image_fill_boxes(PIXMAN_OP_SRC, dst, &black, n, box);
+	else
+		for (i = 0; i < n; i++)
+			pixman_image_composite32(PIXMAN_OP_SRC, t->backdrop, NULL, dst,
+						 box[i].x1, box[i].y1, 0, 0, box[i].x1, box[i].y1,
+						 box[i].x2 - box[i].x1, box[i].y2 - box[i].y1);
 	for (i = 0; i < N; i++) {
 		struct sprite *s = &t->s[i];
 		struct pic *p = wl_container_of(picture(s), p, base);
@@ -547,23 +558,37 @@ static int tick(void *data)
 }
 
 struct toasters *toasters_start(struct wlr_scene_tree *parent, struct wl_event_loop *loop,
-				int w, int h, int tick_ms, bool black, uint32_t format)
+				int w, int h, int tick_ms, bool canvas, uint32_t format,
+				uint32_t *backdrop)
 {
 	struct toasters *t;
 	int i;
 
-	if (!pics_load() || !(t = calloc(1, sizeof(*t))))
+	if (!pics_load() || !(t = calloc(1, sizeof(*t)))) {
+		free(backdrop);
 		return NULL;
+	}
 	t->tree = wlr_scene_tree_create(parent);
-	/* Black: the canvas (opaque: what's under it is left out). */
-	if (black) {
+	/* The canvas: opaque, what's under it is left out. */
+	if (canvas) {
 		if (!(t->canvas = canvas_make(w, h, format))) {
 			wlr_scene_node_destroy(&t->tree->node);
+			free(backdrop);
 			free(t);
 			return NULL;
 		}
 		t->canvas_node = wlr_scene_buffer_create(t->tree, &t->canvas->base);
 		wlr_scene_buffer_set_filter_mode(t->canvas_node, WLR_SCALE_FILTER_NEAREST);
+		if (backdrop && (t->backdrop = pixman_image_create_bits(PIXMAN_x8r8g8b8, w, h,
+									  backdrop, w * 4))) {
+			t->backdrop_px = backdrop;
+			pixman_image_composite32(PIXMAN_OP_SRC, t->backdrop, NULL, t->canvas->img,
+						 0, 0, 0, 0, 0, 0, w, h);
+		} else {
+			free(backdrop);
+		}
+	} else {
+		free(backdrop);
 	}
 	t->w = w;
 	t->h = h;
@@ -602,5 +627,8 @@ void toasters_stop(struct toasters *t)
 	wlr_scene_node_destroy(&t->tree->node);
 	if (t->canvas)
 		wlr_buffer_drop(&t->canvas->base);
+	if (t->backdrop)
+		pixman_image_unref(t->backdrop);
+	free(t->backdrop_px);
 	free(t);
 }
