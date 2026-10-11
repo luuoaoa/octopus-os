@@ -112,6 +112,7 @@ int main(int argc, char **argv)
 	struct zwlr_screencopy_frame_v1 *f;
 	FILE *out = stdout;
 	uint32_t x, y;
+	bool bgr;
 
 	if (!wl) {
 		fprintf(stderr, "chumby-screenshot: no Wayland display\n");
@@ -132,7 +133,9 @@ int main(int argc, char **argv)
 		fprintf(stderr, "chumby-screenshot: capture failed\n");
 		return 1;
 	}
-	if (frame.format != WL_SHM_FORMAT_XRGB8888 && frame.format != WL_SHM_FORMAT_ARGB8888) {
+	/* XRGB from pixman, XBGR from the GPU (gles2). */
+	if (frame.format != WL_SHM_FORMAT_XRGB8888 && frame.format != WL_SHM_FORMAT_ARGB8888 &&
+	    frame.format != WL_SHM_FORMAT_XBGR8888 && frame.format != WL_SHM_FORMAT_ABGR8888) {
 		fprintf(stderr, "chumby-screenshot: unsupported format 0x%x\n", frame.format);
 		return 1;
 	}
@@ -145,16 +148,18 @@ int main(int argc, char **argv)
 		perror(argv[1]);
 		return 1;
 	}
+	bgr = frame.format == WL_SHM_FORMAT_XBGR8888 || frame.format == WL_SHM_FORMAT_ABGR8888;
 	fprintf(out, "P6\n%u %u\n255\n", frame.width, frame.height);
 	for (y = 0; y < frame.height; y++) {
 		uint32_t row = frame.y_invert ? frame.height - 1 - y : y;
 		const uint8_t *p = (const uint8_t *)frame.data + (size_t)row * frame.stride;
 
-		/* [X|A]RGB8888 little-endian: B, G, R, X in memory */
+		/* [X|A]RGB8888 little-endian: B, G, R, X in memory; [X|A]BGR8888
+		 * the other way round: R, G, B, X */
 		for (x = 0; x < frame.width; x++, p += 4) {
-			fputc(p[2], out);
+			fputc(p[bgr ? 0 : 2], out);
 			fputc(p[1], out);
-			fputc(p[0], out);
+			fputc(p[bgr ? 2 : 0], out);
 		}
 	}
 	if (out != stdout)

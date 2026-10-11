@@ -8,7 +8,8 @@ kernel=Image
 arm_64bit=1
 
 # The display through the kernel's KMS driver: chumby-wm drives it with
-# wlroots' DRM backend (pixman rendering, so the GPU needs little memory).
+# wlroots' DRM backend, rendering on the GPU (Mesa; its buffers come from
+# the kernel's CMA pool, which vc4-kms-v3d sets up).
 dtoverlay=vc4-kms-v3d
 max_framebuffers=2
 gpu_mem=64

@@ -42,7 +42,11 @@ A USB mouse moves a cursor kept to the UI, an iPad-style translucent disc
 it goes after a touch or 5 s without moving. Clicks act like taps.
 
 The display runs through the kernel's KMS driver (`dtoverlay=vc4-kms-v3d`
-in config.txt) and wlroots' DRM backend, rendered with pixman (no GPU).
+in config.txt) and wlroots' DRM backend, rendered on the GPU (wlroots'
+gles2 renderer on Mesa: `v3d` on a Pi 4/5, `vc4` on a Zero 2 W/3), which
+also scales the 320x240 UI up on a big screen (nearest, sharp pixels). If
+EGL won't start, wlroots falls back to pixman (software) by itself;
+chumby-wm logs which renderer it got.
 
 ## Touch: ILITEK ILI2511 over USB
 

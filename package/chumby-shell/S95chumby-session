@@ -22,10 +22,10 @@ start() {
 	mkdir -p /run/chumby
 	chmod 0700 /run/chumby
 	# Runs as root on the console; libseat's builtin backend opens the
-	# DRM and input devices directly. No GPU: wlroots' pixman renderer.
+	# DRM and input devices directly. wlroots picks its renderer: the
+	# GPU where it was built with gles2, else pixman.
 	XDG_RUNTIME_DIR=/run/chumby \
 	LIBSEAT_BACKEND=builtin \
-	WLR_RENDERER=pixman \
 	WLR_LIBINPUT_NO_DEVICES=1 \
 	start-stop-daemon -S -q -b -m -p "$PIDFILE" -x /bin/sh -- -c \
 		"exec $DAEMON -s /usr/bin/chumby-shell >$LOG 2>&1" \

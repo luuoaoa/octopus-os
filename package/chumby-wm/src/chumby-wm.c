@@ -78,6 +78,7 @@
 #include <wlr/interfaces/wlr_buffer.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/render/pixman.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_pointer.h>
@@ -114,7 +115,8 @@
 #define MENU_GAP	4	/* the app menu card, from the edge and the bar */
 #define UI_W		320	/* the UI's size, whatever the screen's */
 #define UI_H		240
-#define MODE_MAX_W	1920	/* biggest mode we'll drive (pixman draws it all) */
+#define MODE_MAX_W	1920	/* biggest mode we'll drive (pixman, or an old Pi's GPU at */
+					/* 2048 px a texture, draws it all) */
 #define MODE_MAX_H	1200
 #define CURSOR_R	9	/* the cursor disc's radius, in UI pixels */
 #define CURSOR_MAX	64	/* cursor planes' size (vc4's): bigger is drawn in software */
@@ -1449,6 +1451,10 @@ int main(int argc, char **argv)
 		wlr_log(WLR_ERROR, "failed to create renderer");
 		return 1;
 	}
+	/* The GPU where wlroots has its gles2 renderer and EGL starts (the
+	 * Pi), else pixman: the Chumby, or a GPU that wouldn't. */
+	wlr_log(WLR_INFO, "renderer: %s", wlr_renderer_is_pixman(s.renderer) ?
+		"pixman (software)" : "GPU");
 	wlr_renderer_init_wl_display(s.renderer, s.display);
 	s.allocator = wlr_allocator_autocreate(s.backend, s.renderer);
 	if (!s.allocator) {

@@ -6,8 +6,9 @@ After=systemd-udev-trigger.service systemd-user-sessions.service
 # mxsfb (the display) is a module loaded by udev: wait for the card.
 ExecStartPre=/bin/sh -c 'i=0; while [ ! -e /dev/dri/card0 ] && [ $i -lt 30 ]; do sleep 0.5; i=$((i + 1)); done; [ -e /dev/dri/card0 ]'
 # As root on the console: libseat's builtin backend opens the DRM and
-# input devices directly. No GPU: wlroots' pixman renderer.
-Environment=XDG_RUNTIME_DIR=/run/chumby LIBSEAT_BACKEND=builtin WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1
+# input devices directly. wlroots picks its renderer: the GPU where it
+# was built with gles2 and EGL starts (the Pi), else pixman (the Chumby).
+Environment=XDG_RUNTIME_DIR=/run/chumby LIBSEAT_BACKEND=builtin WLR_LIBINPUT_NO_DEVICES=1
 RuntimeDirectory=chumby
 RuntimeDirectoryMode=0700
 ExecStart=/usr/bin/chumby-wm -s /usr/bin/chumby-shell

@@ -21,6 +21,25 @@ config BR2_PACKAGE_WLROOTS_PIXMAN
 
 	  https://gitlab.freedesktop.org/wlroots/wlroots
 
+if BR2_PACKAGE_WLROOTS_PIXMAN
+
+config BR2_PACKAGE_WLROOTS_PIXMAN_GLES2
+	bool "GLES2 renderer (GPU)"
+	depends on BR2_PACKAGE_HAS_LIBEGL
+	depends on BR2_PACKAGE_HAS_LIBGLES
+	depends on BR2_PACKAGE_HAS_LIBGBM
+	help
+	  Also build the gles2 renderer and GBM allocator, for a board
+	  with a GPU and its EGL/GLES/GBM drivers (e.g. mesa3d): wlroots
+	  renders on the GPU, the pixman renderer staying as its
+	  fallback.
+
+comment "GLES2 renderer needs EGL, OpenGL ES and GBM"
+	depends on !BR2_PACKAGE_HAS_LIBEGL || !BR2_PACKAGE_HAS_LIBGLES || \
+		!BR2_PACKAGE_HAS_LIBGBM
+
+endif
+
 comment "wlroots-pixman needs udev and a toolchain w/ threads, dynamic library"
 	depends on !BR2_PACKAGE_HAS_UDEV || !BR2_TOOLCHAIN_HAS_THREADS || \
 		BR2_STATIC_LIBS
