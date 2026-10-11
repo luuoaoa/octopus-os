@@ -133,9 +133,11 @@ int main(int argc, char **argv)
 		fprintf(stderr, "chumby-screenshot: capture failed\n");
 		return 1;
 	}
-	/* XRGB from pixman, XBGR from the GPU (gles2). */
+	/* XRGB from pixman (RGB565 on the Chumby's 16-bit screen), XBGR
+	 * from the GPU (gles2). */
 	if (frame.format != WL_SHM_FORMAT_XRGB8888 && frame.format != WL_SHM_FORMAT_ARGB8888 &&
-	    frame.format != WL_SHM_FORMAT_XBGR8888 && frame.format != WL_SHM_FORMAT_ABGR8888) {
+	    frame.format != WL_SHM_FORMAT_XBGR8888 && frame.format != WL_SHM_FORMAT_ABGR8888 &&
+	    frame.format != WL_SHM_FORMAT_RGB565) {
 		fprintf(stderr, "chumby-screenshot: unsupported format 0x%x\n", frame.format);
 		return 1;
 	}
@@ -154,6 +156,19 @@ int main(int argc, char **argv)
 		uint32_t row = frame.y_invert ? frame.height - 1 - y : y;
 		const uint8_t *p = (const uint8_t *)frame.data + (size_t)row * frame.stride;
 
+		if (frame.format == WL_SHM_FORMAT_RGB565) {
+			/* little-endian 16 bits, RRRRRGGG GGGBBBBB: each widened,
+			 * its top bits repeated into the bottom ones */
+			for (x = 0; x < frame.width; x++, p += 2) {
+				unsigned px = p[0] | p[1] << 8;
+				unsigned r = px >> 11, g = px >> 5 & 0x3f, b = px & 0x1f;
+
+				fputc(r << 3 | r >> 2, out);
+				fputc(g << 2 | g >> 4, out);
+				fputc(b << 3 | b >> 2, out);
+			}
+			continue;
+		}
 		/* [X|A]RGB8888 little-endian: B, G, R, X in memory; [X|A]BGR8888
 		 * the other way round: R, G, B, X */
 		for (x = 0; x < frame.width; x++, p += 4) {

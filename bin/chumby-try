@@ -7,6 +7,9 @@
 #                     functions in perf) on its SD card, /var/try/root,
 #                     which /var/run-overlay binds over the read-only image
 #                     at the next boot (board/.../carrier/sbin/init-ram)
+#                     (Added to what's staged already: see drop, reset.)
+#   bin/chumby-try HOST drop PATH...   un-stage PATH (the image's again, at
+#                     the next apply)
 #   bin/chumby-try HOST apply          reboot into it (and wait)
 #   bin/chumby-try HOST status         the overlay: armed or not, its files,
 #                     its last log. (An update - bin/update-chumby.sh, or any
@@ -88,17 +91,9 @@ wait_up() {
 	done
 }
 
-case "$CMD" in
-push)
-	for p in "$@"; do
-		src=$(unstripped "$p")
-		[ -n "$src" ] || { echo "no build of $p under ${OUT}" >&2; exit 1; }
-		on "mkdir -p ${TRY}/root$(dirname "$p") && cat > ${TRY}/root$p.new &&
-		    chmod 755 ${TRY}/root$p.new && mv ${TRY}/root$p.new ${TRY}/root$p" < "$src"
-		echo "staged $p <- ${src#${TOP}/} ($(du -h "$src" | cut -f1))"
-	done
-	# The overlay: every staged file bound over the image's, in the early
-	# boot (where the card is /, $ROOT the image).
+# The overlay: every staged file bound over the image's, in the early
+# boot (where the card is /, $ROOT the image).
+write_overlay() {
 	on "cd ${TRY}/root && {
 		echo '# Written by bin/chumby-try: the files under /var/try/root over the image.'
 		echo \"# image-inode: \$(ls -i /media/sd/rootfs.squashfs | sed 's/^ *\\([0-9]*\\).*/\\1/')\"
@@ -108,6 +103,24 @@ push)
 		done
 	    } > /var/run-overlay.new && mv /var/run-overlay.new /var/run-overlay && rm -f /var/run-overlay.disabled &&
 	    echo \"run overlay: \$(grep -c '^mount' /var/run-overlay) file(s), at the next boot (apply)\""
+}
+
+case "$CMD" in
+push)
+	for p in "$@"; do
+		src=$(unstripped "$p")
+		[ -n "$src" ] || { echo "no build of $p under ${OUT}" >&2; exit 1; }
+		on "mkdir -p ${TRY}/root$(dirname "$p") && cat > ${TRY}/root$p.new &&
+		    chmod 755 ${TRY}/root$p.new && mv ${TRY}/root$p.new ${TRY}/root$p" < "$src"
+		echo "staged $p <- ${src#${TOP}/} ($(du -h "$src" | cut -f1))"
+	done
+	write_overlay
+	;;
+drop)
+	for p in "$@"; do
+		on "rm -f ${TRY}/root$p" && echo "dropped $p"
+	done
+	write_overlay
 	;;
 apply)
 	on 'amixer -q sset DAC 0 mute 2>/dev/null; sync; reboot' || true

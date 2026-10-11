@@ -5,10 +5,15 @@
  * gliding down from the top right to the bottom left at three speeds, the
  * toasters flapping their wings.
  *
- * Drawn here rather than by an app: each sprite is a scene node showing one
- * of five pictures (four wing frames, the toast), made once; a frame moves
- * the nodes and swaps the wing pictures, and wlroots composites the squares
- * that changed. As an LVGL app the same saver cost the Chumby's ARM9 ~40%
+ * Drawn here rather than by an app, from five pictures (four wing frames,
+ * the toast) made once. Over the app (the GPU's way: see-through), each
+ * sprite is a scene node showing one of them; a frame moves the nodes and
+ * swaps the wing pictures, and wlroots composites the squares that
+ * changed. Over black (no GPU), one screen-sized canvas instead: a frame
+ * blacks out where the sprites were and draws them where they are
+ * (pixman), and hands wlroots the canvas with just those squares damaged -
+ * a dozen moving nodes cost the ARM9 more in wlroots' scene bookkeeping
+ * (each move re-walks the tree, in soft floating point) than in pixels. As an LVGL app the same saver cost the Chumby's ARM9 ~40%
  * (LVGL's per-object, per-area bookkeeping; its 16-bit window converted for
  * the 32-bit screen; the two processes' frames). The chumby-toasters app
  * only holds the screen (its window, see-through or black) and ends at a
@@ -31,6 +36,7 @@
 #include <wayland-server-core.h>
 #include <wlr/interfaces/wlr_buffer.h>
 #include <wlr/types/wlr_scene.h>
+#include <pixman.h>
 #include "toasters.h"
 
 #define DIR		"/usr/share/chumby/toasters"
@@ -237,12 +243,17 @@ out:
 
 struct pic {
 	struct wlr_buffer base;
+	pixman_image_t *img;	/* the same pixels, for drawing on the canvas */
 	uint32_t px[SZ * SZ];
 };
 
 static void pic_destroy(struct wlr_buffer *b)
 {
-	free(wl_container_of(b, (struct pic *)NULL, base));
+	struct pic *p = wl_container_of(b, p, base);
+
+	if (p->img)
+		pixman_image_unref(p->img);
+	free(p);
 }
 
 static bool pic_begin(struct wlr_buffer *b, uint32_t flags, void **data, uint32_t *format,
@@ -296,6 +307,7 @@ static struct wlr_buffer *pic_make(const struct gif *g, int x0)
 			/* sum(c * a) / 4 / 255: premultiplied by the averaged alpha */
 			p->px[y * SZ + x] = (a / 4) << 24 | (r / 1020) << 16 | (gr / 1020) << 8 | bl / 1020;
 		}
+	p->img = pixman_image_create_bits(PIXMAN_a8r8g8b8, SZ, SZ, p->px, SZ * 4);
 	return &p->base;
 }
 
@@ -329,18 +341,80 @@ out:
 /* Flying                                                             */
 
 struct sprite {
-	struct wlr_scene_buffer *node;
+	struct wlr_scene_buffer *node;	/* over the app; else on the canvas */
+	bool placed;
 	bool toaster;
 	float x, y, v;		/* top left; px/s down and left alike */
 	int phase;		/* the wings: where in their beat */
 	int frame;		/* shown */
+	int dx, dy;		/* where it was drawn on the canvas */
 };
+
+/* Over black: the screen, in its format (a plain copy to show). */
+struct canvas {
+	struct wlr_buffer base;
+	pixman_image_t *img;
+	void *px;
+	uint32_t format;	/* DRM's */
+	int stride;
+};
+
+static void canvas_destroy(struct wlr_buffer *b)
+{
+	struct canvas *c = wl_container_of(b, c, base);
+
+	pixman_image_unref(c->img);
+	free(c->px);
+	free(c);
+}
+
+static bool canvas_begin(struct wlr_buffer *b, uint32_t flags, void **data, uint32_t *format,
+			 size_t *stride)
+{
+	struct canvas *c = wl_container_of(b, c, base);
+
+	if (flags & WLR_BUFFER_DATA_PTR_ACCESS_WRITE)
+		return false;
+	*data = c->px;
+	*format = c->format;
+	*stride = c->stride;
+	return true;
+}
+
+static const struct wlr_buffer_impl canvas_impl = {
+	.destroy = canvas_destroy,
+	.begin_data_ptr_access = canvas_begin,
+	.end_data_ptr_access = pic_end,
+};
+
+static struct canvas *canvas_make(int w, int h, uint32_t format)
+{
+	struct canvas *c = calloc(1, sizeof(*c));
+	bool rgb565 = format == DRM_FORMAT_RGB565;
+
+	if (c) {
+		c->format = rgb565 ? DRM_FORMAT_RGB565 : DRM_FORMAT_XRGB8888;
+		c->stride = (rgb565 ? 2 * w + 3 : 4 * w) & ~3;	/* (pixman's: whole words) */
+	}
+	if (!c || !(c->px = calloc(h, c->stride)) ||
+	    !(c->img = pixman_image_create_bits(rgb565 ? PIXMAN_r5g6b5 : PIXMAN_x8r8g8b8,
+						w, h, c->px, c->stride))) {
+		if (c)
+			free(c->px);
+		free(c);
+		return NULL;
+	}
+	wlr_buffer_init(&c->base, &canvas_impl, w, h);
+	return c;
+}
 
 struct toasters {
 	struct wlr_scene_tree *tree;
 	struct wl_event_source *timer;
 	int w, h, tick_ms;
 	struct sprite s[N];
+	struct canvas *canvas;		/* over black */
+	struct wlr_scene_buffer *canvas_node;
 	uint64_t last_ms;
 };
 
@@ -362,7 +436,7 @@ static bool clear_of_others(struct toasters *t, const struct sprite *s)
 	for (i = 0; i < N; i++) {
 		const struct sprite *o = &t->s[i];
 
-		if (o != s && o->node && abs((int)(o->x - s->x)) < GAP &&
+		if (o != s && o->placed && abs((int)(o->x - s->x)) < GAP &&
 		    abs((int)(o->y - s->y)) < GAP)
 			return false;
 	}
@@ -389,6 +463,50 @@ static void place(struct toasters *t, struct sprite *s, bool anywhere)
 		if (clear_of_others(t, s))
 			break;
 	}
+	s->placed = true;
+}
+
+static struct wlr_buffer *picture(const struct sprite *s)
+{
+	return s->toaster ? wings[s->frame] : toast;
+}
+
+/* The canvas: black where the sprites were, them where they are, and
+ * wlroots told just that much changed. */
+static void canvas_draw(struct toasters *t)
+{
+	static const pixman_color_t black = { 0, 0, 0, 0xffff };
+	pixman_image_t *dst = t->canvas->img;
+	pixman_region32_t was, damage;
+	pixman_box32_t *box;
+	int i, n;
+
+	pixman_region32_init(&was);
+	pixman_region32_init(&damage);
+	for (i = 0; i < N; i++) {
+		struct sprite *s = &t->s[i];
+
+		pixman_region32_union_rect(&was, &was, s->dx, s->dy, SZ, SZ);
+		s->dx = (int)s->x;
+		s->dy = (int)s->y;
+		pixman_region32_union_rect(&damage, &damage, s->dx, s->dy, SZ, SZ);
+	}
+	/* (Clipped first: pixman fills boxes as given, off the canvas too.) */
+	pixman_region32_intersect_rect(&was, &was, 0, 0, t->w, t->h);
+	box = pixman_region32_rectangles(&was, &n);
+	pixman_image_fill_boxes(PIXMAN_OP_SRC, dst, &black, n, box);
+	for (i = 0; i < N; i++) {
+		struct sprite *s = &t->s[i];
+		struct pic *p = wl_container_of(picture(s), p, base);
+
+		pixman_image_composite32(PIXMAN_OP_OVER, p->img, NULL, dst,
+					 0, 0, 0, 0, s->dx, s->dy, SZ, SZ);
+	}
+	pixman_region32_union(&damage, &damage, &was);
+	pixman_region32_intersect_rect(&damage, &damage, 0, 0, t->w, t->h);
+	wlr_scene_buffer_set_buffer_with_damage(t->canvas_node, &t->canvas->base, &damage);
+	pixman_region32_fini(&was);
+	pixman_region32_fini(&damage);
 }
 
 static int tick(void *data)
@@ -407,7 +525,8 @@ static int tick(void *data)
 		s->y += s->v * dt / 1000.0f;
 		if (s->x < -SZ || s->y > t->h)	/* gone: in again */
 			place(t, s, false);
-		wlr_scene_node_set_position(&s->node->node, (int)s->x, (int)s->y);
+		if (s->node)
+			wlr_scene_node_set_position(&s->node->node, (int)s->x, (int)s->y);
 		if (s->toaster) {
 			/* 0 1 2 3 3 2 1 0: forward and back, as the CSS's
 			 * steps(4) alternate */
@@ -416,16 +535,19 @@ static int tick(void *data)
 
 			if (frame != s->frame) {
 				s->frame = frame;
-				wlr_scene_buffer_set_buffer(s->node, wings[frame]);
+				if (s->node)
+					wlr_scene_buffer_set_buffer(s->node, wings[frame]);
 			}
 		}
 	}
+	if (t->canvas)
+		canvas_draw(t);
 	wl_event_source_timer_update(t->timer, t->tick_ms);
 	return 0;
 }
 
 struct toasters *toasters_start(struct wlr_scene_tree *parent, struct wl_event_loop *loop,
-				int w, int h, int tick_ms, bool black)
+				int w, int h, int tick_ms, bool black, uint32_t format)
 {
 	struct toasters *t;
 	int i;
@@ -433,11 +555,16 @@ struct toasters *toasters_start(struct wlr_scene_tree *parent, struct wl_event_l
 	if (!pics_load() || !(t = calloc(1, sizeof(*t))))
 		return NULL;
 	t->tree = wlr_scene_tree_create(parent);
-	/* Black of our own: a fill, and what's under it (the app's window,
-	 * 16-bit, converted for the screen where a toaster moved) is left
-	 * out. */
-	if (black)
-		wlr_scene_rect_create(t->tree, w, h, (float[4]){ 0, 0, 0, 1 });
+	/* Black: the canvas (opaque: what's under it is left out). */
+	if (black) {
+		if (!(t->canvas = canvas_make(w, h, format))) {
+			wlr_scene_node_destroy(&t->tree->node);
+			free(t);
+			return NULL;
+		}
+		t->canvas_node = wlr_scene_buffer_create(t->tree, &t->canvas->base);
+		wlr_scene_buffer_set_filter_mode(t->canvas_node, WLR_SCALE_FILTER_NEAREST);
+	}
 	t->w = w;
 	t->h = h;
 	t->tick_ms = tick_ms;
@@ -450,11 +577,17 @@ struct toasters *toasters_start(struct wlr_scene_tree *parent, struct wl_event_l
 		s->phase = rand() % (2 * FRAMES * FLAP_STEP_MS);
 		s->frame = 0;
 		place(t, s, true);
-		s->node = wlr_scene_buffer_create(t->tree, s->toaster ? wings[0] : toast);
+		s->dx = (int)s->x;
+		s->dy = (int)s->y;
+		if (t->canvas)
+			continue;
+		s->node = wlr_scene_buffer_create(t->tree, picture(s));
 		/* Scaled up (a bigger screen): crisp pixels, as the UI's. */
 		wlr_scene_buffer_set_filter_mode(s->node, WLR_SCALE_FILTER_NEAREST);
-		wlr_scene_node_set_position(&s->node->node, (int)s->x, (int)s->y);
+		wlr_scene_node_set_position(&s->node->node, s->dx, s->dy);
 	}
+	if (t->canvas)
+		canvas_draw(t);
 	t->last_ms = now_ms();
 	t->timer = wl_event_loop_add_timer(loop, tick, t);
 	wl_event_source_timer_update(t->timer, tick_ms);
@@ -467,5 +600,7 @@ void toasters_stop(struct toasters *t)
 		return;
 	wl_event_source_remove(t->timer);
 	wlr_scene_node_destroy(&t->tree->node);
+	if (t->canvas)
+		wlr_buffer_drop(&t->canvas->base);
 	free(t);
 }

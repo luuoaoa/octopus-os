@@ -443,7 +443,8 @@ static void view_map(struct wl_listener *l, void *data)
 	 * ARM9's work). */
 	if (v->kind == VIEW_SAVER && !s->toasters)
 		s->toasters = toasters_start(s->saver_tree, wl_display_get_event_loop(s->display),
-					     s->width, s->height, s->gpu ? 40 : 80, !s->gpu);
+					     s->width, s->height, s->gpu ? 40 : 80, !s->gpu,
+					     s->output ? s->output->render_format : 0);
 	if (v->kind == VIEW_POPUP || v->kind == VIEW_MENU || v->kind == VIEW_SAVER)
 		veil_update(s);
 	if (v->kind != VIEW_APP)
@@ -1706,6 +1707,15 @@ static void new_output(struct wl_listener *l, void *data)
 	if (scale < 1)
 		scale = 1;
 	wlr_output_state_set_scale(&state, scale);
+	/* Without a GPU, a 16-bit screen, if it takes one: the apps draw
+	 * 16-bit, so showing them is a plain copy, and every copy (pixman's,
+	 * the LCD controller's scanning out) moves half the bytes - which,
+	 * through the ARM9's slow, uncached memory, is most of the cost. */
+	if (!s->gpu && !getenv("CHUMBY_WM_32BIT")) {
+		wlr_output_state_set_render_format(&state, DRM_FORMAT_RGB565);
+		if (!wlr_output_test_state(wo, &state))
+			wlr_output_state_set_render_format(&state, DRM_FORMAT_XRGB8888);
+	}
 	wlr_output_commit_state(wo, &state);
 	wlr_output_state_finish(&state);
 
@@ -1724,8 +1734,9 @@ static void new_output(struct wl_listener *l, void *data)
 	wlr_scene_rect_set_size(s->ui_backdrop, s->width, s->height);
 	s->scale = scale;
 	corners_create(s);
-	wlr_log(WLR_INFO, "output %s: %dx%d, UI %dx%d at scale %d", wo->name,
-		wo->width, wo->height, s->width, s->height, scale);
+	wlr_log(WLR_INFO, "output %s: %dx%d, UI %dx%d at scale %d, %s", wo->name,
+		wo->width, wo->height, s->width, s->height, scale,
+		wo->render_format == DRM_FORMAT_RGB565 ? "16-bit" : "32-bit");
 
 	o = calloc(1, sizeof(*o));
 	if (!o)
