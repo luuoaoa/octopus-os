@@ -189,26 +189,49 @@ on the dark screen.
 **Clock**: HH:MM (one redraw a minute), date, the next alarm; alarms in
 `/var/lib/chumby/alarms.conf` (`06:30 MTWTF-- on`, editable by hand).
 
+## The run overlay: builds without reflashing
+
+`/var/run-overlay` on the card, if there, is a shell script `init-ram` runs
+early in every boot, before the switch to the image: it binds files over the
+read-only root (`$ROOT`), as if they were in the image. It's an escape
+hatch by design:
+
+- `init-ram` renames it `run-overlay.disabled` *before* running it: an
+  overlay that breaks the boot (a hang, a crash, the watchdog) doesn't run
+  again, and the next boot is the image's;
+- `chumby-overlay-ok.service` renames it back once the boot has gone well
+  (the UI up two minutes): it then holds for every boot;
+- it's only run on the image it was made for (`# image-inode:`, which
+  changes when an update renames a new rootfs.squashfs in), and
+  `bin/update-chumby.sh` removes it: an update always ends it;
+- chumby-wm frames the screen in magenta while anything from the card is
+  bound over the image, and logs the files: none is left behind unnoticed.
+
+Its output is in `/var/run-overlay.log`. `bin/chumby-try` makes them.
+
 ## Measuring CPU, without reflashing
 
 The ARM926 is where costs show: measure there, not in QEMU (no cache or
-timing model; this CPU's VIVT caches are flushed at every process switch).
-`bin/chumby-try HOST ...` does it over SSH:
+timing model). `bin/chumby-try HOST ...` does it over SSH, everything on
+the card (`/var/try`: the Chumby has 64 MB of RAM), the sound muted:
 
-- `push /usr/bin/chumby-toasters /usr/lib/libchumby.so.1 ...` runs this
-  build's unstripped copies (named functions in perf) from the Chumby's RAM,
-  bind-mounted over the read-only root's; `restart` restarts the UI session
-  to take them; `reset` (or a reboot) goes back to the image's.
+- `push /usr/bin/chumby-wm /usr/lib/libchumby.so.1 ...` stages this build's
+  unstripped copies (named functions in perf) in the run overlay; `apply`
+  reboots into it (nothing is swapped under a running session: that reset
+  the Chumby); `status` shows it; `reset` removes it and reboots.
 - `perf [S]` samples the whole system S seconds (perf is in the image, the
   kernel has `CONFIG_PERF_EVENTS`; timer sampling, the ARM926 has no
   counters for it): time by process and library, then by function.
-- `bench [idle saver stream podcast saver-stream]` lights the screen and
-  runs scenarios, CPU per process and the system's load in each.
+- `bench [idle saver stream podcast saver-stream]` lights the screen,
+  mutes the sound (the DAC at 0, left so) and runs scenarios: CPU per
+  process and the system's load in each.
 
-`CHUMBY_REFR_DEBUG=1` (any app: its redraws a second, pixels, time) and
-`CHUMBY_WM_DEBUG=1` (chumby-wm: frames a second, their time) log to the
-journal. `/proc/stat`'s idle ticks undercount here (tickless idle):
-compare shares of the ticks counted, as `bench` does.
+`CHUMBY_REFR_DEBUG=1` (any app: its redraws a second, pixels, time),
+`CHUMBY_WM_DEBUG=1` (chumby-wm: frames a second, their time) and
+`CHUMBY_LOOP_DEBUG=1` (libchumby's loop going round too fast: which
+descriptor, once a second) log to the journal. `/proc/stat`'s idle ticks
+undercount here (tickless idle): compare shares of the ticks counted, as
+`bench` does.
 
 ## Unverified until it runs on hardware
 

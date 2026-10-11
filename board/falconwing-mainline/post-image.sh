@@ -60,7 +60,8 @@ rm -rf "${CARRIER}"
 mkdir -p "${CARRIER}"/{bin,lib,dev,proc,newroot,data/var}
 cp -a "${BOARD_DIR}/carrier/." "${CARRIER}/"
 cp "${TARGET_DIR}/bin/busybox" "${CARRIER}/bin/"
-for applet in sh mount umount mkdir pivot_root chroot; do
+# (init-ram's own, and the run overlay's: init-ram has PATH=/bin.)
+for applet in sh mount umount mkdir pivot_root chroot mv rm sed ls sync cat cp ln grep; do
 	ln -sf busybox "${CARRIER}/bin/${applet}"
 done
 

@@ -1,26 +1,34 @@
 #!/bin/sh
-# Try builds on a running Chumby One without reflashing it, and measure.
+# Try builds on a Chumby One without reflashing it, and measure.
 #
-#   bin/chumby-try HOST push PATH...   run this build's PATH (e.g.
-#                     /usr/bin/chumby-toasters, /usr/lib/libchumby.so.1)
-#                     on the Chumby instead of the image's: an unstripped
-#                     copy (named functions in perf) in its RAM (/tmp/try),
-#                     bind-mounted over the read-only root's
-#   bin/chumby-try HOST reset          back to the image's files (as a
-#                     reboot does; restarts the UI session)
-#   bin/chumby-try HOST restart        restart the UI session (to take a
-#                     pushed compositor, shell or library)
+#   bin/chumby-try HOST push PATH...   stage this build's PATH (e.g.
+#                     /usr/bin/chumby-wm, /usr/lib/libchumby.so.1) for the
+#                     Chumby's run overlay: an unstripped copy (named
+#                     functions in perf) on its SD card, /var/try/root,
+#                     which /var/run-overlay binds over the read-only image
+#                     at the next boot (board/.../carrier/sbin/init-ram)
+#   bin/chumby-try HOST apply          reboot into it (and wait)
+#   bin/chumby-try HOST status         the overlay: armed or not, its files,
+#                     its last log. (An update - bin/update-chumby.sh, or any
+#                     new image - ends it; chumby-wm frames the screen in
+#                     magenta while anything is bound over the image.)
+#   bin/chumby-try HOST reset          the overlay gone, reboot: the image's
+#   bin/chumby-try HOST restart        restart the UI session
 #   bin/chumby-try HOST perf [S]       S seconds (default 10) of the whole
 #                     system sampled (perf, on the timer), the busiest
 #                     functions by process and library
-#   bin/chumby-try HOST bench [NAME...] (the screen lit first) CPU per process and the system's
+#   bin/chumby-try HOST bench [NAME...] CPU per process and the system's
 #                     load in scenarios (default: all): idle (the clock in
 #                     front), saver (over FM Radio), stream (Internet
 #                     Radio playing, the clock in front), podcast (playing,
 #                     Podcasts in front), saver-stream (the saver over a
-#                     stream)
+#                     stream). The screen is lit first, and the sound muted
+#                     (the DAC at 0) and left so: nothing is heard.
 #
-# The image needs perf (configs/falconwing_mainline_defconfig). Load is
+# The overlay is the escape hatch: init-ram disables it before running it
+# (a boot it breaks comes back as the image's) and chumby-overlay-ok
+# re-arms it after a boot that went well. Nothing is swapped under a
+# running session (that reset the Chumby: its 64 MB, the watchdog). Load is
 # shares of the ticks counted, not of wall time: this kernel counts fewer
 # ticks than pass while idle. Key auth, else password "root"
 # (CHUMBY_SSH_PASSWORD), as bin/update-chumby.sh.
@@ -34,21 +42,27 @@ case "$HOST" in *@*) ;; *) HOST="root@${HOST}" ;; esac
 
 TOP="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${TOP}/output-falconwing-mainline"
+# On the Chumby, all on its SD card (/var: the carrier's /data/var), never
+# /tmp (RAM). The overlay's files under root/, as in the image.
+TRY=/var/try
 
 SSH_CTL="${TMPDIR:-/tmp}/chumby-try-$$.sock"
 SSH_OPTS="-o ControlMaster=auto -o ControlPath=${SSH_CTL} -o ControlPersist=60s \
 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=30"
 on() { ssh ${SSH_OPTS} "${HOST}" "$@"; }
+login() {
+	if ! SSH_ASKPASS_REQUIRE=never ssh ${SSH_OPTS} -o BatchMode=yes "${HOST}" true 2>/dev/null; then
+		command -v sshpass >/dev/null 2>&1 || { echo "key auth failed and sshpass is not installed" >&2; exit 1; }
+		SSH_ASKPASS_REQUIRE=never sshpass -p "${CHUMBY_SSH_PASSWORD:-root}" \
+			ssh ${SSH_OPTS} -o PubkeyAuthentication=no "${HOST}" true
+	fi
+}
 trap 'ssh ${SSH_OPTS} -O exit "${HOST}" 2>/dev/null || true; rm -f "${SSH_CTL}"' EXIT
-if ! SSH_ASKPASS_REQUIRE=never ssh ${SSH_OPTS} -o BatchMode=yes "${HOST}" true 2>/dev/null; then
-	command -v sshpass >/dev/null 2>&1 || { echo "key auth failed and sshpass is not installed" >&2; exit 1; }
-	SSH_ASKPASS_REQUIRE=never sshpass -p "${CHUMBY_SSH_PASSWORD:-root}" \
-		ssh ${SSH_OPTS} -o PubkeyAuthentication=no "${HOST}" true
-fi
+login
 
-# This build's unstripped copy of a target path: staging has the libraries
-# as built, a package's build directory its programs.
+# This build's unstripped copy of a target path: the sysroot has the
+# libraries as built, a package's build directory its programs.
 unstripped() {
 	# (staging links to the build container's /work path: the sysroot.)
 	for sysroot in "${OUT}"/host/*-linux-*/sysroot; do
@@ -61,41 +75,78 @@ unstripped() {
 		-not -name '.*' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-
 }
 
+# Back up after a reboot: SSH again, the session running a while.
+wait_up() {
+	sleep 20
+	ssh ${SSH_OPTS} -O exit "${HOST}" 2>/dev/null || true
+	i=0
+	until ssh ${SSH_OPTS} -o BatchMode=yes "${HOST}" \
+		'test $(cut -d. -f1 /proc/uptime) -gt 40 && systemctl is-active -q chumby-session' 2>/dev/null; do
+		i=$((i + 1))
+		[ $i -lt 40 ] || { echo "${HOST}: not back after a reboot" >&2; exit 1; }
+		sleep 5
+	done
+}
+
 case "$CMD" in
 push)
 	for p in "$@"; do
 		src=$(unstripped "$p")
 		[ -n "$src" ] || { echo "no build of $p under ${OUT}" >&2; exit 1; }
-		on "mkdir -p /tmp/try$(dirname "$p") && cat > /tmp/try$p.new && chmod 755 /tmp/try$p.new &&
-		    { ! mountpoint -q $p 2>/dev/null || umount $p; } &&
-		    mv /tmp/try$p.new /tmp/try$p && mount --bind /tmp/try$p $p" < "$src"
-		echo "$p <- ${src#${TOP}/} ($(du -h "$src" | cut -f1))"
+		on "mkdir -p ${TRY}/root$(dirname "$p") && cat > ${TRY}/root$p.new &&
+		    chmod 755 ${TRY}/root$p.new && mv ${TRY}/root$p.new ${TRY}/root$p" < "$src"
+		echo "staged $p <- ${src#${TOP}/} ($(du -h "$src" | cut -f1))"
 	done
+	# The overlay: every staged file bound over the image's, in the early
+	# boot (where the card is /, $ROOT the image).
+	on "cd ${TRY}/root && {
+		echo '# Written by bin/chumby-try: the files under /var/try/root over the image.'
+		echo \"# image-inode: \$(ls -i /media/sd/rootfs.squashfs | sed 's/^ *\\([0-9]*\\).*/\\1/')\"
+		echo '# (init-ram runs it only on that image: an update makes it stale.)'
+		find . -type f | sed 's|^\./||' | while read -r f; do
+			echo \"mount --bind /data${TRY}/root/\$f \\\$ROOT/\$f\"
+		done
+	    } > /var/run-overlay.new && mv /var/run-overlay.new /var/run-overlay && rm -f /var/run-overlay.disabled &&
+	    echo \"run overlay: \$(grep -c '^mount' /var/run-overlay) file(s), at the next boot (apply)\""
+	;;
+apply)
+	on 'amixer -q sset DAC 0 mute 2>/dev/null; sync; reboot' || true
+	wait_up
+	on "echo \"up \$(cut -d' ' -f1 /proc/uptime) s; overlay:\"; grep ' /usr/' /proc/mounts | cut -d' ' -f2;
+	    [ -s /var/run-overlay.log ] && { echo '-- its log:'; cat /var/run-overlay.log; };
+	    amixer -q sset DAC 0 mute 2>/dev/null; true"
+	;;
+status)
+	on "if [ -e /var/run-overlay ]; then echo 'armed: /var/run-overlay'
+	    elif [ -e /var/run-overlay.stale ]; then echo 'stale: made for another image (updated since), not run'
+	    elif [ -e /var/run-overlay.disabled ]; then
+		[ -e /var/run-overlay.applied ] && echo 'running, re-arms once this boot has gone well' ||
+		    echo 'disabled (a boot it ran in did not finish well): push again to re-arm'
+	    else echo 'none'; fi
+	    echo '-- bound now:'; grep ' /usr/' /proc/mounts | cut -d' ' -f2
+	    [ -s /var/run-overlay.log ] && { echo '-- last log:'; cat /var/run-overlay.log; }; true"
 	;;
 reset)
-	# The session uses them: stopped first, started again after (a
-	# file still held elsewhere is let go of lazily).
-	on 'systemctl stop chumby-session
-	    grep " /usr/" /proc/mounts | cut -d" " -f2 | while read -r m; do umount "$m" 2>/dev/null || umount -l "$m"; done
-	    rm -rf /tmp/try
-	    systemctl start chumby-session
-	    echo "back to the image'"'"'s files ($(grep -c " /usr/" /proc/mounts) left mounted)"'
+	on "rm -rf ${TRY}/root /var/run-overlay /var/run-overlay.disabled /var/run-overlay.applied /var/run-overlay.log
+	    amixer -q sset DAC 0 mute 2>/dev/null; sync; reboot" || true
+	wait_up
+	echo "back on the image's files ($(on "grep -c ' /usr/' /proc/mounts" || true) bound)"
 	;;
 restart)
 	on 'systemctl restart chumby-session && echo "session restarted"'
 	;;
 perf)
 	secs="${1:-10}"
-	on "perf record -a -F 250 -o /tmp/perf.data -q -- sleep ${secs} 2>/dev/null &&
+	on "mkdir -p ${TRY} && perf record -a -F 250 -o ${TRY}/perf.data -q -- sleep ${secs} 2>/dev/null &&
 	    echo '-- by process and library:' &&
-	    perf report -i /tmp/perf.data --stdio --sort comm,dso --percent-limit 0.5 2>/dev/null |
+	    perf report -i ${TRY}/perf.data --stdio --sort comm,dso --percent-limit 0.5 2>/dev/null |
 	    grep -v '^#' | grep -v '^$' | head -25 &&
 	    echo '-- busiest functions (idle left out):' &&
-	    perf report -i /tmp/perf.data --stdio --sort comm,dso,sym 2>/dev/null |
-	    grep -v '^#' | grep -v '^$' | grep -v default_idle_call | head -30; rm -f /tmp/perf.data"
+	    perf report -i ${TRY}/perf.data --stdio --sort comm,dso,sym 2>/dev/null |
+	    grep -v '^#' | grep -v '^$' | grep -v default_idle_call | head -30; rm -f ${TRY}/perf.data"
 	;;
 bench)
-	on "SCENARIOS='$*' sh -s" <<'EOF'
+	on "mkdir -p ${TRY} && TRY=${TRY} SCENARIOS='$*' sh -s" <<'EOF'
 export XDG_RUNTIME_DIR=/run/chumby WAYLAND_DISPLAY=wayland-0
 C=/run/chumby/shell.cmd
 T=15
@@ -110,19 +161,23 @@ snap() {	# pid ticks name
 }
 ticks() { awk '/^cpu / { s = 0; for (i = 2; i <= 9; i++) s += $i; print s, $5 + $6 }' /proc/stat; }
 measure() {
-	snap > /tmp/b0; set -- $(ticks); t0=$1 i0=$2
+	snap > $TRY/b0; set -- $(ticks); t0=$1 i0=$2
 	sleep $T
-	snap > /tmp/b1; set -- $(ticks); t1=$1 i1=$2
+	snap > $TRY/b1; set -- $(ticks); t1=$1 i1=$2
 	tot=$((t1 - t0))
 	echo "== $SC: busy $(( (tot - (i1 - i0)) * 100 / tot ))%"
 	awk -v T=$tot 'NR == FNR { a[$1] = $2; next }
 	     ($1 in a) && ($2 - a[$1]) * 100 / T >= 1 { printf "   %3d%% %s\n", ($2 - a[$1]) * 100 / T, substr($0, index($0, $3)) }' \
-		/tmp/b0 /tmp/b1 | sort -rn | head -6
+		$TRY/b0 $TRY/b1 | sort -rn | head -6
 }
-quiet() { echo active > $C; chumby-stream stop 2>/dev/null; radio off >/dev/null 2>&1; }
+# Silent: the codec's DAC (the UI's volume) muted at 0 and left so; again
+# after anything starts playing (a player may set its level).
+mute() { amixer -q sset DAC 0 mute 2>/dev/null; }
+quiet() { echo active > $C; chumby-stream stop 2>/dev/null; radio off >/dev/null 2>&1; mute; }
 # The screen on (the snooze button's way: past the screen-off hours too):
 # a dark screen gets no saver, and draws nothing.
 lit() { [ "$(cat /sys/class/backlight/backlight/bl_power 2>/dev/null)" = 0 ] || { echo snooze > $C; sleep 2; }; }
+mute
 lit
 front() { echo "launch $1" > $C; sleep ${2:-12}; }
 saver() {
@@ -136,18 +191,19 @@ for SC in $SCENARIOS; do
 	case $SC in
 	idle)	front Clock; measure ;;
 	saver)	front "FM Radio"; saver; measure ;;
-	stream)	chumby-stream "$STATION" Bench 2>/dev/null; front Clock 15; measure ;;
+	stream)	chumby-stream "$STATION" Bench 2>/dev/null; mute; front Clock 15; mute; measure ;;
 	podcast)
 		kill $(pidof chumby-podcasts) 2>/dev/null
-		chumby-stream "$EPISODE" Bench 10000000 2>/dev/null; sleep 3
-		front Podcasts 15; measure ;;
+		chumby-stream "$EPISODE" Bench 10000000 2>/dev/null; mute; sleep 3
+		front Podcasts 15; mute; measure ;;
 	saver-stream)
-		chumby-stream "$STATION" Bench 2>/dev/null; front "FM Radio" 15; saver; measure ;;
+		chumby-stream "$STATION" Bench 2>/dev/null; mute; front "FM Radio" 15; mute; saver; measure ;;
 	*)	echo "== $SC: unknown" ;;
 	esac
 done 2>&1 | grep -v "ALSA lib"
 quiet
 echo "launch Clock" > $C
+rm -f $TRY/b0 $TRY/b1
 EOF
 	;;
 *)

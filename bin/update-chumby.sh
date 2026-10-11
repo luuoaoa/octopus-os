@@ -19,7 +19,8 @@
 #   customize-chumby/{network-config,user-data,authorized_keys}
 #                     -> /boot (FAT, p3), only those present locally
 #
-# then reboots. /var (alarms, SSH host keys, ...) is left alone.
+# then reboots. /var (alarms, SSH host keys, ...) is left alone, but for a
+# run overlay (bin/chumby-try), which an update removes.
 #
 # Usage:  bin/update-chumby.sh [user@]host [--no-reboot]
 #         Key auth if you have a key installed, else password "root"
@@ -72,6 +73,15 @@ fi
 
 on 'mountpoint -q /media/sd && [ -w /media/sd ]' ||
     { echo "${HOST}: /media/sd (the carrier) is not mounted rw: not a RAM-root image?" >&2; exit 1; }
+
+# An update ends any run overlay (bin/chumby-try): what it held was built
+# against another image, and a forgotten one would only confuse. Gone
+# first, so an update that fails halfway has dropped it too. (init-ram
+# also won't run one made for another image.)
+if on '[ -e /var/run-overlay ] || [ -e /var/run-overlay.disabled ] || [ -e /var/try/root ]'; then
+    echo "==> run overlay removed"
+fi
+on 'rm -rf /var/run-overlay /var/run-overlay.disabled /var/run-overlay.applied /var/run-overlay.stale /var/run-overlay.log /var/try/root'
 
 # rsync on both ends (images from before it was added don't have it).
 RSYNC=

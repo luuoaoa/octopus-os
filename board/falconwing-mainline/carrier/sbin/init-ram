@@ -38,6 +38,35 @@ mount -t squashfs -o loop,ro /rootfs.squashfs /newroot ||
 mkdir -p /data/var
 mount --bind /data/var /newroot/var || fail "cannot bind /data/var"
 
+# The run overlay: /var/run-overlay (on this card), if there, is a shell
+# script that binds files over the new root ($ROOT) - builds to try
+# (bin/chumby-try), fixes - as if they were in the image, without one.
+# It's renamed run-overlay.disabled before it runs: one that breaks the
+# boot (a hang, a crash, the watchdog) doesn't run again, and the next boot
+# is the image's. chumby-overlay-ok.service renames it back once a boot
+# has gone well (the UI up a while). Its output: /var/run-overlay.log.
+rm -f /data/var/run-overlay.applied	# (a boot that didn't finish: stays off)
+# Made for another image (its "# image-inode: N" isn't this one's: an
+# update renames a new rootfs.squashfs over the old): never run, kept
+# aside as run-overlay.stale.
+if [ -f /data/var/run-overlay ]; then
+	made_for=$(sed -n 's/^# image-inode: *//p' /data/var/run-overlay)
+	this=$(ls -i /rootfs.squashfs | sed 's/^ *\([0-9]*\).*/\1/')
+	if [ "$made_for" != "$this" ]; then
+		mv /data/var/run-overlay /data/var/run-overlay.stale
+		echo "init-ram: run overlay made for another image (inode $made_for, not $this): not run" \
+			> /data/var/run-overlay.log
+	fi
+fi
+if [ -f /data/var/run-overlay ]; then
+	mv /data/var/run-overlay /data/var/run-overlay.disabled
+	: > /data/var/run-overlay.applied	# this boot: re-arm if it goes well
+	sync
+	ROOT=/newroot /bin/busybox sh /data/var/run-overlay.disabled \
+		> /data/var/run-overlay.log 2>&1 </dev/null
+	sync
+fi
+
 umount /proc
 mount --move /dev /newroot/dev || fail "cannot move /dev"
 cd /newroot || fail "no new root"
