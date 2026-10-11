@@ -5,8 +5,10 @@
 #   chumby-app build             cross-compile the app in this directory
 #                                (its Makefile, into bundle/)
 #   chumby-app pack              bundle/ -> <Id>.chumbyapp, to install
-#   chumby-app sim [--sound]     the Chumby's UI as a window on this PC's
-#                                desktop, with this app installed (Home menu)
+#   chumby-app sim [--no-sound]  the Chumby's UI as a window on this PC's
+#                                desktop, with this app installed (Home menu);
+#                                its sound through this PC's (PipeWire,
+#                                PulseAudio or ALSA)
 #   chumby-app sim-shot FILE     the same headless, a screenshot after 25 s
 #                                (FILE.ppm), the app brought to the front
 #   chumby-app deploy HOST       install <Id>.chumbyapp on a Chumby (SSH)
@@ -77,8 +79,7 @@ pack)
 sim | sim-shot)
 	id=$(app_id)
 	set -- "$cmd" "$@"
-	sound=; shot=
-	[ "$cmd" = sim ] && [ "${2:-}" = --sound ] && sound="--device /dev/snd --group-add audio"
+	shot=
 	if [ "$cmd" = sim-shot ]; then
 		shot=${2:-}
 		[ -n "$shot" ] || usage
@@ -99,10 +100,30 @@ sim | sim-shot)
 		/*) sock=$WAYLAND_DISPLAY ;;
 		*) sock=${XDG_RUNTIME_DIR:?}/$WAYLAND_DISPLAY ;;
 	esac
+	# Sound: the simulator's ALSA writes 48 kHz 16-bit stereo into a FIFO
+	# (its asound.conf), played here. Opened read-write, so the player
+	# never sees an end between one stream and the next.
+	snd=$(mktemp -d)
+	chmod 755 "$snd"	# (the simulator's apps are another user, "chumby")
+	chmod 755 "$snd"	# (the simulator's apps are another user, "chumby")
+	player=
+	if [ "${2:-}" != --no-sound ]; then
+		mkfifo -m 666 "$snd/pcm"
+		if command -v pw-cat >/dev/null; then
+			pw-cat --playback --format s16 --rate 48000 --channels 2 - 0<>"$snd/pcm" &
+		elif command -v paplay >/dev/null; then
+			paplay --raw --format=s16le --rate=48000 --channels=2 0<>"$snd/pcm" &
+		elif command -v aplay >/dev/null; then
+			aplay -q -t raw -f S16_LE -r 48000 -c 2 0<>"$snd/pcm" &
+		else
+			echo "chumby-app: no pw-cat, paplay or aplay here: no sound" >&2
+		fi
+		player=$!
+	fi
+	trap '[ -n "$player" ] && kill "$player" 2>/dev/null; rm -rf "$snd"' EXIT INT TERM
 	echo "The Chumby's UI in a window: Home (top left) > $(conf Name bundle/app.conf). Ctrl-C ends it."
-	# shellcheck disable=SC2086
-	exec docker run --rm -it --init --name chumby-sim $sound \
-		-v "$sock:/run/host/wayland-0" -v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE"
+	docker run --rm -it --init --name chumby-sim -v "$snd:/run/host-sound" \
+		-v "$sock:/run/host/wayland-0" -v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE" || true
 	;;
 deploy)
 	host=${1:-}

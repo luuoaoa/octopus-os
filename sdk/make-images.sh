@@ -25,7 +25,8 @@ cp -r "$TOP/sdk/examples" "$ctx/"
 docker build -t chumby-sdk "$ctx"
 
 rm -rf "${ctx:?}"/*
-cp "$IMG/rootfs.tar" "$TOP/sdk/sim/Dockerfile" "$TOP/sdk/sim/chumby-sim-session" "$ctx/"
+cp "$IMG/rootfs.tar" "$TOP/sdk/sim/Dockerfile" "$TOP/sdk/sim/chumby-sim-session" \
+	"$TOP/sdk/sim/asound.conf" "$ctx/"
 docker build -t chumby-sim "$ctx"
 
 echo "chumby-sdk, chumby-sim built. To hand them out:"

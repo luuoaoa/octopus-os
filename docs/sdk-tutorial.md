@@ -225,10 +225,9 @@ chumby-app sim
 ```
 
 Home menu → One Song. Tap the button (click it): "Connecting...", then
-"Playing 0:01, 0:02...". In the simulator you'll only hear it with
-`chumby-app sim --sound`, and only if nothing else on your PC holds the
-sound card. "Can't play it" in the simulator usually just means no sound
-card; the network is the PC's.
+"Playing 0:01, 0:02...", and you hear it through your PC's speakers (the
+simulator's sound goes to your desktop's). "Can't play it" means the
+song couldn't be fetched: the simulator's network is the PC's.
 
 Things to try:
 - Switch to another app from the Home menu: the song goes on. Come back,

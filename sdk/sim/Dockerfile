@@ -6,4 +6,5 @@
 FROM scratch
 ADD rootfs.tar /
 COPY chumby-sim-session /usr/libexec/chumby-sim-session
+COPY asound.conf /etc/asound.conf
 ENTRYPOINT ["/usr/libexec/chumby-sim-session"]

@@ -93,10 +93,13 @@ in it, so open it from the Home menu. The mouse is the finger.
 - **Your app's colours, fonts, layout and night mode** look the same as on
   the device. Speed doesn't: it's an emulated ARM on a fast PC, so it can be
   faster than the Chumby's. Check performance on the real thing.
-- **Sound** is off by default (the container has no sound card).
-  `chumby-app sim --sound` gives it the PC's (`/dev/snd`), which works when
-  nothing else holds the card directly. PipeWire and PulseAudio desktops
-  usually do, so the app shows "can't play" there.
+- **Sound** plays through the PC's. The simulator has no sound card: its
+  ALSA writes 48 kHz 16-bit stereo into a FIFO (`sdk/sim/asound.conf`), and
+  `chumby-app sim` plays that with `pw-cat`, `paplay` or `aplay`, whichever
+  it finds, mixed with the rest of the desktop. It works for any app using
+  ALSA's `default` or `chumby` device, which is what the stream player and
+  the alarm tone use. `--no-sound` leaves it out. The volume control
+  doesn't work in the simulator (there's no mixer to set); use the PC's.
 - **No buttons:** the knob, snooze and power buttons aren't there. The
   shell's FIFO stands in for them:
   `docker exec chumby-sim sh -c 'echo snooze > /run/chumby/shell.cmd'`.
