@@ -319,8 +319,10 @@ static void save_positions(void)
 	rename(POSITIONS_FILE ".tmp", POSITIONS_FILE);
 }
 
-/* The episode's bytes per second: from the feed, else the stream's
- * measured bitrate, else 128 kbit/s. */
+/* The episode's bytes per second: from the feed (its size over its
+ * duration: both of the episode as published, so their ratio is the
+ * bitrate even when what's served is longer - see episode_duration()),
+ * else the stream's measured bitrate, else 128 kbit/s. */
 static double bytes_per_s(const struct episode *e)
 {
 	if (e && e->bytes > 0 && e->duration > 0)
@@ -554,10 +556,21 @@ static bool stream_is_ours(const char *url)
 	return e && url[0] && !strcmp(url, e->url);
 }
 
-/* How long it is: the feed's word, else its size at its bitrate. */
+/*
+ * How long it is: the file's real size (what the server says while it
+ * plays, kept with its place) at its bitrate; the feed's word only until
+ * that's known. Podcast hosts splice ads into the file as it's served
+ * (seen: 12-15% longer than the feed's size and duration): by the feed's
+ * duration, the time and bar reached the end with minutes still to play,
+ * and a seek landed elsewhere than the bar said.
+ */
 static long episode_duration(const struct episode *e)
 {
-	return e->duration > 0 ? e->duration : (long)(episode_length(e) / bytes_per_s(e));
+	long long len = episode_length(e);
+
+	if (len > 0 && len != e->bytes)
+		return (long)(len / bytes_per_s(e));
+	return e->duration > 0 ? e->duration : (long)(len / bytes_per_s(e));
 }
 
 /* Busy (loading, or again after a seek): a stripe runs along the bar,

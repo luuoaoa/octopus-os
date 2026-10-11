@@ -65,6 +65,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <sys/wait.h>
 #include <sys/inotify.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -1753,6 +1754,25 @@ static void new_output(struct wl_listener *l, void *data)
 
 /* ------------------------------------------------------------------ */
 
+static pid_t shell_pid = -1;
+
+/* SIGCHLD: reap; if it was the shell, end the display (main() returns). */
+static int child_exited(int sig, void *data)
+{
+	pid_t pid;
+	int status;
+
+	(void)sig;
+	while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
+		if (pid == shell_pid) {
+			wlr_log(WLR_ERROR, "the shell ended (%s %d): ending the session",
+				WIFSIGNALED(status) ? "signal" : "status",
+				WIFSIGNALED(status) ? WTERMSIG(status) : WEXITSTATUS(status));
+			wl_display_terminate(data);
+		}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	struct server s = { .width = 320, .height = 240 };
@@ -1896,7 +1916,14 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	setenv("WAYLAND_DISPLAY", socket, true);
-	if (startup && fork() == 0) {
+	/* The shell gone (a crash): so are we, and systemd starts the session
+	 * again (Restart=always). Left running, we kept a screen with no bar,
+	 * menu or buttons - and the dead shell as a zombie. (Watched before
+	 * the fork: a shell dying at once isn't missed.) */
+	if (startup)
+		wl_event_loop_add_signal(wl_display_get_event_loop(s.display), SIGCHLD,
+					 child_exited, s.display);
+	if (startup && (shell_pid = fork()) == 0) {
 		execl("/bin/sh", "/bin/sh", "-c", startup, (char *)NULL);
 		_exit(127);
 	}

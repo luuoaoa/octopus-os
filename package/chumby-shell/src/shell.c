@@ -50,6 +50,7 @@
 #include <wayland-client.h>
 
 #include <chumby.h>
+#include <lvgl/src/misc/lv_text_private.h>	/* lv_text_get_width(): the menu's names */
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 
 #define APPS_DIR	"/usr/share/chumby/apps"	/* the image's: <name>.app each */
@@ -732,6 +733,8 @@ static void popup_close(void);
 
 /* The app menu ("chumby-menu"): a row per installed app. */
 #define MENU_W		184
+#define MENU_W_WIDE	(CHUMBY_SCREEN_W - 8)	/* two columns: more apps than rows fit */
+#define MENU_ROWS	4	/* rows that fit under the bar */
 #define MENU_ROW_H	44
 #define MENU_PAD	6
 #define MENU_IDLE_MS	8000
@@ -852,18 +855,28 @@ static void menu_row_cb(lv_event_t *e)
 static void menu_open(void)
 {
 	lv_obj_t *scr, *plate, *row, *l;
-	int i, n = 0, h;
+	int i, n = 0, h, w, cols, rows, item_w;
 
 	for (i = 0; i < n_apps; i++)
 		n += !is_clock(apps[i].id);
-	h = (n ? n : 1) * (MENU_ROW_H + 4) - 4 + 2 * MENU_PAD;
+	/* One column while they fit under the bar (MENU_ROWS: 200 px); then
+	 * two, nearly the screen's width; past MENU_ROWS rows of those, it
+	 * scrolls: three rows and half of the next, which says so. */
+	cols = n > MENU_ROWS ? 2 : 1;
+	w = cols == 2 ? MENU_W_WIDE : MENU_W;
+	rows = n ? (n + cols - 1) / cols : 1;
+	if (rows <= MENU_ROWS)
+		h = rows * (MENU_ROW_H + 4) - 4 + 2 * MENU_PAD;
+	else
+		h = (MENU_ROWS - 1) * (MENU_ROW_H + 4) + MENU_ROW_H / 2 + MENU_PAD;
+	item_w = (w - 2 * MENU_PAD - (cols - 1) * 4) / cols;
 
 	popup_close();
 	if (menu_disp)
 		return;
 	/* With alpha: the plate's rounded corners show what's under them. */
 	lv_wayland_window_set_next_color_format(LV_COLOR_FORMAT_ARGB8888);
-	menu_disp = chumby_window_create("chumby-menu", MENU_W, h);
+	menu_disp = chumby_window_create("chumby-menu", w, h);
 	if (!menu_disp)
 		return;
 	lv_timer_reset(menu_timer);
@@ -875,20 +888,23 @@ static void menu_open(void)
 	/* A card of its own, rounded all round, in the highlight shade. */
 	plate = lv_obj_create(scr);
 	lv_obj_remove_style_all(plate);
-	lv_obj_set_size(plate, MENU_W, h);
-	lv_obj_set_scrollable(plate, false);
+	lv_obj_set_size(plate, w, h);
+	lv_obj_set_scrollable(plate, rows > MENU_ROWS);
+	lv_obj_set_scroll_dir(plate, LV_DIR_VER);
+	lv_obj_set_scrollbar_mode(plate, LV_SCROLLBAR_MODE_OFF);
 	lv_obj_set_style_radius(plate, MENU_RADIUS, 0);
 	lv_obj_set_style_bg_opa(plate, POPUP_OPA, 0);
 	lv_obj_set_style_bg_color(plate, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_flex_flow(plate, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_flow(plate, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_style_pad_all(plate, MENU_PAD, 0);
 	lv_obj_set_style_pad_row(plate, 4, 0);
+	lv_obj_set_style_pad_column(plate, 4, 0);
 
 	for (i = 0; i < n_apps; i++) {
 		if (is_clock(apps[i].id))
 			continue;
 		row = lv_button_create(plate);
-		lv_obj_set_size(row, LV_PCT(100), MENU_ROW_H);
+		lv_obj_set_size(row, item_w, MENU_ROW_H);
 		lv_obj_set_style_radius(row, 8, 0);
 		lv_obj_set_style_shadow_width(row, 0, 0);
 		lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
@@ -909,8 +925,24 @@ static void menu_open(void)
 		lv_obj_set_width(l, 24);
 		lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
 		l = lv_label_create(row);
-		lv_label_set_text(l, apps[i].name);
 		lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
+		{
+			/* Too long for its column: the tab's name (Short), and
+			 * anything longer still on one line, cut with dots. */
+			const lv_font_t *f = chumby_font(CHUMBY_FONT_LARGE);
+			const char *name = apps[i].name;
+			int room = item_w - 10 - 24 - 12 - 8;	/* pads, icon, gap */
+			/* (A struct, not a letter spacing: 0 there was NULL.) */
+			lv_text_attributes_t attr = { .max_width = LV_COORD_MAX };
+
+			if (apps[i].short_name[0] &&
+			    lv_text_get_width(name, strlen(name), f, &attr) > room)
+				name = apps[i].short_name;
+			lv_label_set_text(l, name);
+			lv_obj_set_flex_grow(l, 1);
+			lv_obj_set_height(l, lv_font_get_line_height(f));
+			lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
+		}
 	}
 	if (!n) {
 		l = lv_label_create(plate);
