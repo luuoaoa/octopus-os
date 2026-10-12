@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs after board/falconwing-mainline/post-build.sh (shared with the
+# Runs after board/falconwing/post-build.sh (shared with the
 # Chumby: dropbear keys on /var, the config links, no sysvinit scripts).
 set -eu
 
@@ -21,7 +21,7 @@ GIT_DIR="${BR2_EXTERNAL_OCTOPUS_PATH:-.}"
 COMMIT=${OCTOPUS_COMMIT:-$(git -C "${GIT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)}
 cat > "${TARGET_DIR}/etc/motd" <<MOTD
 
-  raspad (64-bit Raspberry Pi, Octopus OS) — buildroot
+  rpi64 (64-bit Raspberry Pi, Octopus OS) — buildroot
   build:  ${COMMIT}
   date:   $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 

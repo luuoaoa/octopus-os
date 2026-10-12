@@ -3,8 +3,8 @@
 Write an app for Octopus OS on any Linux PC with Docker, see it in a
 simulator, and install it on a device, from a USB stick or over the
 network. The SDK targets one board: by default any 64-bit Raspberry Pi
-running Octopus OS (`raspad`), or the Chumby One itself
-(`falconwing_mainline`), or a board of your own. You build it once, from
+running Octopus OS (`rpi64`), or the Chumby One itself
+(`falconwing`), or a board of your own. You build it once, from
 this repository: [sdk-build.md](sdk-build.md). Then a step-by-step
 walk-through of an app: [sdk-tutorial.md](sdk-tutorial.md). How apps work
 (the UI, sound, the traps): [writing-octopus-apps.md](writing-octopus-apps.md).
@@ -24,7 +24,7 @@ walk-through of an app: [sdk-tutorial.md](sdk-tutorial.md). How apps work
 - **Docker**, and the SDK's two images for your board, built with
   `sdk/make-sdk.sh` ([sdk-build.md](sdk-build.md)).
 - **Which board:** `octopus-app` uses `OCTOPUS_BOARD` (the images' tag),
-  `raspad` if it's unset: `export OCTOPUS_BOARD=falconwing_mainline` for the
+  `rpi64` if it's unset: `export OCTOPUS_BOARD=falconwing` for the
   Chumby One. A bundle runs only on the kind of board it was built for
   (`octopus-install` checks).
 - **ARM emulation for the simulator:** QEMU user emulation registered with

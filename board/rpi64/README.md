@@ -1,6 +1,6 @@
-# Any 64-bit Raspberry Pi (made for the RasPad 3) with Octopus OS
+# rpi64: any 64-bit Raspberry Pi (made for the RasPad 3)
 
-`configs/raspad_defconfig` builds the Chumby One's userland (octopus-wm,
+`configs/rpi64_defconfig` builds Octopus OS (octopus-wm,
 octopus-shell, the clock, internet radio and podcast apps) for any 64-bit
 Raspberry Pi - 3, 3B+, Zero 2 W, CM3, 4, 400, CM4, 5, 500, CM5 - on any
 screen, with touch or a mouse. It was made for a SunFounder RasPad 3: a
@@ -19,9 +19,9 @@ RasPad); the rest only built.
 
 ```sh
 docker run --rm -v "$(pwd):/work" -w /work/buildroot octopus-builder:ubuntu20.04 \
-    bash -c "make O=/work/output-raspad BR2_EXTERNAL=/work raspad_defconfig && \
-             make O=/work/output-raspad BR2_EXTERNAL=/work"
-# then write output-raspad/images/sdcard.img to a card
+    bash -c "make O=/work/output-rpi64 BR2_EXTERNAL=/work rpi64_defconfig && \
+             make O=/work/output-rpi64 BR2_EXTERNAL=/work"
+# then write output-rpi64/images/sdcard.img to a card
 ```
 
 ## Display: 320x240 at a whole-number scale

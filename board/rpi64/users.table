@@ -1,4 +1,4 @@
-# The apps' user, as on the Chumby (board/falconwing-mainline/users.table),
+# The apps' user, as on the Chumby (board/falconwing/users.table),
 # plus the system-wide PipeWire's socket (/run/pipewire, group pipewire):
 # here sound goes through it.
 octopus -1 octopus -1 * /var/lib/octopus /bin/sh audio,input,pipewire Octopus apps

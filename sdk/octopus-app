@@ -15,7 +15,7 @@
 #   octopus-app shell             a shell with the SDK, in this directory
 #
 # On the PC it needs Docker (and SSH for deploy), and the SDK's images for
-# the board (OCTOPUS_BOARD, raspad by default), built with sdk/make-sdk.sh
+# the board (OCTOPUS_BOARD, rpi64 by default), built with sdk/make-sdk.sh
 # (docs/sdk-build.md): build, pack and new run in octopus-sdk:BOARD, sim in
 # octopus-sim:BOARD (the board's own software, ARM, through QEMU: register
 # it once with
@@ -24,9 +24,9 @@
 set -eu
 
 # The board the SDK was built for (sdk/make-sdk.sh BOARD): its images are
-# tagged with it. raspad (any 64-bit Raspberry Pi) by default;
-# falconwing_mainline is the Chumby One.
-BOARD=${OCTOPUS_BOARD:-raspad}
+# tagged with it. rpi64 (any 64-bit Raspberry Pi) by default;
+# falconwing is the Chumby One.
+BOARD=${OCTOPUS_BOARD:-rpi64}
 SDK_IMAGE=${OCTOPUS_SDK_IMAGE:-octopus-sdk:$BOARD}
 SIM_IMAGE=${OCTOPUS_SIM_IMAGE:-octopus-sim:$BOARD}
 

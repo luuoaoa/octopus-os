@@ -2,13 +2,13 @@
 # Build an image inside a pinned Ubuntu 20.04 container.
 # Mounts the repository (with the buildroot subtree inside) at /work.
 #
-#   bash docker-build.sh                      # Chumby One -> output-falconwing-mainline/
-#   bash docker-build.sh raspad               # Raspberry Pi -> output-raspad/
+#   bash docker-build.sh          # Chumby One   -> output-falconwing/
+#   bash docker-build.sh rpi64    # Raspberry Pi -> output-rpi64/
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE=octopus-builder:ubuntu20.04
-BOARD="${1:-falconwing-mainline}"
+BOARD="${1:-falconwing}"
 
 [ -f "${SCRIPT_DIR}/build-${BOARD}.sh" ] || { echo "no build-${BOARD}.sh" >&2; exit 1; }
 

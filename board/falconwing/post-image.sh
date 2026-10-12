@@ -12,7 +12,7 @@ KERNEL="${BINARIES_DIR}/zImage.imx23-chumby-one"
 BOOT_IMG="${BINARIES_DIR}/falconwing-boot.img"
 
 if [ ! -f "${STOCK_DIR}/boot.img" ]; then
-    echo "ERROR: ${STOCK_DIR}/boot.img missing; run board/falconwing-mainline/extract-stock.sh first" >&2
+    echo "ERROR: ${STOCK_DIR}/boot.img missing; run board/falconwing/extract-stock.sh first" >&2
     exit 1
 fi
 
@@ -38,7 +38,7 @@ KSIZE=$(stat -c %s "${KERNEL}")
 echo "krnA: offset=$(printf 0x%x "${KRN_OFF}") slot=${KRN_SIZE} kernel+dtb=${KSIZE}"
 if [ "${KSIZE}" -gt "${KRN_SIZE}" ]; then
     echo "ERROR: zImage+DTB (${KSIZE} bytes) exceeds the krnA slot (${KRN_SIZE} bytes)." >&2
-    echo "       Trim board/falconwing-mainline/linux.config.fragment." >&2
+    echo "       Trim board/falconwing/linux.config.fragment." >&2
     exit 1
 fi
 

@@ -1,4 +1,4 @@
-# falconwing-mainline (Chumby One on a current kernel)
+# falconwing: the Chumby One
 
 Octopus OS for the Chumby One, on a mainline Linux kernel (6.19.x) in
 place of its stock 2.6.28, with a glibc userland.
@@ -10,9 +10,9 @@ DRAM, clock, USB and panel bring-up, then loads the whole slot to
 0x40008000 and jumps to it.
 
 ```sh
-board/falconwing-mainline/extract-stock.sh /path/to/stock-sdcard.img   # once
-bash docker-build.sh falconwing-mainline
-# -> output-falconwing-mainline/images/sdcard.img
+board/falconwing/extract-stock.sh /path/to/stock-sdcard.img   # once
+bash docker-build.sh falconwing
+# -> output-falconwing/images/sdcard.img
 ```
 
 The card's FAT config partition (`config-partition/`: network-config,

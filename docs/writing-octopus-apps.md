@@ -1,4 +1,4 @@
-# Writing apps for the Chumby One (falconwing-mainline)
+# Writing apps for the Chumby One (falconwing)
 
 How the UI and sound fit together on the Chumby One image, what's already
 there to build on, and the traps we fell into so you don't have to. Read
@@ -182,7 +182,7 @@ Sizes for a resistive screen: anything a finger must hit is at least
 
 There is one sound card (the i.MX233's codec, ALSA `plughw:0,0`) and one
 thing plays at a time. `octopus-audio`
-(`board/falconwing-mainline/rootfs/usr/bin/octopus-audio`) decides:
+(`board/falconwing/rootfs/usr/bin/octopus-audio`) decides:
 
 ```
 octopus-audio play <source>      I'm playing now: every other source stops,

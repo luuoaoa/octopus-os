@@ -7,7 +7,7 @@
 #                    whole thing back at the same offset (sector 4).
 #
 # Run once, on the host (needs python3; no root):
-#   board/falconwing-mainline/extract-stock.sh /path/to/stock-sdcard.img
+#   board/falconwing/extract-stock.sh /path/to/stock-sdcard.img
 #
 # The source image is only read, never modified. stock/ is gitignored.
 set -euo pipefail

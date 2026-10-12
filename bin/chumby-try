@@ -44,7 +44,7 @@ shift 2
 case "$HOST" in *@*) ;; *) HOST="root@${HOST}" ;; esac
 
 TOP="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${TOP}/output-falconwing-mainline"
+OUT="${TOP}/output-falconwing"
 # On the Chumby, all on its SD card (/var: the carrier's /data/var), never
 # /tmp (RAM). The overlay's files under root/, as in the image.
 TRY=/var/try

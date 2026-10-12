@@ -1,8 +1,8 @@
 #!/bin/bash
 # make-sdk.sh [BOARD]: build the Octopus SDK for a board, from source
 # (docs/sdk-build.md). BOARD is a configs/<BOARD>_defconfig with the
-# Octopus OS in it; the default, raspad, is any 64-bit Raspberry Pi
-# (aarch64). falconwing_mainline is the Chumby One itself (ARMv5).
+# Octopus OS in it; the default, rpi64, is any 64-bit Raspberry Pi
+# (aarch64). falconwing is the Chumby One itself (ARMv5).
 #
 # In the pinned build container (as docker-build.sh): the board's image,
 # then buildroot's SDK (the toolchain and the sysroot, relocatable). Then
@@ -13,11 +13,11 @@
 #
 # The first build takes an hour or two (everything from source); later
 # ones only what changed. Use the images with OCTOPUS_BOARD=BOARD
-# octopus-app ... (raspad is octopus-app's default too).
+# octopus-app ... (rpi64 is octopus-app's default too).
 set -euo pipefail
 
 TOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BOARD="${1:-raspad}"
+BOARD="${1:-rpi64}"
 DEFCONFIG="${BOARD}_defconfig"
 OUT="output-${BOARD//_/-}"
 BUILDER=octopus-builder:ubuntu20.04

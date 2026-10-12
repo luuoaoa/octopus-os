@@ -1,14 +1,14 @@
 #!/bin/sh
 # make-images.sh [BOARD]: the SDK's two Docker images from a board's build
 # (sdk/make-sdk.sh runs this last; on its own, after the board's image and
-# "make sdk" are built in output-BOARD/). BOARD defaults to raspad.
+# "make sdk" are built in output-BOARD/). BOARD defaults to rpi64.
 #
 #   octopus-sdk:BOARD   the toolchain (buildroot's SDK) + octopus-app + examples
 #   octopus-sim:BOARD   the board's root filesystem + the simulator's session
 set -eu
 
 TOP=$(cd "$(dirname "$0")/.." && pwd)
-BOARD=${1:-raspad}
+BOARD=${1:-rpi64}
 IMG=$TOP/output-$(echo "$BOARD" | tr _ -)/images
 set -- "$IMG"/*_sdk-buildroot.tar.gz
 SDK_TAR=$1

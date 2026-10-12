@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs after board/falconwing-mainline/post-fakeroot.sh (wpa_supplicant@
+# Runs after board/falconwing/post-fakeroot.sh (wpa_supplicant@
 # and udhcpc@ on wlan0, /etc links to /run/octopus-config).
 set -eu
 

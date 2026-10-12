@@ -9,7 +9,7 @@ config BR2_PACKAGE_OCTOPUS_APPS
 	help
 	  The Chumby One's system apps, on liboctopus: Clock (with alarms,
 	  rung by octopus-shell), FM Radio (uses /usr/bin/radio from the
-	  falconwing-mainline board), AirPlay (what shairport-sync
+	  falconwing board), AirPlay (what shairport-sync
 	  receives; the board selects shairport-sync), Settings, and the
 	  stream player octopus-stream (MP3 and AAC streams, HLS, files: for
 	  any app, through liboctopus's octopus_stream_*). And Flying

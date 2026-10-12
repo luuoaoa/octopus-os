@@ -6,15 +6,15 @@
 # config.txt, cmdline.txt), the kernel, every DTB - so the list follows
 # the defconfig's DTS names.
 #
-# customize-raspad/{network-config,user-data,authorized_keys,
+# customize-rpi64/{network-config,user-data,authorized_keys,
 # wpa_supplicant.conf} at the top of the tree (gitignored: your WiFi
 # password) go onto the boot FAT too, so a fresh card joins your network.
-# The formats are sdcard-config-apply's (board/falconwing-mainline/rootfs/usr/bin).
+# The formats are sdcard-config-apply's (board/falconwing/rootfs/usr/bin).
 set -eu
 
 BOARD_DIR="$(dirname "$0")"
-CUSTOMIZE="${BR2_EXTERNAL_OCTOPUS_PATH}/customize-raspad"
-GENIMAGE_CFG="${BINARIES_DIR}/genimage-raspad.cfg"
+CUSTOMIZE="${BR2_EXTERNAL_OCTOPUS_PATH}/customize-rpi64"
+GENIMAGE_CFG="${BINARIES_DIR}/genimage-rpi64.cfg"
 GENIMAGE_TMP="${BUILD_DIR}/genimage.tmp"
 ROOTPATH_TMP="$(mktemp -d)"
 trap 'rm -rf "${ROOTPATH_TMP}"' EXIT
@@ -31,7 +31,7 @@ for f in network-config user-data authorized_keys wpa_supplicant.conf; do
 	if [ -f "${CUSTOMIZE}/${f}" ]; then
 		cp "${CUSTOMIZE}/${f}" "${BINARIES_DIR}/customize/${f}"
 		add "customize/${f}"
-		echo "raspad: ${f} from customize-raspad/ onto the boot FAT"
+		echo "rpi64: ${f} from customize-rpi64/ onto the boot FAT"
 	fi
 done
 # (genimage puts each listed file at the FAT's root, by its name.)

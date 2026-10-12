@@ -79,7 +79,7 @@ speakers. Stand it on the nightstand and you're done.
 - **Speakers:** the sound goes to the first HDMI port's audio, through the
   bass and EQ chain. For the 3.5 mm jack (not on a Pi 5), a USB sound card
   or an I2S amplifier board (e.g. a MAX98357A), change the one match in
-  `board/raspad/rootfs/etc/wireplumber/wireplumber.conf.d/50-raspad-speakers.conf`
+  `board/rpi64/rootfs/etc/wireplumber/wireplumber.conf.d/50-raspad-speakers.conf`
   to that output's name (`wpctl status` lists them on the device), and
   for an I2S board add its `dtoverlay=` to `config.txt`. Small full-range
   drivers are what the bass enhancer is made for.
@@ -95,8 +95,8 @@ container.
 ```sh
 git clone --recurse-submodules https://github.com/luuoaoa/octopus-os.git
 cd octopus-os
-bash docker-build.sh raspad
-# -> output-raspad/images/sdcard.img
+bash docker-build.sh rpi64
+# -> output-rpi64/images/sdcard.img
 ```
 
 The first build takes a while (the toolchain and kernel are built from
@@ -127,7 +127,7 @@ the files on its FAT partition (any computer mounts it):
   Settings > Sound.
 
 They're applied at every boot, so edit and reboot to change them. To
-build them into the image instead, put them in `customize-raspad/` at the
+build them into the image instead, put them in `customize-rpi64/` at the
 top of the tree (it's gitignored: it holds your Wi-Fi password).
 
 SSH is off by default. Turn it on in **Settings > Network** (it makes a
@@ -137,8 +137,8 @@ have it on from the first boot.
 ### Updating a running device
 
 ```sh
-bash docker-build.sh raspad
-bin/update-raspad.sh <device address>
+bash docker-build.sh rpi64
+bin/update-rpi64.sh <device address>
 ```
 
 Once the card is flashed, it never needs flashing again: this rsyncs
@@ -165,7 +165,7 @@ fonts, sound and system helpers.
 
 ## Working on the system
 
-- **[board/raspad/README.md](board/raspad/README.md)** is the Raspberry Pi
+- **[board/rpi64/README.md](board/rpi64/README.md)** is the Raspberry Pi
   reference: which Pi, the display scaling, touch and mouse, the sound
   chain.
 - The UI was designed for the Chumby One's 320x240 screen and slow CPU,
@@ -185,9 +185,9 @@ If you have one, building for it needs an image of its stock SD card
 (the bootloader is reused):
 
 ```sh
-board/falconwing-mainline/extract-stock.sh /path/to/stock-sdcard.img   # once
-bash docker-build.sh falconwing-mainline
-# -> output-falconwing-mainline/images/sdcard.img
+board/falconwing/extract-stock.sh /path/to/stock-sdcard.img   # once
+bash docker-build.sh falconwing
+# -> output-falconwing/images/sdcard.img
 ```
 
 The first time, write `sdcard.img` to a microSD card with an imager
@@ -199,17 +199,18 @@ After that, update the running Chumby One over the network instead:
 bin/update-chumby.sh <its address>
 ```
 
-**[board/falconwing-mainline/README.md](board/falconwing-mainline/README.md)**
+**[board/falconwing/README.md](board/falconwing/README.md)**
 is its detailed reference: the boot chain, the kernel patches, FM, the
 hardware watchdog, and trying builds without reflashing (`bin/chumby-try`).
 
 ## Repository
 
 ```
-configs/raspad_defconfig                the Raspberry Pi image
-configs/falconwing_mainline_defconfig   the Chumby One image
-board/raspad/                           Pi board files and root overlay
-board/falconwing-mainline/              Chumby One board files, kernel patches, the root overlay (shared with the Pi)
+configs/rpi64_defconfig        the Raspberry Pi image (board rpi64)
+configs/falconwing_defconfig   the Chumby One image (board falconwing)
+board/rpi64/                   Pi board files and root overlay
+board/falconwing/              Chumby One board files, kernel patches, and
+                               the root overlay the Pi shares
 package/
   octopus-wm/        the Wayland compositor (wlroots)
   octopus-shell/     tab bar, Home menu, alarms, buttons, screen saver policy
@@ -223,6 +224,6 @@ package/
 apps/               Internet Radio, Podcasts: app bundles, built like anyone's
 sdk/                octopus-app, the SDK's Docker images, examples
 docs/               writing apps, the SDK, the tutorial
-bin/                update-raspad.sh, update-chumby.sh, chumby-try
+bin/                update-rpi64.sh, update-chumby.sh, chumby-try
 buildroot/          submodule
 ```

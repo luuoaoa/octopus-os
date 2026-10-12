@@ -1,7 +1,7 @@
 #!/bin/sh
-# Update a running RasPad (configs/raspad_defconfig) over SSH, no reflash.
+# Update a running RasPad (configs/rpi64_defconfig) over SSH, no reflash.
 #
-# The image's root (output-raspad/images/rootfs.ext4) and boot FAT
+# The image's root (output-rpi64/images/rootfs.ext4) and boot FAT
 # (boot.vfat) are unpacked here (debugfs, mtools: no root needed) and
 # rsynced onto the live system:
 #
@@ -10,12 +10,12 @@
 #                    reboot. Kept: /var (SSH host keys, the journal,
 #                    alarms), /etc/machine-id, and the mounts.
 #   boot    -> /boot the kernel, DTB, firmware, config.txt, cmdline.txt and
-#                    the customize-raspad/ files built in (remounted rw
+#                    the customize-rpi64/ files built in (remounted rw
 #                    for the copy)
 #
 # then reboots (unless --no-reboot).
 #
-# usage: bin/update-raspad.sh [user@]host [--no-reboot]
+# usage: bin/update-rpi64.sh [user@]host [--no-reboot]
 set -eu
 
 HOST="${1:-}"
@@ -25,16 +25,16 @@ REBOOT=1
 [ "${2:-}" = "--no-reboot" ] && REBOOT=
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${SCRIPT_DIR}/output-raspad"
+OUT="${SCRIPT_DIR}/output-rpi64"
 IMG_DIR="${OUT}/images"
 HOST_BIN="${OUT}/host/bin"
 HOST_SBIN="${OUT}/host/sbin"
 
 for f in "${IMG_DIR}/rootfs.ext4" "${IMG_DIR}/boot.vfat" "${HOST_SBIN}/debugfs" "${HOST_BIN}/mcopy"; do
-    [ -e "$f" ] || { echo "missing $f; build output-raspad first (board/raspad/README.md)" >&2; exit 1; }
+    [ -e "$f" ] || { echo "missing $f; build output-rpi64 first (board/rpi64/README.md)" >&2; exit 1; }
 done
 
-STAGE="$(mktemp -d "${TMPDIR:-/tmp}/update-raspad.XXXXXX")"
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/update-rpi64.XXXXXX")"
 SSH_CTL="${STAGE}.sock"
 SSH_OPTS="\
 -o ControlMaster=auto \
@@ -58,11 +58,12 @@ trap cleanup EXIT
 # One authenticated master connection; never an interactive password prompt.
 if ! SSH_ASKPASS_REQUIRE=never ssh ${SSH_OPTS} -o BatchMode=yes "${HOST}" true 2>/dev/null; then
     command -v sshpass >/dev/null 2>&1 || { echo "key auth failed and sshpass is not installed" >&2; exit 1; }
-    SSH_ASKPASS_REQUIRE=never sshpass -p "${RASPAD_SSH_PASSWORD:-root}" \
+    SSH_ASKPASS_REQUIRE=never sshpass -p "${OCTOPUS_SSH_PASSWORD:-root}" \
         ssh ${SSH_OPTS} -o PubkeyAuthentication=no "${HOST}" true
 fi
-on 'grep -q "raspad" /etc/motd 2>/dev/null || grep -qi "raspad" /etc/issue' ||
-    { echo "${HOST} doesn't look like a raspad image; not touching it" >&2; exit 1; }
+# (raspad: the board's name before rpi64, on devices not updated since.)
+on 'grep -qE "rpi64|raspad" /etc/motd 2>/dev/null || grep -qiE "rpi64|raspad" /etc/issue' ||
+    { echo "${HOST} doesn't look like an rpi64 image; not touching it" >&2; exit 1; }
 
 echo "==> unpacking the image"
 mkdir -p "${STAGE}/root" "${STAGE}/boot"

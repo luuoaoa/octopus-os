@@ -1,12 +1,12 @@
 # Chumby One (falconwing) with a mainline kernel.
 #
 # The stock Chumby bootloader and config block (partition 1, extracted by
-# board/falconwing-mainline/extract-stock.sh) are kept; post-image.sh writes our
+# board/falconwing/extract-stock.sh) are kept; post-image.sh writes our
 # zImage + appended DTB into the krnA slot instead of the 2.6.28 kernel.
 BR2_arm=y
 BR2_arm926t=y
 BR2_DL_DIR="$(BR2_EXTERNAL_OCTOPUS_PATH)/dl"
-BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/patches"
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/patches"
 
 # A current kernel lifts the 2.6.28 constraints: glibc is fine.
 BR2_TOOLCHAIN_EXTERNAL=y
@@ -33,23 +33,23 @@ BR2_SYSTEM_BIN_SH_BUSYBOX=y
 # Time zones: "timezone:" in the config partition's user-data picks one.
 BR2_TARGET_TZ_INFO=y
 BR2_TARGET_LOCALTIME="Etc/UTC"
-BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/rootfs"
-BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/post-build.sh"
-BR2_ROOTFS_POST_FAKEROOT_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/post-fakeroot.sh"
-BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/users.table"
-BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/post-image.sh"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/rootfs"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/post-build.sh"
+BR2_ROOTFS_POST_FAKEROOT_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/post-fakeroot.sh"
+BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/users.table"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/post-image.sh"
 
 # Kernel: latest mainline buildroot knows, mxs_defconfig + board fragment.
 BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_LATEST_VERSION=y
 BR2_LINUX_KERNEL_DEFCONFIG="mxs"
-BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/linux.config.fragment"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/linux.config.fragment"
 BR2_LINUX_KERNEL_APPENDED_ZIMAGE=y
 # xz: slower to unpack than gzip, but the 4 MiB krnA slot is the hard limit.
 BR2_LINUX_KERNEL_XZ=y
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
 BR2_LINUX_KERNEL_APPENDED_DTB=y
-BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/dts/imx23-chumby-one.dts"
+BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/dts/imx23-chumby-one.dts"
 
 # Packages
 BR2_PACKAGE_DROPBEAR=y
@@ -107,7 +107,7 @@ BR2_PACKAGE_ELFUTILS=y
 BR2_PACKAGE_LINUX_TOOLS=y
 BR2_PACKAGE_LINUX_TOOLS_PERF=y
 
-# "carrier" ext4 with the early boot (board/falconwing-mainline/carrier/
+# "carrier" ext4 with the early boot (board/falconwing/carrier/
 # sbin/init-ram loop-mounts it as the root) and the persistent /var.
 # zstd: close to xz in size, several times faster to unpack on demand.
 BR2_TARGET_ROOTFS_SQUASHFS=y

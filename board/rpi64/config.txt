@@ -2,7 +2,7 @@
 # kernel, every DTB; the firmware picks the DTB and start.elf/start4.elf
 # by board, and maps overlays to their Pi 5 versions itself). Made for the
 # RasPad 3 (a Pi 4B, 1280x800 HDMI panel, USB touch); see
-# board/raspad/README.md.
+# board/rpi64/README.md.
 
 kernel=Image
 arm_64bit=1

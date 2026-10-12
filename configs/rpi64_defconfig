@@ -1,8 +1,8 @@
 # Any 64-bit Raspberry Pi (3, Zero 2 W, 4, 400, CM4, 5, 500) running the
 # Octopus UI, made for the RasPad 3: a Pi 4B behind a 1280x800 HDMI panel
 # with an ILITEK USB touchscreen (octopus-wm, at 3x: see
-# board/raspad/README.md). A mouse works too. Builds on the Chumby's
-# falconwing-mainline userland; board/raspad overrides what differs.
+# board/rpi64/README.md). A mouse works too. Builds on the Chumby's
+# falconwing userland; board/rpi64 overrides what differs.
 BR2_aarch64=y
 # Tuned for the Pi 4's A72; the code (ARMv8.0 + CRC) runs on the Pi 3's and
 # Zero 2 W's A53 and the Pi 5's A76 alike.
@@ -13,11 +13,11 @@ BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y
 BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=y
 BR2_DL_DIR="$(BR2_EXTERNAL_OCTOPUS_PATH)/dl"
 # The Pi kernel's hash (buildroot's) and our fixed-point faad2.
-BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/raspad/patches"
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/patches"
 
 # System
-BR2_TARGET_GENERIC_HOSTNAME="raspad"
-BR2_TARGET_GENERIC_ISSUE="Welcome to Octopus OS (raspad)"
+BR2_TARGET_GENERIC_HOSTNAME="octopus"
+BR2_TARGET_GENERIC_ISSUE="Welcome to Octopus OS (rpi64)"
 BR2_TARGET_GENERIC_ROOT_PASSWD="root"
 BR2_INIT_SYSTEMD=y
 # BR2_PACKAGE_SYSTEMD_HWDB is not set
@@ -33,19 +33,19 @@ BR2_TARGET_GENERIC_GETTY_BAUDRATE_115200=y
 BR2_SYSTEM_BIN_SH_BUSYBOX=y
 BR2_TARGET_TZ_INFO=y
 BR2_TARGET_LOCALTIME="Etc/UTC"
-BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/rootfs $(BR2_EXTERNAL_OCTOPUS_PATH)/board/raspad/rootfs"
-BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/post-build.sh $(BR2_EXTERNAL_OCTOPUS_PATH)/board/raspad/post-build.sh"
-BR2_ROOTFS_POST_FAKEROOT_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/post-fakeroot.sh $(BR2_EXTERNAL_OCTOPUS_PATH)/board/raspad/post-fakeroot.sh"
-BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/raspad/users.table"
-BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/raspad/post-image.sh"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/rootfs $(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/rootfs"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/post-build.sh $(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/post-build.sh"
+BR2_ROOTFS_POST_FAKEROOT_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/post-fakeroot.sh $(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/post-fakeroot.sh"
+BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/users.table"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/post-image.sh"
 
 # Kernel: the Raspberry Pi tree buildroot uses for the Pi 4, plus the
-# touchscreen (board/raspad/linux.config.fragment).
+# touchscreen (board/rpi64/linux.config.fragment).
 BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_CUSTOM_TARBALL=y
 BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION="$(call github,raspberrypi,linux,21b410140c47ffab5668399f6f143c7d7b935c8b)/linux-21b410140c47ffab5668399f6f143c7d7b935c8b.tar.gz"
 BR2_LINUX_KERNEL_DEFCONFIG="bcm2711"
-BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/raspad/linux.config.fragment"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/linux.config.fragment"
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
 # Every 64-bit Pi: 3, 3B+, Zero 2 W, CM3, 4, 400, CM4, 5, 500, CM5 (the one
 # bcm2711 kernel boots them all; the firmware picks the DTB).
@@ -59,8 +59,8 @@ BR2_PACKAGE_RPI_FIRMWARE=y
 BR2_PACKAGE_RPI_FIRMWARE_BOOTCODE_BIN=y
 BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI=y
 BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI4=y
-BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/raspad/config.txt"
-BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/raspad/cmdline.txt"
+BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/config.txt"
+BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/cmdline.txt"
 BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y
 BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI_WIFI=y
 
@@ -110,7 +110,7 @@ BR2_PACKAGE_FAAD2=y
 # Sound through PipeWire (system-wide, WirePlumber): the players' ALSA
 # output goes there (asound.conf), into a filter-chain sink that improves
 # the small speakers - bankstown's psychoacoustic bass, then a parametric
-# EQ - before HDMI (board/raspad/README.md). Not for the Chumby: its
+# EQ - before HDMI (board/rpi64/README.md). Not for the Chumby: its
 # 454 MHz ARM9 can't spare it.
 BR2_PACKAGE_DBUS=y
 BR2_PACKAGE_PIPEWIRE=y

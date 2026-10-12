@@ -1,10 +1,9 @@
 /output/
+/output-*/
 /dl/
 /customize/
 /customize-octopus/
 *.swp
 *.swo
-/board/falconwing-mainline/stock/
-/output-falconwing-mainline/
-/output-raspad/
-/customize-raspad/
+/board/falconwing/stock/
+/customize-rpi64/

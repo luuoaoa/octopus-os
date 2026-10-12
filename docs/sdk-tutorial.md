@@ -16,7 +16,7 @@ What you'll learn:
 You need the SDK for your board, built once with `sdk/make-sdk.sh`
 ([sdk-build.md](sdk-build.md)), ARM emulation, and `octopus-app` on your
 PATH ([sdk.md](sdk.md), "Setting up"). `octopus-app` builds for a Raspberry
-Pi unless `OCTOPUS_BOARD` says otherwise (`falconwing_mainline` for the
+Pi unless `OCTOPUS_BOARD` says otherwise (`falconwing` for the
 Chumby One).
 
 ## 1. Start from the template

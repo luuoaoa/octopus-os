@@ -1,8 +1,8 @@
 #!/bin/sh
-# Update a running Chumby One (falconwing-mainline) over SSH, no reflash.
+# Update a running Chumby One (falconwing) over SSH, no reflash.
 #
 # The root is a read-only squashfs file on the card, and nothing else on
-# the card is in use (see board/falconwing-mainline/README.md), so it can be
+# the card is in use (see board/falconwing/README.md), so it can be
 # replaced live:
 #
 #   rootfs.squashfs   -> /media/sd (carrier, p2): with rsync on the board, a
@@ -34,14 +34,14 @@ REBOOT=1
 [ "${2:-}" = "--no-reboot" ] && REBOOT=
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${SCRIPT_DIR}/output-falconwing-mainline"
+OUT="${SCRIPT_DIR}/output-falconwing"
 IMG_DIR="${OUT}/images"
 CARRIER="${OUT}/build/carrier"
 BOOT_IMG="${IMG_DIR}/falconwing-boot.img"
 CUSTOMIZE="${SCRIPT_DIR}/customize-octopus"
 
 for f in "${IMG_DIR}/rootfs.squashfs" "${BOOT_IMG}" "${CARRIER}/sbin/init-ram"; do
-    [ -e "$f" ] || { echo "missing $f; run: bash docker-build.sh falconwing-mainline" >&2; exit 1; }
+    [ -e "$f" ] || { echo "missing $f; run: bash docker-build.sh falconwing" >&2; exit 1; }
 done
 
 SSH_CTL="${TMPDIR:-/tmp}/update-chumby-$$.sock"

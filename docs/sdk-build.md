@@ -5,8 +5,8 @@ the board you write apps for. That takes one command and, the first time,
 an hour or two of the computer's time. This page walks through it, for:
 
 - **a Raspberry Pi** (any 64-bit one running Octopus OS: the
-  `raspad` image) - the default;
-- **the Chumby One** itself (`falconwing_mainline`);
+  `rpi64` image) - the default;
+- **the Chumby One** itself (`falconwing`);
 - **a board of your own**, from a defconfig.
 
 What comes out is two Docker images, which `octopus-app` uses
@@ -45,18 +45,18 @@ run `git submodule update --init`.
 sdk/make-sdk.sh
 ```
 
-That's `sdk/make-sdk.sh raspad`. In the build container it:
+That's `sdk/make-sdk.sh rpi64`. In the build container it:
 
-1. builds the board's image (`configs/raspad_defconfig`, into
-   `output-raspad/`): the kernel, the userland, Octopus OS - the SDK's
+1. builds the board's image (`configs/rpi64_defconfig`, into
+   `output-rpi64/`): the kernel, the userland, Octopus OS - the SDK's
    libraries are exactly the image's;
 2. runs buildroot's `make sdk`: the toolchain and the sysroot as one
    relocatable tarball
-   (`output-raspad/images/aarch64-buildroot-linux-gnu_sdk-buildroot.tar.gz`);
-3. builds `octopus-sdk:raspad` and `octopus-sim:raspad` from it and from the
+   (`output-rpi64/images/aarch64-buildroot-linux-gnu_sdk-buildroot.tar.gz`);
+3. builds `octopus-sdk:rpi64` and `octopus-sim:rpi64` from it and from the
    image's root filesystem (`sdk/make-images.sh`).
 
-The `raspad` board is tuned for a Cortex-A72 (a Pi 4) with Bootlin's
+The `rpi64` board is tuned for a Cortex-A72 (a Pi 4) with Bootlin's
 aarch64 glibc toolchain; its programs run on any 64-bit Pi (3, 4, 5, Zero
 2 W, the Compute Modules) with the matching image.
 
@@ -70,7 +70,7 @@ octopus-app new Hello && cd Hello
 octopus-app build && octopus-app sim
 ```
 
-`octopus-app` uses the `raspad` images unless told otherwise. The rest -
+`octopus-app` uses the `rpi64` images unless told otherwise. The rest -
 writing an app - is [sdk-tutorial.md](sdk-tutorial.md).
 
 ## 3. Or: the SDK for the Chumby One
@@ -79,14 +79,14 @@ The Chumby's image reuses its stock bootloader, so the build needs it,
 extracted once from an image of the original SD card:
 
 ```sh
-board/falconwing-mainline/extract-stock.sh /path/to/stock-sdcard.img
-sdk/make-sdk.sh falconwing_mainline
+board/falconwing/extract-stock.sh /path/to/stock-sdcard.img
+sdk/make-sdk.sh falconwing
 ```
 
 Then tell `octopus-app` which board:
 
 ```sh
-export OCTOPUS_BOARD=falconwing_mainline
+export OCTOPUS_BOARD=falconwing
 octopus-app build
 ```
 
@@ -102,12 +102,12 @@ Octopus OS in it. The quickest start is a copy of the one closest to
 yours:
 
 ```sh
-cp configs/raspad_defconfig configs/myboard_defconfig
+cp configs/rpi64_defconfig configs/myboard_defconfig
 ```
 
 What decides the SDK - and so what your apps are built for:
 
-| Setting | In the defconfig | raspad's |
+| Setting | In the defconfig | rpi64's |
 |---|---|---|
 | The CPU family | `BR2_aarch64=y`, `BR2_arm=y`, ... | `BR2_aarch64=y` |
 | The CPU it's tuned for | `BR2_cortex_a72=y`, `BR2_cortex_a53=y`, `BR2_arm926t=y`, ... | `BR2_cortex_a72=y` |
@@ -127,7 +127,7 @@ BR2_PACKAGE_OCTOPUS_SHELL=y
 BR2_PACKAGE_OCTOPUS_APPS=y
 BR2_PACKAGE_OCTOPUS_BUNDLED_APPS=y
 BR2_TARGET_ROOTFS_TAR=y               # the simulator's image
-BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/raspad/users.table"
+BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/users.table"
 ```
 
 (`liboctopus`, LVGL, pixman and the rest come with those. The users table
@@ -149,9 +149,9 @@ what changed, which is usually minutes.
 To give the SDK to someone without the build:
 
 ```sh
-docker save octopus-sdk:raspad octopus-sim:raspad | zstd > octopus-sdk-raspad.tar.zst
+docker save octopus-sdk:rpi64 octopus-sim:rpi64 | zstd > octopus-sdk-rpi64.tar.zst
 # and on their PC:
-zstd -dc octopus-sdk-raspad.tar.zst | docker load
+zstd -dc octopus-sdk-rpi64.tar.zst | docker load
 ```
 
 ## When it goes wrong

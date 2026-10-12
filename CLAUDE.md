@@ -15,11 +15,11 @@ one board it runs on. Don't call the software Chumby.
   crash. A build failure with a `/work/...` path in `@INC` or similar
   means **the build was run on the host** — rerun in the container.
 - Full builds: `bash docker-build.sh` (Chumby One, the default) or
-  `bash docker-build.sh raspad` (Raspberry Pi).
+  `bash docker-build.sh rpi64` (Raspberry Pi).
 - Targeted rebuilds, docker by hand:
   ```sh
   docker run --rm -v "$(pwd):/work" -w /work octopus-builder:ubuntu20.04 \
-      bash -c "cd buildroot && make O=/work/output-raspad BR2_EXTERNAL=/work <target>"
+      bash -c "cd buildroot && make O=/work/output-rpi64 BR2_EXTERNAL=/work <target>"
   ```
   - `<pkg>-rebuild` — re-run one package's build step. The local packages
     (liboctopus, octopus-wm, octopus-shell, octopus-apps,
@@ -59,7 +59,7 @@ one board it runs on. Don't call the software Chumby.
   && git add buildroot && git commit`, then rebuild from scratch and
   expect kernel-fragment / package mk fallout.
 
-## The Chumby One (falconwing-mainline)
+## The Chumby One (falconwing)
 
 - The bootloader arms a hardware watchdog; systemd feeds it every 15 s.
   **Never `systemctl daemon-reload`** on it: it stalls PID 1 past that.
@@ -71,8 +71,8 @@ one board it runs on. Don't call the software Chumby.
   eye.
 - OTA: `bin/update-chumby.sh <address>`.
 
-## The Raspberry Pi (raspad)
+## The Raspberry Pi (rpi64)
 
-- OTA: `bin/update-raspad.sh <address>`. Sound goes through system-wide
+- OTA: `bin/update-rpi64.sh <address>`. Sound goes through system-wide
   PipeWire and the `raspad-eq` filter chain, set by `octopus-sound`.
 - Busybox awk there has no math library (no `^`, `exp`).
