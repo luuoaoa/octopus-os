@@ -1,0 +1,71 @@
+From: falconwing bring-up
+Subject: [PATCH] drm: mxsfb: a modeset when the primary plane's format changes
+
+The controller's word length and byte packing follow the primary plane's
+pixel format (mxsfb_set_formats()), but are only programmed on a
+modeset. A compositor switching the plane from XRGB8888 (the fbdev
+console's) to RGB565 with the same mode got a plain plane update, and
+the controller went on reading the 16-bit buffer as 32-bit pixels:
+scrambled colours on the glass, though not in a screenshot. Set by hand
+as the vendor kernel did (16-bit words, all four bytes valid), RGB565
+showed right.
+
+So make a change of format a modeset.
+
+---
+--- a/drivers/gpu/drm/mxsfb/mxsfb_drv.c	2026-04-11 05:29:58.000000000 -0700
++++ b/drivers/gpu/drm/mxsfb/mxsfb_drv.c	2026-10-12 15:54:18.117891274 -0700
+@@ -19,12 +19,14 @@
+ #include <linux/pm_runtime.h>
+ 
+ #include <drm/clients/drm_client_setup.h>
++#include <drm/drm_atomic.h>
+ #include <drm/drm_atomic_helper.h>
+ #include <drm/drm_bridge.h>
+ #include <drm/drm_connector.h>
+ #include <drm/drm_drv.h>
+ #include <drm/drm_fbdev_dma.h>
+ #include <drm/drm_fourcc.h>
++#include <drm/drm_framebuffer.h>
+ #include <drm/drm_gem_dma_helper.h>
+ #include <drm/drm_gem_framebuffer_helper.h>
+ #include <drm/drm_mode_config.h>
+@@ -102,9 +104,37 @@
+ 	return drm_gem_fb_create(dev, file_priv, info, mode_cmd);
+ }
+ 
++/*
++ * The controller's word format follows the primary plane's pixel format,
++ * but is only programmed on a modeset (mxsfb_set_formats()): a change of
++ * format needs one, or RGB565 is scanned out as if it were XRGB8888.
++ */
++static int mxsfb_atomic_check(struct drm_device *dev,
++			      struct drm_atomic_state *state)
++{
++	struct drm_plane_state *old_state, *new_state;
++	struct drm_crtc_state *crtc_state;
++	struct drm_plane *plane;
++	int i;
++
++	for_each_oldnew_plane_in_state(state, plane, old_state, new_state, i) {
++		if (plane->type != DRM_PLANE_TYPE_PRIMARY || !new_state->crtc ||
++		    !old_state->fb || !new_state->fb ||
++		    old_state->fb->format->format ==
++		    new_state->fb->format->format)
++			continue;
++		crtc_state = drm_atomic_get_crtc_state(state, new_state->crtc);
++		if (IS_ERR(crtc_state))
++			return PTR_ERR(crtc_state);
++		crtc_state->mode_changed = true;
++	}
++
++	return drm_atomic_helper_check(dev, state);
++}
++
+ static const struct drm_mode_config_funcs mxsfb_mode_config_funcs = {
+ 	.fb_create		= mxsfb_fb_create,
+-	.atomic_check		= drm_atomic_helper_check,
++	.atomic_check		= mxsfb_atomic_check,
+ 	.atomic_commit		= drm_atomic_helper_commit,
+ };
+ 

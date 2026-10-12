@@ -251,10 +251,11 @@ reload - every unit re-read from the compressed image, the page cache
 short of RAM - stalls it past that, and the Chumby resets. The journal is
 in RAM: to see why something reset, stream it to the card first.
 
-The screen stays 32-bit: a 16-bit one (`OCTOPUS_WM_16BIT=1`) would halve
-every copy, but the i.MX23's LCD controller doesn't widen RGB565 for the
-18-bit panel and the colours come out scrambled - on the glass only, not
-in a screenshot.
+The screen stays 32-bit. A 16-bit one (`OCTOPUS_WM_16BIT=1`) shows right
+since patch 0008 (mxsfb used to keep the controller's 32-bit word format,
+and the colours came out scrambled), but costs more than it saves: the
+compositor converting the apps' 32-bit buffers took the saver from 13 %
+to 35 % of the CPU.
 
 ## Unverified until it runs on hardware
 

@@ -66,9 +66,10 @@ one board it runs on. Don't call the software Chumby.
 - Test builds through the run overlay (`bin/chumby-try`), files in
   `/var/try` on the SD card, never `/tmp` (64 MB of RAM). Mute the sound
   for tests (`amixer -q sset DAC 0 mute`).
-- The screen stays 32-bit: its LCD controller scrambles 16-bit pixels.
-  Screenshots read the compositor's buffer, so check display changes by
-  eye.
+- The screen stays 32-bit: 16-bit works since kernel patch 0008, but the
+  compositor's conversion costs more CPU than it saves. Screenshots read
+  the compositor's buffer, so check display changes by eye; no register
+  has been found that shows a split picture.
 - OTA: `bin/update-chumby.sh <address>`.
 
 ## The Raspberry Pi (rpi64)
