@@ -383,10 +383,12 @@ struct octopus_stream_status {
 
 /*
  * USB sticks: each one plugged in is mounted read-only (FAT, or exFAT)
- * in a directory of its own under this one (/run/octopus-usb/sda1...,
+ * under its own name in this directory (/run/octopus-usb/sda1...,
  * or $OCTOPUS_USB_DIR), readable by the apps, until it's pulled out.
- * The directory is always there: watch it (inotify) for sticks coming
- * and going. A file on one plays with octopus_stream_play(path, name).
+ * The name is a link to the mount (skip names starting with a dot: the
+ * mounts themselves), made once the stick is readable. The directory is
+ * always there: watch it (inotify) for sticks coming and going. A file
+ * on one plays with octopus_stream_play(path, name).
  */
 const char *octopus_usb_dir(void);
 

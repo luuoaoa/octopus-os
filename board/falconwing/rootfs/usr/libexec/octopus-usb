@@ -3,23 +3,38 @@
 # pulled out. Started by udev (90-octopus-usb.rules) through
 # octopus-usb@<dev>.service, which stops (remove) when the device goes.
 #
-# add: mounted read-only at /run/octopus-usb/<dev>, readable by the apps
-# (a music player reads it there: octopus_usb_dir()), and the bundles in
-# its octopus-apps/ folder installed (octopus-install). It stays mounted
+# add: mounted read-only, readable by the apps (a music player reads it
+# at /run/octopus-usb/<dev>: octopus_usb_dir()), and the bundles in its
+# octopus-apps/ folder installed (octopus-install). It stays mounted
 # until it's pulled out. FAT, or exFAT where the kernel has it.
+# The mount is made at a hidden .<dev> and only then shown as <dev> (a
+# link to it, made in one go): apps watching the directory never see a
+# stick that isn't there yet, or one that won't be (the whole disk of a
+# partitioned stick). A stick fresh in can fail its first reads: tried
+# three times.
 # remove: unmounted (lazily: it's gone already, a player may hold a file).
 DEV=/dev/$2
 MNT=/run/octopus-usb/$2
+HID=/run/octopus-usb/.$2
 
 case "$1" in
 add)
-	mkdir -p "$MNT"
+	# The whole disk of a partitioned stick: its partitions come on their own.
+	ls -d /sys/class/block/"$2"/"$2"* >/dev/null 2>&1 && exit 0
+	mkdir -p "$HID"
 	opts=ro,nosuid,nodev,noexec,umask=022
-	mount -t vfat -o "$opts,utf8" "$DEV" "$MNT" 2>/dev/null ||
-		mount -t exfat -o "$opts" "$DEV" "$MNT" 2>/dev/null || {
-		rmdir "$MNT"
-		exit 0	# neither (or the whole disk of a partitioned stick): not ours
-	}
+	ok=
+	for try in 1 2 3; do
+		mount -t vfat -o "$opts,utf8" "$DEV" "$HID" 2>/dev/null ||
+			mount -t exfat -o "$opts" "$DEV" "$HID" 2>/dev/null
+		[ $? -eq 0 ] && ok=1 && break
+		sleep 1
+	done
+	if [ -z "$ok" ]; then
+		rmdir "$HID"
+		exit 0	# neither FAT nor exFAT: not ours
+	fi
+	ln -sfn ".$2" "$MNT"
 	n=0
 	for b in "$MNT"/octopus-apps/*.octopusapp "$MNT"/octopus-apps/*/; do
 		[ -e "$b" ] || continue
@@ -31,11 +46,12 @@ add)
 	echo "octopus-usb: $DEV at $MNT, $n bundle(s) installed"
 	;;
 remove)
-	if grep -q " $MNT " /proc/mounts; then
-		umount -l "$MNT"
+	rm -f "$MNT"
+	if grep -q " $HID " /proc/mounts; then
+		umount -l "$HID"
 		echo "octopus-usb: $DEV gone"
 	fi
-	rmdir "$MNT" 2>/dev/null
+	rmdir "$HID" 2>/dev/null
 	;;
 *)
 	echo "usage: octopus-usb add|remove <dev>" >&2

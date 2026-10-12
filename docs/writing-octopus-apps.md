@@ -208,7 +208,7 @@ margin; the controls along the bottom, as far apart as on 320x240.
 | `octopus_run_dir()` | `/run/octopus` (or `$OCTOPUS_RUN_DIR`): state shared between processes |
 | `octopus_shell_command(cmd)` | the shell's FIFO: `snooze`, `stop`, `ring`, `volume`, `brightness`, `menu`, `calibrate` |
 | `octopus_stay_awake(on)` | don't freeze me while out of sight |
-| `octopus_usb_dir()` | where USB sticks are: each one plugged in is mounted read-only (FAT, exFAT) in a directory of its own under it (`/run/octopus-usb/sda1`), until it's pulled out; watch it with inotify |
+| `octopus_usb_dir()` | where USB sticks are: each one plugged in is mounted read-only (FAT, exFAT) and appears under it by name (`/run/octopus-usb/sda1`, a link to the mount, made once it's readable; skip dot names) until it's pulled out; watch it with inotify |
 | `octopus_audio_tags(path, &tags)` | a music file's title, artist, album and track (ID3v2, ID3v1), as UTF-8 |
 
 ## Sound
