@@ -292,7 +292,7 @@ typedef enum {
 octopus_alarm_state_t octopus_alarm_state(time_t *until);
 
 /*
- * Runtime directory shared with the shell (/run/chumby, or
+ * Runtime directory shared with the shell (/run/octopus, or
  * $OCTOPUS_RUN_DIR). The shell reads commands from its "shell.cmd" FIFO:
  * "snooze" (= the snooze button: snoozes a ringing alarm), "power" (= the
  * power button: the screen off or on), "screen on" / "screen off",

@@ -409,7 +409,7 @@ static int rds_run(const char *out)
 	struct rds r;
 	int prev, v, i, tick = 0;
 
-	/* The output usually lives in /run/chumby, which may not exist yet. */
+	/* The output usually lives in /run/octopus, which may not exist yet. */
 	snprintf(dir, sizeof(dir), "%s", out);
 	slash = strrchr(dir, '/');
 	if (slash && slash != dir) {

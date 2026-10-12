@@ -32,7 +32,7 @@ echo "== the build container"
 docker build --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" -t "$BUILDER" "$TOP"
 
 echo "== $BOARD: the image and the SDK (in $OUT/)"
-# (This repository's own packages - libchumby, the shell, the apps - are
+# (This repository's own packages - liboctopus, the shell, the apps - are
 # local sources buildroot doesn't watch: rebuilt every time, or a pull's
 # changes to them wouldn't reach the image or the SDK.)
 docker run --rm -v "$TOP:/work" -w /work/buildroot "$BUILDER" bash -c '

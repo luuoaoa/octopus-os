@@ -14,7 +14,7 @@ What comes out is two Docker images, which `octopus-app` uses
 
 | Image | What's in it |
 |---|---|
-| `octopus-sdk:BOARD` | the board's cross toolchain (gcc, binutils), a sysroot with its libraries and headers (libchumby, LVGL, pixman, ALSA, libcurl, expat...), `pkg-config` set up for them, `octopus-app` and the examples |
+| `octopus-sdk:BOARD` | the board's cross toolchain (gcc, binutils), a sysroot with its libraries and headers (liboctopus, LVGL, pixman, ALSA, libcurl, expat...), `pkg-config` set up for them, `octopus-app` and the examples |
 | `octopus-sim:BOARD` | the board's root filesystem, to run its UI on your PC (`octopus-app sim`) |
 
 ## What you need

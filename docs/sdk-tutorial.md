@@ -258,7 +258,7 @@ says so if it's another's.
 
 ## Where next
 
-- [writing-octopus-apps.md](writing-octopus-apps.md): the rest of libchumby,
+- [writing-octopus-apps.md](writing-octopus-apps.md): the rest of liboctopus,
   sound (the FM radio, playing your own sounds), input, and the LVGL traps
   we've hit.
 - `octopus.h` in the SDK (`/opt/octopus-sdk/arm-buildroot-linux-gnueabi/sysroot/usr/include/octopus/`):

@@ -1,6 +1,6 @@
 # octopus-sdk:BOARD: the toolchain to build Octopus apps for a board (an
 # x86-64 Linux image, cross-compiling): buildroot's SDK - gcc, the board's
-# libraries and headers (libchumby, LVGL, pixman, ALSA, libcurl),
+# libraries and headers (liboctopus, LVGL, pixman, ALSA, libcurl),
 # pkg-config set up for them - and octopus-app. Built by sdk/make-images.sh.
 FROM ubuntu:22.04
 ARG SDK_DIR
