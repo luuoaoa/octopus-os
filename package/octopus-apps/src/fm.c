@@ -43,8 +43,8 @@
 #define RADIO_PIDFILE	"/run/octopus/radio-loop.pid"
 #define FREQ_MIN	876	/* tenths of MHz */
 #define FREQ_MAX	1080
-#define ART_SIZE	92	/* the tile */
-#define ART_PAD		8	/* logo inset on the tile */
+#define ART_SIZE	octopus_px(92)	/* the tile (sizes: 320x240's, scaled) */
+#define ART_PAD		octopus_px(8)	/* logo inset on the tile */
 #define SIGNAL_BARS	5
 
 enum { REQ_NONE, REQ_ON, REQ_OFF, REQ_TUNE, REQ_SCAN };
@@ -558,11 +558,14 @@ static int32_t baseline_of(lv_obj_t *l)
 	return lv_obj_get_y(l) + f->line_height - f->base_line;
 }
 
-#define COL_X		(ART_X + ART_SIZE + 12)	/* the right column */
-#define COL_W		(OCTOPUS_APP_W - 10 - COL_X)
-#define ART_X		14
-#define STEP_SIZE	38			/* the < > buttons */
-#define BARS_W		(SIGNAL_BARS * 3 + (SIGNAL_BARS - 1) * 2)
+#define COL_X		(ART_X + ART_SIZE + OCTOPUS_MARGIN)	/* the right column */
+#define COL_W		(OCTOPUS_APP_W - OCTOPUS_MARGIN - COL_X)
+#define ART_X		OCTOPUS_MARGIN
+#define STEP_SIZE	octopus_px(38)		/* the < > buttons */
+#define BAR_W		octopus_px(3)		/* a signal bar, and between them */
+#define BAR_GAP		octopus_px(2)
+#define BARS_H		octopus_px(14)
+#define BARS_W		(SIGNAL_BARS * BAR_W + (SIGNAL_BARS - 1) * BAR_GAP)
 
 int main(void)
 {
@@ -577,12 +580,12 @@ int main(void)
 	row = lv_obj_create(scr);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_scrollable(row, false);
-	lv_obj_set_size(row, OCTOPUS_APP_W, 56);
-	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -8);
+	lv_obj_set_size(row, octopus_px(320), octopus_px(56));
+	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -octopus_px(8));
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
-	btn_scan = round_button(row, LV_SYMBOL_REFRESH, STEP_SIZE, &lv_font_montserrat_14);
+	btn_scan = round_button(row, LV_SYMBOL_REFRESH, STEP_SIZE, octopus_symbol_font(14));
 	lv_obj_set_style_bg_opa(btn_scan, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_bg_opa(btn_scan, LV_OPA_COVER, LV_STATE_PRESSED);
 	lv_obj_set_style_border_width(btn_scan, 1, 0);
@@ -590,22 +593,22 @@ int main(void)
 	lv_obj_set_ext_click_area(btn_scan, (OCTOPUS_TOUCH_MIN - STEP_SIZE) / 2);
 	lv_obj_add_event_cb(btn_scan, scan_cb, LV_EVENT_SHORT_CLICKED, NULL);
 	lv_obj_add_event_cb(btn_scan, scan_cb, LV_EVENT_LONG_PRESSED, NULL);
-	btn_prev = round_button(row, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
+	btn_prev = round_button(row, LV_SYMBOL_PREV, octopus_px(52), octopus_symbol_font(28));
 	lv_obj_add_event_cb(btn_prev, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
-	btn_power = round_button(row, LV_SYMBOL_PLAY, 56, &lv_font_montserrat_28);
+	btn_power = round_button(row, LV_SYMBOL_PLAY, octopus_px(56), octopus_symbol_font(28));
 	lv_obj_set_checkable(btn_power, true);
 	lv_obj_add_event_cb(btn_power, power_cb, LV_EVENT_CLICKED, NULL);
-	btn_next = round_button(row, LV_SYMBOL_NEXT, 52, &lv_font_montserrat_28);
+	btn_next = round_button(row, LV_SYMBOL_NEXT, octopus_px(52), octopus_symbol_font(28));
 	lv_obj_add_event_cb(btn_next, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
 	lv_obj_update_layout(scr);
 
 	/* The art, centred in the space above the buttons. */
-	art_y = (lv_obj_get_y(row) - ART_SIZE) / 2;
+	art_y = OCTOPUS_MARGIN;	/* top left at the margins, as in every app */
 	art_tile = lv_obj_create(scr);
 	lv_obj_remove_style_all(art_tile);
 	lv_obj_set_pos(art_tile, ART_X, art_y);
 	lv_obj_set_size(art_tile, ART_SIZE, ART_SIZE);
-	lv_obj_set_style_radius(art_tile, 10, 0);
+	lv_obj_set_style_radius(art_tile, octopus_px(10), 0);
 	lv_obj_set_style_bg_opa(art_tile, LV_OPA_COVER, 0);
 	lv_obj_set_style_clip_corner(art_tile, true, 0);
 	lv_obj_set_clickable(art_tile, false);
@@ -614,7 +617,7 @@ int main(void)
 	lv_obj_set_hidden(art_img, true);
 	art_note = lv_label_create(art_tile);
 	lv_label_set_text(art_note, LV_SYMBOL_AUDIO);
-	lv_obj_set_style_text_font(art_note, &lv_font_montserrat_48, 0);
+	lv_obj_set_style_text_font(art_note, octopus_symbol_font(48), 0);
 	lv_obj_center(art_note);
 
 	/* Right column, top: < frequency >, level with the art's top. */
@@ -647,25 +650,25 @@ int main(void)
 	/* Between them: the station's name, the signal bars on its baseline. */
 	lbl_name = lv_label_create(scr);
 	lv_obj_set_style_text_font(lbl_name, octopus_font(OCTOPUS_FONT_LARGE), 0);
-	lv_obj_set_width(lbl_name, COL_W - BARS_W - 6);
+	lv_obj_set_width(lbl_name, COL_W - BARS_W - octopus_px(6));
 	lv_obj_set_x(lbl_name, COL_X);
 	octopus_scroll_label_init(lbl_name);
 	octopus_center_y_between(lbl_name, btn_down, lbl_song);
 
 	bars = lv_obj_create(scr);
 	lv_obj_remove_style_all(bars);
-	lv_obj_set_size(bars, BARS_W, 14);
+	lv_obj_set_size(bars, BARS_W, BARS_H);
 	lv_obj_set_flex_flow(bars, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(bars, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-	lv_obj_set_style_pad_column(bars, 2, 0);
+	lv_obj_set_style_pad_column(bars, BAR_GAP, 0);
 	lv_obj_set_clickable(bars, false);
 	for (i = 0; i < SIGNAL_BARS; i++) {
 		signal_bars[i] = lv_obj_create(bars);
 		lv_obj_remove_style_all(signal_bars[i]);
-		lv_obj_set_size(signal_bars[i], 3, 4 + i * 10 / (SIGNAL_BARS - 1));
-		lv_obj_set_style_radius(signal_bars[i], 1, 0);
+		lv_obj_set_size(signal_bars[i], BAR_W, octopus_px(4 + i * 10 / (SIGNAL_BARS - 1)));
+		lv_obj_set_style_radius(signal_bars[i], octopus_px(1), 0);
 	}
-	lv_obj_set_pos(bars, COL_X + COL_W - BARS_W, baseline_of(lbl_name) - 14);
+	lv_obj_set_pos(bars, COL_X + COL_W - BARS_W, baseline_of(lbl_name) - BARS_H);
 
 	load_station();
 	load_stations();

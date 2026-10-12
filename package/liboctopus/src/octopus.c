@@ -278,8 +278,56 @@ octopus_mode_t octopus_mode(void)
 	return mode;
 }
 
+/* ------------------------------------------------------------------ */
+/* Screen geometry                                                    */
+
+static int screen_w, screen_h;
+
+/* $OCTOPUS_SCREEN, from octopus-wm: "640x360" on a wide screen, else (or
+ * unset) 320x240. */
+static void screen_load(void)
+{
+	const char *e = getenv("OCTOPUS_SCREEN");
+
+	if (screen_w)
+		return;
+	if (e && !strcmp(e, "640x360")) {
+		screen_w = 640;
+		screen_h = 360;
+	} else {
+		screen_w = 320;
+		screen_h = 240;
+	}
+}
+
+int octopus_screen_w(void)
+{
+	screen_load();
+	return screen_w;
+}
+
+int octopus_screen_h(void)
+{
+	screen_load();
+	return screen_h;
+}
+
+octopus_aspect_t octopus_screen_aspect(void)
+{
+	screen_load();
+	return screen_w == 640 ? OCTOPUS_ASPECT_16_9 : OCTOPUS_ASPECT_4_3;
+}
+
+int32_t octopus_px(int32_t px)
+{
+	if (octopus_screen_aspect() == OCTOPUS_ASPECT_4_3)
+		return px;
+	return px >= 0 ? (px * 3 + 1) / 2 : -((-px * 3 + 1) / 2);	/* x 1.5, rounded */
+}
+
 /* Rockbox's Nimbus bitmap fonts, generated from the BDFs in fonts/ at build time. */
-extern lv_font_t nimbus_12, nimbus_14, nimbus_19, nimbus_35, nimbus_35x2, nimbus_14x2;
+extern lv_font_t nimbus_12, nimbus_14, nimbus_19, nimbus_35, nimbus_35x2, nimbus_14x2,
+		 nimbus_19x2, nimbus_35x3;
 
 static const lv_font_t *fonts[OCTOPUS_FONT_COUNT];
 
@@ -292,13 +340,31 @@ static const lv_font_t *nimbus(lv_font_t *f, const lv_font_t *symbols)
 
 static void fonts_load(void)
 {
-	fonts[OCTOPUS_FONT_SMALL] = nimbus(&nimbus_14, &lv_font_montserrat_14);
-	fonts[OCTOPUS_FONT_BODY] = nimbus(&nimbus_14, &lv_font_montserrat_14);
-	fonts[OCTOPUS_FONT_LARGE] = nimbus(&nimbus_19, &lv_font_montserrat_20);
-	fonts[OCTOPUS_FONT_XL] = nimbus(&nimbus_35, &lv_font_montserrat_28);
-	fonts[OCTOPUS_FONT_HUGE] = nimbus(&nimbus_35x2, &lv_font_montserrat_28);
-	fonts[OCTOPUS_FONT_MEDIUM] = nimbus(&nimbus_14x2, &lv_font_montserrat_28);
-	fonts[OCTOPUS_FONT_CAPTION] = nimbus(&nimbus_12, &lv_font_montserrat_14);
+	if (octopus_screen_aspect() == OCTOPUS_ASPECT_4_3) {
+		fonts[OCTOPUS_FONT_SMALL] = nimbus(&nimbus_14, &lv_font_montserrat_14);
+		fonts[OCTOPUS_FONT_BODY] = nimbus(&nimbus_14, &lv_font_montserrat_14);
+		fonts[OCTOPUS_FONT_LARGE] = nimbus(&nimbus_19, &lv_font_montserrat_20);
+		fonts[OCTOPUS_FONT_XL] = nimbus(&nimbus_35, &lv_font_montserrat_28);
+		fonts[OCTOPUS_FONT_HUGE] = nimbus(&nimbus_35x2, &lv_font_montserrat_28);
+		fonts[OCTOPUS_FONT_MEDIUM] = nimbus(&nimbus_14x2, &lv_font_montserrat_28);
+		fonts[OCTOPUS_FONT_CAPTION] = nimbus(&nimbus_12, &lv_font_montserrat_14);
+	} else {	/* 640x360: each one bitmap size up (~1.5x) */
+		fonts[OCTOPUS_FONT_SMALL] = nimbus(&nimbus_19, &lv_font_montserrat_20);
+		fonts[OCTOPUS_FONT_BODY] = nimbus(&nimbus_19, &lv_font_montserrat_20);
+		fonts[OCTOPUS_FONT_LARGE] = nimbus(&nimbus_14x2, &lv_font_montserrat_28);
+		fonts[OCTOPUS_FONT_XL] = nimbus(&nimbus_19x2, &lv_font_montserrat_42);
+		fonts[OCTOPUS_FONT_HUGE] = nimbus(&nimbus_35x3, &lv_font_montserrat_42);
+		fonts[OCTOPUS_FONT_MEDIUM] = nimbus(&nimbus_19x2, &lv_font_montserrat_42);
+		fonts[OCTOPUS_FONT_CAPTION] = nimbus(&nimbus_14, &lv_font_montserrat_20);
+	}
+}
+
+const lv_font_t *octopus_symbol_font(int px)
+{
+	px = octopus_px(px);
+	return px >= 48 ? &lv_font_montserrat_48 : px >= 42 ? &lv_font_montserrat_42 :
+	       px >= 28 ? &lv_font_montserrat_28 : px >= 20 ? &lv_font_montserrat_20 :
+	       &lv_font_montserrat_14;
 }
 
 extern lv_font_t octopus_icons_14, octopus_icons_20, octopus_icons_28, octopus_icons_42;
@@ -314,6 +380,7 @@ const lv_font_t *octopus_icon_font(int px)
 		octopus_icons_42.fallback = &lv_font_montserrat_48;
 		init = true;
 	}
+	px = octopus_px(px);
 	return px >= 42 ? &octopus_icons_42 : px >= 28 ? &octopus_icons_28 : px >= 20 ? &octopus_icons_20 : &octopus_icons_14;
 }
 
@@ -998,6 +1065,8 @@ lv_display_t *octopus_window_create(const char *app_id, int width, int height)
 	disp = lv_wayland_window_create(width, height, (char *)app_id, NULL);
 	if (!disp)
 		return NULL;
+	/* LVGL's theme sizes its widgets' padding by the DPI: 1.5x on 640x360. */
+	lv_display_set_dpi(disp, octopus_px(LV_DPI_DEF));
 	windows[n_windows++] = disp;
 	theme_apply(disp);
 	if (getenv("OCTOPUS_REFR_DEBUG")) {

@@ -54,26 +54,28 @@
 #define MAX_EPS		30
 #define MAX_POSITIONS	256
 #define FEED_MAX_AGE_S	3600
-#define ART_X		14
-#define ART_SIZE	92
-#define ART_PAD		8
-#define COL_X		(ART_X + ART_SIZE + 12)
-#define COL_W		(OCTOPUS_APP_W - 10 - COL_X)
-#define SMALL_BTN	38
-#define LINE_GAP	2
-#define BAR_H		4
+/* Sizes are 320x240's, scaled for the screen (octopus_px()). */
+#define ART_X		OCTOPUS_MARGIN
+#define ART_SIZE	octopus_px(92)
+#define ART_PAD		octopus_px(8)
+#define COL_X		(ART_X + ART_SIZE + OCTOPUS_MARGIN)
+#define COL_W		(OCTOPUS_APP_W - OCTOPUS_MARGIN - COL_X)
+#define SMALL_BTN	octopus_px(38)
+#define LINE_GAP	octopus_px(2)
+#define BAR_H		octopus_px(4)
 #define BAR_W		(OCTOPUS_APP_W - 2 * ART_X)	/* the width: seeking precisely */
-#define BAR_GAP		8			/* between the art and the bar */
-#define BAR_TOUCH	12			/* the bar's touch area, above and below */
-#define STRIPE_W	28			/* the busy stripe on the bar */
+#define BAR_GAP		octopus_px(8)		/* between the art and the bar */
+#define BAR_TOUCH	octopus_px(12)		/* the bar's touch area, above and below */
+#define STRIPE_W	octopus_px(28)		/* the busy stripe on the bar */
 #define STRIPE_MS	1100			/* its trip across */
 #define START_GRACE_MS	5000
 #define SAVE_EVERY_S	10
 #define SKIP_SETTLE_MS	500
-#define TILE_H		44
-#define TILE_GAP	6
-#define ROW_H		54
-#define LIST_HEAD_H	30
+#define TILE_H		octopus_px(44)
+#define TILE_GAP	octopus_px(6)
+#define ROW_H		octopus_px(54)
+#define LIST_HEAD_H	octopus_px(30)
+#define TILE_W		((OCTOPUS_APP_W - 2 * OCTOPUS_MARGIN - octopus_px(8)) / 2)
 
 struct episode {
 	long long published;	/* epoch s */
@@ -1051,10 +1053,10 @@ static lv_obj_t *tile(lv_obj_t *parent, const char *text, const char *sub, bool 
 {
 	lv_obj_t *b = lv_button_create(parent), *l;
 
-	lv_obj_set_size(b, (OCTOPUS_APP_W - 3 * 8) / 2, TILE_H);
-	lv_obj_set_style_radius(b, 8, 0);
+	lv_obj_set_size(b, TILE_W, TILE_H);
+	lv_obj_set_style_radius(b, octopus_px(8), 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
-	lv_obj_set_style_pad_hor(b, 8, 0);
+	lv_obj_set_style_pad_hor(b, octopus_px(8), 0);
 	lv_obj_set_style_bg_color(b, octopus_color(OCTOPUS_COLOR_SURFACE), 0);
 	lv_obj_set_style_text_color(b, octopus_color(OCTOPUS_COLOR_TEXT), 0);
 	if (on) {
@@ -1064,7 +1066,7 @@ static lv_obj_t *tile(lv_obj_t *parent, const char *text, const char *sub, bool 
 	l = lv_label_create(b);
 	lv_label_set_text(l, text);
 	lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_LARGE), 0);
-	lv_obj_set_width(l, (OCTOPUS_APP_W - 3 * 8) / 2 - 16 - (sub ? 24 : 0));
+	lv_obj_set_width(l, TILE_W - octopus_px(16 + (sub ? 24 : 0)));
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
 	lv_obj_update_layout(l);
 	if (lv_obj_get_height(l) > 2 * lv_font_get_line_height(octopus_font(OCTOPUS_FONT_LARGE))) {
@@ -1091,10 +1093,10 @@ static lv_obj_t *episode_row(lv_obj_t *parent, int s, int ep)
 	char date[16], info[64], left[16];
 	double bps = e->bytes > 0 && e->duration > 0 ? (double)e->bytes / e->duration : 16000.0;
 
-	lv_obj_set_size(b, OCTOPUS_APP_W - 16, ROW_H);
-	lv_obj_set_style_radius(b, 8, 0);
+	lv_obj_set_size(b, OCTOPUS_APP_W - 2 * OCTOPUS_MARGIN, ROW_H);
+	lv_obj_set_style_radius(b, octopus_px(8), 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
-	lv_obj_set_style_pad_hor(b, 10, 0);
+	lv_obj_set_style_pad_hor(b, octopus_px(10), 0);
 	lv_obj_set_style_pad_ver(b, 0, 0);	/* the two lines need the height */
 	lv_obj_set_style_bg_color(b, octopus_color(OCTOPUS_COLOR_SURFACE), 0);
 	lv_obj_set_style_text_color(b, octopus_color(OCTOPUS_COLOR_TEXT), 0);
@@ -1105,10 +1107,10 @@ static lv_obj_t *episode_row(lv_obj_t *parent, int s, int ep)
 	l = lv_label_create(b);
 	lv_label_set_text(l, e->title);
 	lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_LARGE), 0);
-	lv_obj_set_width(l, OCTOPUS_APP_W - 16 - 20);
+	lv_obj_set_width(l, OCTOPUS_APP_W - 2 * OCTOPUS_MARGIN - octopus_px(20));
 	lv_obj_set_height(l, lv_font_get_line_height(octopus_font(OCTOPUS_FONT_LARGE)));
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
-	lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, 4);
+	lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, octopus_px(4));
 
 	fmt_date(date, sizeof(date), e->published);
 	snprintf(info, sizeof(info), "%s", date);
@@ -1125,7 +1127,7 @@ static lv_obj_t *episode_row(lv_obj_t *parent, int s, int ep)
 	lv_label_set_text(l, info);
 	lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_set_style_text_color(l, on ? octopus_on_accent() : octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
-	lv_obj_align(l, LV_ALIGN_BOTTOM_LEFT, 0, -4);
+	lv_obj_align(l, LV_ALIGN_BOTTOM_LEFT, 0, -octopus_px(4));
 	return b;
 }
 
@@ -1146,8 +1148,8 @@ static void list_show(int level)
 
 	head = lv_button_create(list_panel);
 	lv_obj_remove_style_all(head);
-	lv_obj_set_size(head, OCTOPUS_APP_W - 8 - OCTOPUS_TOUCH_MIN, LIST_HEAD_H + 4);
-	lv_obj_set_pos(head, 8, 0);
+	lv_obj_set_size(head, OCTOPUS_APP_W - OCTOPUS_MARGIN - OCTOPUS_TOUCH_MIN, LIST_HEAD_H + octopus_px(4));
+	lv_obj_set_pos(head, OCTOPUS_MARGIN, 0);
 	l = lv_label_create(head);
 	lv_obj_set_width(l, OCTOPUS_APP_W - 8 - OCTOPUS_TOUCH_MIN);
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
@@ -1160,7 +1162,7 @@ static void list_show(int level)
 		lv_obj_add_event_cb(head, back_cb, LV_EVENT_CLICKED, NULL);
 	b = lv_button_create(list_panel);
 	lv_obj_remove_style_all(b);
-	lv_obj_set_size(b, OCTOPUS_TOUCH_MIN, LIST_HEAD_H + 4);
+	lv_obj_set_size(b, OCTOPUS_TOUCH_MIN, LIST_HEAD_H + octopus_px(4));
 	lv_obj_align(b, LV_ALIGN_TOP_RIGHT, 0, 0);
 	l = lv_label_create(b);
 	lv_label_set_text(l, LV_SYMBOL_CLOSE);
@@ -1170,13 +1172,13 @@ static void list_show(int level)
 
 	grid = lv_obj_create(list_panel);
 	lv_obj_remove_style_all(grid);
-	lv_obj_set_size(grid, OCTOPUS_APP_W, OCTOPUS_APP_H - LIST_HEAD_H - 4);
-	lv_obj_set_pos(grid, 0, LIST_HEAD_H + 4);
+	lv_obj_set_size(grid, OCTOPUS_APP_W, OCTOPUS_APP_H - LIST_HEAD_H - octopus_px(4));
+	lv_obj_set_pos(grid, 0, LIST_HEAD_H + octopus_px(4));
 	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_style_pad_hor(grid, 8, 0);
-	lv_obj_set_style_pad_bottom(grid, 8, 0);
+	lv_obj_set_style_pad_hor(grid, OCTOPUS_MARGIN, 0);
+	lv_obj_set_style_pad_bottom(grid, octopus_px(8), 0);
 	lv_obj_set_style_pad_gap(grid, TILE_GAP, 0);
-	lv_obj_set_style_pad_column(grid, 8, 0);
+	lv_obj_set_style_pad_column(grid, octopus_px(8), 0);
 	lv_obj_set_scroll_dir(grid, LV_DIR_VER);
 
 	if (level < 0) {
@@ -1274,34 +1276,34 @@ int main(void)
 	row = lv_obj_create(scr);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_scrollable(row, false);
-	lv_obj_set_size(row, OCTOPUS_APP_W, 56);
-	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -8);
+	lv_obj_set_size(row, octopus_px(320), octopus_px(56));
+	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -octopus_px(8));
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
-	btn_list = round_button(row, LV_SYMBOL_LIST, SMALL_BTN, &lv_font_montserrat_14);
+	btn_list = round_button(row, LV_SYMBOL_LIST, SMALL_BTN, octopus_symbol_font(14));
 	lv_obj_set_style_bg_opa(btn_list, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_bg_opa(btn_list, LV_OPA_COVER, LV_STATE_PRESSED);
 	lv_obj_set_style_border_width(btn_list, 1, 0);
 	lv_obj_set_style_border_opa(btn_list, LV_OPA_40, 0);
 	lv_obj_set_ext_click_area(btn_list, (OCTOPUS_TOUCH_MIN - SMALL_BTN) / 2);
 	lv_obj_add_event_cb(btn_list, list_cb, LV_EVENT_CLICKED, NULL);
-	btn_back = round_button(row, OCTOPUS_ICON_BACK10, 52, octopus_icon_font(28));
+	btn_back = round_button(row, OCTOPUS_ICON_BACK10, octopus_px(52), octopus_icon_font(28));
 	lv_obj_add_event_cb(btn_back, skip_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-10);
-	btn_play = round_button(row, LV_SYMBOL_PLAY, 56, &lv_font_montserrat_28);
+	btn_play = round_button(row, LV_SYMBOL_PLAY, octopus_px(56), octopus_symbol_font(28));
 	lv_obj_add_event_cb(btn_play, play_cb, LV_EVENT_CLICKED, NULL);
-	btn_ahead = round_button(row, OCTOPUS_ICON_AHEAD30, 52, octopus_icon_font(28));
+	btn_ahead = round_button(row, OCTOPUS_ICON_AHEAD30, octopus_px(52), octopus_icon_font(28));
 	lv_obj_add_event_cb(btn_ahead, skip_cb, LV_EVENT_CLICKED, (void *)(intptr_t)30);
 	lv_obj_update_layout(scr);
 
-	/* The artwork, then the bar across the screen with the times under
-	 * it: together, centred in the space above the buttons. */
-	art_y = (lv_obj_get_y(row) - (ART_SIZE + BAR_GAP + BAR_H + LINE_GAP + line_body)) / 2;
+	/* The artwork, top left at the margins (as in every app), then the
+	 * bar across the screen with the times under it. */
+	art_y = OCTOPUS_MARGIN;
 	art_tile = lv_obj_create(scr);
 	lv_obj_remove_style_all(art_tile);
 	lv_obj_set_pos(art_tile, ART_X, art_y);
 	lv_obj_set_size(art_tile, ART_SIZE, ART_SIZE);
-	lv_obj_set_style_radius(art_tile, 10, 0);
+	lv_obj_set_style_radius(art_tile, octopus_px(10), 0);
 	lv_obj_set_style_bg_opa(art_tile, LV_OPA_COVER, 0);
 	lv_obj_set_style_clip_corner(art_tile, true, 0);
 	lv_obj_set_clickable(art_tile, false);

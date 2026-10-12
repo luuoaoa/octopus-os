@@ -33,10 +33,16 @@
  * directly. While the shell has the backlight off (night), touches are
  * dropped so nothing gets pressed blind.
  *
- * A screen bigger than the Chumby's (a RasPad's 1280x800, say) shows the
- * 320x240 UI at the largest whole-number scale that fits, centred, pixels
- * doubled or tripled (nearest, never blurred): the output's scale, with
- * everything in a 320x240 tree in the middle of its layout. A touch is
+ * A screen bigger than the Chumby's shows the UI at the largest
+ * whole-number scale that fits, centred, pixels doubled or tripled
+ * (nearest, never blurred): the output's scale, with everything in a tree
+ * of the UI's size in the middle of its layout. The UI is 320x240 (4:3)
+ * or 640x360 (16:9: the same UI at 1.5x, wider), whichever fills more of
+ * the screen - a RasPad's 1280x800 gets 640x360 doubled, a 1920x1080 TV
+ * 640x360 tripled, the Chumby and 4:3 screens 320x240 - unless "screen =
+ * 4:3" or "16:9" in /var/lib/octopus/settings.conf says otherwise (read
+ * at start). The shell, and so every app, is told in $OCTOPUS_SCREEN
+ * ("640x360"); liboctopus scales to it. A touch is
  * mapped over the whole output, so one on the border presses nothing. A
  * screen whose own mode is huge (a 4K TV) gets one up to 1920x1200: all
  * of it is drawn by the CPU.
@@ -99,10 +105,13 @@
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
 
-/* = OCTOPUS_BAR_H, OCTOPUS_POPUP_W, OCTOPUS_POPUP_H in octopus.h */
-#define BAR_H		32
-#define POPUP_W		216
-#define POPUP_H		52
+/* = OCTOPUS_BAR_H, OCTOPUS_POPUP_W, OCTOPUS_POPUP_H in octopus.h: 320x240
+ * sizes, 1.5x on 640x360 (as octopus_px()). */
+static bool ui_wide;		/* the UI is 640x360 */
+#define PX(v)		(ui_wide ? ((v) * 3 + 1) / 2 : (v))
+#define BAR_H		PX(32)
+#define POPUP_W		PX(216)
+#define POPUP_H		PX(52)
 #define APP_PANEL	"octopus-panel"
 #define APP_HOME	"octopus-home"
 #define APP_POPUP	"octopus-popup"
@@ -117,9 +126,12 @@
 #define CAL_FILE	CAL_DIR "/" CAL_NAME
 #define MAX_TOUCH	10
 #define CORNER_R	8	/* the screen's rounded corners */
-#define MENU_GAP	4	/* the app menu card, from the edge and the bar */
-#define UI_W		320	/* the UI's size, whatever the screen's */
+#define MENU_GAP	PX(4)	/* the app menu card, from the edge and the bar */
+#define UI_W		320	/* the UI's size, whatever the screen's: this, */
 #define UI_H		240
+#define UI_WIDE_W	640	/* or this on a wider screen */
+#define UI_WIDE_H	360
+#define SETTINGS_FILE	"/var/lib/octopus/settings.conf"	/* "screen = auto|4:3|16:9" */
 #define MODE_MAX_W	1920	/* biggest mode we'll drive (pixman, or an old Pi's GPU at */
 					/* 2048 px a texture, draws it all) */
 #define MODE_MAX_H	1200
@@ -1662,6 +1674,47 @@ static struct wlr_output_mode *pick_mode(struct wlr_output *wo)
 	return best ? best : pref;
 }
 
+/* "screen" in the settings: "4:3", "16:9", else (or none) "auto". */
+static void screen_setting(char *val, size_t size)
+{
+	FILE *f = fopen(SETTINGS_FILE, "r");
+	char line[128], key[32], v[32];
+
+	snprintf(val, size, "auto");
+	if (!f)
+		return;
+	while (fgets(line, sizeof(line), f))
+		if (sscanf(line, " %31[^= ] = %31s", key, v) == 2 && !strcmp(key, "screen"))
+			snprintf(val, size, "%s", v);
+	fclose(f);
+}
+
+/*
+ * 640x360 for this screen (w x h, its pixels)? Whichever of it and 320x240
+ * covers more of it at its whole scale; 320x240 when they tie, or the
+ * wide one doesn't fit at all. $OCTOPUS_WM_UI (4:3, 16:9) or the setting
+ * can say which.
+ */
+static bool ui_pick_wide(int w, int h)
+{
+	char want[32];
+	const char *e = getenv("OCTOPUS_WM_UI");
+	long sn = w / UI_W < h / UI_H ? w / UI_W : h / UI_H;
+	long sw = w / UI_WIDE_W < h / UI_WIDE_H ? w / UI_WIDE_W : h / UI_WIDE_H;
+
+	if (e)
+		snprintf(want, sizeof(want), "%s", e);
+	else
+		screen_setting(want, sizeof(want));
+	if (sw < 1)
+		return false;
+	if (!strcmp(want, "16:9"))
+		return true;
+	if (!strcmp(want, "4:3"))
+		return false;
+	return sw * sw * UI_WIDE_W * UI_WIDE_H > sn * sn * UI_W * UI_H;
+}
+
 static void new_output(struct wl_listener *l, void *data)
 {
 	struct server *s = wl_container_of(l, s, new_output);
@@ -1672,7 +1725,7 @@ static void new_output(struct wl_listener *l, void *data)
 	struct wlr_scene_output *so;
 	struct output *o;
 	struct view *v;
-	int pw, ph, scale;
+	int pw, ph, uw, uh, scale;
 
 	wlr_output_init_render(wo, s->allocator, s->renderer);
 	wlr_output_state_init(&state);
@@ -1692,8 +1745,11 @@ static void new_output(struct wl_listener *l, void *data)
 		}
 		wlr_output_state_set_custom_mode(&state, pw, ph, 0);
 	}
-	/* The UI at the biggest whole scale that fits. */
-	scale = pw / UI_W < ph / UI_H ? pw / UI_W : ph / UI_H;
+	/* The UI's size, at the biggest whole scale that fits. */
+	ui_wide = ui_pick_wide(pw, ph);
+	uw = ui_wide ? UI_WIDE_W : UI_W;
+	uh = ui_wide ? UI_WIDE_H : UI_H;
+	scale = pw / uw < ph / uh ? pw / uw : ph / uh;
 	if (scale < 1)
 		scale = 1;
 	wlr_output_state_set_scale(&state, scale);
@@ -1713,9 +1769,9 @@ static void new_output(struct wl_listener *l, void *data)
 
 	s->layout_w = (double)wo->width / scale;
 	s->layout_h = (double)wo->height / scale;
-	if (scale > 1 || wo->width > UI_W || wo->height > UI_H) {
-		s->width = UI_W;
-		s->height = UI_H;
+	if (scale > 1 || wo->width > uw || wo->height > uh) {
+		s->width = uw;
+		s->height = uh;
 	} else {	/* the Chumby's own LCD (or something smaller) */
 		s->width = wo->width;
 		s->height = wo->height;
@@ -1918,6 +1974,14 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	setenv("WAYLAND_DISPLAY", socket, true);
+	/* The UI's size, picked with the output (the backend's start brings
+	 * it): the shell and the apps it starts lay out to it. */
+	{
+		char size[32];
+
+		snprintf(size, sizeof(size), "%dx%d", s.width, s.height);
+		setenv("OCTOPUS_SCREEN", size, true);
+	}
 	/* The shell gone (a crash): so are we, and systemd starts the session
 	 * again (Restart=always). Left running, we kept a screen with no bar,
 	 * menu or buttons - and the dead shell as a zombie. (Watched before

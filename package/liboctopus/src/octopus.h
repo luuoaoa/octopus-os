@@ -34,28 +34,57 @@
 extern "C" {
 #endif
 
-/* Screen geometry: octopus-wm's tab bar along the top, the app area below. */
-#define OCTOPUS_SCREEN_W	320
-#define OCTOPUS_SCREEN_H	240
-#define OCTOPUS_BAR_H	32
+/*
+ * Screen geometry. octopus-wm picks the UI's size from the screen's (and
+ * tells every program it starts, in $OCTOPUS_SCREEN):
+ *
+ *   320x240, 4:3   the Chumby One, 4:3 screens, small ones
+ *   640x360, 16:9  16:9 and 16:10 screens: the same UI at 1.5x, wider
+ *
+ * Design for 320x240 and write sizes as octopus_px(n): n on 320x240, n
+ * times 1.5 (rounded) on 640x360, so 640x360 looks like 320x240 with
+ * more width - not a desktop with more of everything. The fonts follow by
+ * themselves (one bitmap size up). Lay out against OCTOPUS_APP_W / _H and
+ * OCTOPUS_MARGIN, not numbers: they're the screen's.
+ */
+typedef enum {
+	OCTOPUS_ASPECT_4_3,	/* 320x240 */
+	OCTOPUS_ASPECT_16_9,	/* 640x360 */
+} octopus_aspect_t;
+
+int octopus_screen_w(void);
+int octopus_screen_h(void);
+octopus_aspect_t octopus_screen_aspect(void);
+/* A 320x240 size in this screen's pixels. */
+int32_t octopus_px(int32_t px);
+
+/* octopus-wm's tab bar along the top, the app area below. */
+#define OCTOPUS_SCREEN_W	octopus_screen_w()
+#define OCTOPUS_SCREEN_H	octopus_screen_h()
+#define OCTOPUS_BAR_H	octopus_px(32)
 #define OCTOPUS_APP_W	OCTOPUS_SCREEN_W
 #define OCTOPUS_APP_H	(OCTOPUS_SCREEN_H - OCTOPUS_BAR_H)
 /* The shell's volume/brightness slider: drops down from the bar's right
  * end, under their buttons. */
-#define OCTOPUS_POPUP_W	216
-#define OCTOPUS_POPUP_H	52
+#define OCTOPUS_POPUP_W	octopus_px(216)
+#define OCTOPUS_POPUP_H	octopus_px(52)
+/* An app's content from the bar and the left and right edges: the same in
+ * every app, so nothing jumps when you switch between them. */
+#define OCTOPUS_MARGIN	octopus_px(14)
 
 /*
  * Minimum touch target on the resistive panel (~9 mm). Anything a finger
  * must hit should be at least this big in both directions.
  */
-#define OCTOPUS_TOUCH_MIN	42
+#define OCTOPUS_TOUCH_MIN	octopus_px(42)
 
 typedef enum {
 	OCTOPUS_MODE_DAY,	/* dark theme */
 	OCTOPUS_MODE_NIGHT,	/* darker, warm, low-glare theme */
 } octopus_mode_t;
 
+/* The sizes are 320x240's; on 640x360 each is one bitmap size up (14 ->
+ * 19, 19 -> 14 at 2x, 35 -> 19 at 2x, 70 -> 35 at 3x). */
 typedef enum {
 	OCTOPUS_FONT_SMALL,	/* Nimbus 14: captions, status */
 	OCTOPUS_FONT_BODY,	/* Nimbus 14: default text */
@@ -127,6 +156,13 @@ void octopus_watch_fd(int fd, octopus_fd_cb_t cb, void *user);
 #define OCTOPUS_ICON_AIRPLAY	"\xEE\xA4\x87"	/* U+E907 */
 #define OCTOPUS_ICON_NO_NETWORK	"\xEE\xA4\x88"	/* U+E908 */
 const lv_font_t *octopus_icon_font(int px);
+/*
+ * LVGL's symbols (LV_SYMBOL_*) alone, at a 320x240 size: 14, 20, 28 or 48
+ * (Montserrat's), scaled for the screen like octopus_px() - instead of
+ * &lv_font_montserrat_<n>, which is the same size on every screen.
+ * octopus_icon_font() takes 320x240 sizes too.
+ */
+const lv_font_t *octopus_symbol_font(int px);
 
 /* Theme */
 const lv_font_t *octopus_font(octopus_font_t font);

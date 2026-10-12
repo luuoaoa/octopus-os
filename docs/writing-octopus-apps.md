@@ -20,11 +20,13 @@ liboctopus (package/liboctopus)  LVGL 9.6 compiled in, plus Octopus's
                     framework every app and the shell link against
 ```
 
-- **Screen**: 320x240 (on a bigger screen, scaled up by a whole number:
-  apps don't see it). The shell's tab bar is the top `OCTOPUS_BAR_H` (32)
-  px; an app gets `OCTOPUS_APP_W` x `OCTOPUS_APP_H` (320x208) under it. The
-  compositor places windows by their app_id (see the top of
-  `octopus-wm.c`); an app doesn't position itself.
+- **Screen**: 320x240 (4:3), or 640x360 (16:9) on a wide screen: the same
+  UI at 1.5x, with more width. Either is scaled up by a whole number to
+  fit the screen; apps don't see that. The shell's tab bar is the top
+  `OCTOPUS_BAR_H` (32 or 48) px; an app gets `OCTOPUS_APP_W` x
+  `OCTOPUS_APP_H` (320x208 or 640x312) under it. The compositor places
+  windows by their app_id (see the top of `octopus-wm.c`); an app doesn't
+  position itself. See [Two screen sizes](#two-screen-sizes).
 - **One app in front at a time.** The tab bar shows it (filled tab, with
   icon and name) and the one before it. Home is a menu of installed apps,
   not a place.
@@ -111,7 +113,7 @@ Everything below is declared in `octopus.h`, with comments.
 
 | | |
 |---|---|
-| `octopus_app_init(id)` | an app's window (320x208), returns its screen |
+| `octopus_app_init(id)` | an app's window (`OCTOPUS_APP_W` x `OCTOPUS_APP_H`), returns its screen |
 | `octopus_init()`, `octopus_window_create(id, w, h)`, `octopus_window_close(d)` | several windows (the shell does this) |
 | `octopus_run()` | the main loop: LVGL timers, Wayland, your fds; exits when the compositor goes |
 | `octopus_watch_fd(fd, cb, user)` | call `cb` when an fd is readable (input devices, pipes, FIFOs) |
@@ -157,8 +159,35 @@ Everything below is declared in `octopus.h`, with comments.
 | `octopus_center_y_on(obj, ref)` / `_between(obj, above, below)` / `_at(obj, y)` | centre an object vertically on the *visible* glyphs, not the font box: Nimbus's box sits high, so plain centring looks off |
 
 Sizes for a resistive screen: anything a finger must hit is at least
-`OCTOPUS_TOUCH_MIN` (42 px). Smaller-looking buttons get the rest from
-`lv_obj_set_ext_click_area()` (the FM app's scan, < > buttons).
+`OCTOPUS_TOUCH_MIN` (42 px on 320x240). Smaller-looking buttons get the
+rest from `lv_obj_set_ext_click_area()` (the FM app's scan, < > buttons).
+
+### Two screen sizes
+
+octopus-wm picks the UI's size from the screen's: 320x240 on the Chumby
+One and 4:3 screens, 640x360 on 16:9 and 16:10 ones (whichever fills
+more of the screen; `screen = 4:3` or `16:9` in
+`/var/lib/octopus/settings.conf` forces one, from the next start). 640x360
+is not a desktop with more room: it is the 320x240 UI at 1.5x, wider, so
+an appliance across the room looks the same on both.
+
+| | |
+|---|---|
+| `octopus_screen_w()`, `octopus_screen_h()` | 320x240 or 640x360 (`OCTOPUS_SCREEN_W`, `_H` are these) |
+| `octopus_screen_aspect()` | `OCTOPUS_ASPECT_4_3` or `OCTOPUS_ASPECT_16_9` |
+| `octopus_px(n)` | a 320x240 size in this screen's pixels: n, or n x 1.5 rounded |
+| `OCTOPUS_MARGIN` | content from the bar and the left and right edges: `octopus_px(14)`, the same in every app |
+| `octopus_symbol_font(px)` | LVGL's symbols at a 320x240 size (14, 20, 28, 48), scaled |
+
+Design at 320x240 and write every size as `octopus_px(n)`; lay out
+against `OCTOPUS_APP_W` and `OCTOPUS_MARGIN`, never a number, and give the
+extra width of 640x360 to what's long (titles, names). `octopus_font()`
+and `octopus_icon_font()` scale by themselves: each font is the next
+bitmap size up on 640x360 (body 14 -> 19, headings 19 -> 28, the clock 70
+-> 105). `&lv_font_montserrat_<n>` doesn't: use `octopus_symbol_font(n)`.
+The players (Net Radio, Podcasts, FM, AirPlay) share one layout: the art
+at the margins, top left; the text in a column right of it, to the right
+margin; the controls along the bottom, as far apart as on 320x240.
 
 ### Text and images
 

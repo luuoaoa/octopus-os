@@ -589,14 +589,15 @@ static void launch(struct app_info *a)
  * Tabs are drawn taller than the bar: the window clips their bottom
  * (rounded) corners, leaving square feet on the line.
  */
-#define TAB_Y		5	/* a tab's top, filled or not */
-#define TAB_FOOT	10	/* drawn below the bar, clipped */
-#define LINE_H		2
-#define TAB_GAP		3
-#define CORNER_R	8	/* every corner: the screen's (octopus-wm), tabs, plates */
-#define TAB_TITLE_MAX	80
+/* Sizes: 320x240's, scaled for the screen (octopus_px()). */
+#define TAB_Y		octopus_px(5)	/* a tab's top, filled or not */
+#define TAB_FOOT	octopus_px(10)	/* drawn below the bar, clipped */
+#define LINE_H		octopus_px(2)
+#define TAB_GAP		octopus_px(3)
+#define CORNER_R	octopus_px(8)	/* every corner: the screen's (octopus-wm), tabs, plates */
+#define TAB_TITLE_MAX	octopus_px(80)
 #define POPUP_IDLE_MS	4000
-#define STOP_SIZE	36	/* the volume control's stop button */
+#define STOP_SIZE	octopus_px(36)	/* the volume control's stop button */
 /* The menu card and the sliders' plate, a little see-through: under them
  * octopus-wm dims the app (and blurs it, on a GPU). */
 #define POPUP_OPA	LV_OPA_80
@@ -693,9 +694,9 @@ static lv_obj_t *tab_create(lv_obj_t *parent, const char *sym, const char *name,
 	lv_obj_t *b = bar_box(parent), *l;
 
 	lv_obj_set_clickable(b, true);
-	lv_obj_set_style_min_width(b, 36, 0);
-	lv_obj_set_style_pad_hor(b, name ? 9 : 10, 0);
-	lv_obj_set_style_pad_column(b, 5, 0);
+	lv_obj_set_style_min_width(b, octopus_px(36), 0);
+	lv_obj_set_style_pad_hor(b, octopus_px(name ? 9 : 10), 0);
+	lv_obj_set_style_pad_column(b, octopus_px(5), 0);
 	/* Up to the screen's top edge, and the gaps between tabs. */
 	lv_obj_set_ext_click_area(b, TAB_Y);
 	tab_style(b, on);
@@ -735,8 +736,8 @@ static lv_obj_t *tray_button(lv_obj_t *parent, const char *sym)
 	lv_obj_t *b = tab_create(parent, sym, NULL, false);
 
 	/* Narrower than a tab: the two sit close together. */
-	lv_obj_set_style_min_width(b, 26, 0);
-	lv_obj_set_style_pad_hor(b, 4, 0);
+	lv_obj_set_style_min_width(b, octopus_px(26), 0);
+	lv_obj_set_style_pad_hor(b, octopus_px(4), 0);
 	return b;
 }
 
@@ -745,11 +746,12 @@ static lv_obj_t *bar_line;	/* the line under them */
 static void popup_close(void);
 
 /* The app menu ("octopus-menu"): a row per installed app. */
-#define MENU_W		184
-#define MENU_W_WIDE	(OCTOPUS_SCREEN_W - 8)	/* two columns: more apps than rows fit */
+#define MENU_W		octopus_px(184)
+#define MENU_W_WIDE	(OCTOPUS_SCREEN_W - octopus_px(8))	/* two columns: more apps than rows fit */
 #define MENU_ROWS	4	/* rows that fit under the bar */
-#define MENU_ROW_H	44
-#define MENU_PAD	6
+#define MENU_ROW_H	octopus_px(44)
+#define MENU_PAD	octopus_px(6)
+#define MENU_GAP	octopus_px(4)	/* between rows and columns */
 #define MENU_IDLE_MS	8000
 #define MENU_RADIUS	CORNER_R
 
@@ -761,7 +763,7 @@ static lv_timer_t *menu_timer;
  * are one shape: its fill runs through the line, and concave rounded
  * corners on either side of its foot curve out into the plate's top edge.
  */
-#define JOIN_R		6
+#define JOIN_R		octopus_px(6)
 static lv_obj_t *bar_join;	/* that band and its two fillets */
 
 static lv_obj_t *join_part(int x, int y, int w, int h)
@@ -879,10 +881,10 @@ static void menu_open(void)
 	w = cols == 2 ? MENU_W_WIDE : MENU_W;
 	rows = n ? (n + cols - 1) / cols : 1;
 	if (rows <= MENU_ROWS)
-		h = rows * (MENU_ROW_H + 4) - 4 + 2 * MENU_PAD;
+		h = rows * (MENU_ROW_H + MENU_GAP) - MENU_GAP + 2 * MENU_PAD;
 	else
-		h = (MENU_ROWS - 1) * (MENU_ROW_H + 4) + MENU_ROW_H / 2 + MENU_PAD;
-	item_w = (w - 2 * MENU_PAD - (cols - 1) * 4) / cols;
+		h = (MENU_ROWS - 1) * (MENU_ROW_H + MENU_GAP) + MENU_ROW_H / 2 + MENU_PAD;
+	item_w = (w - 2 * MENU_PAD - (cols - 1) * MENU_GAP) / cols;
 
 	popup_close();
 	if (menu_disp)
@@ -910,15 +912,15 @@ static void menu_open(void)
 	lv_obj_set_style_bg_color(plate, octopus_color(OCTOPUS_COLOR_TEXT), 0);
 	lv_obj_set_flex_flow(plate, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_style_pad_all(plate, MENU_PAD, 0);
-	lv_obj_set_style_pad_row(plate, 4, 0);
-	lv_obj_set_style_pad_column(plate, 4, 0);
+	lv_obj_set_style_pad_row(plate, MENU_GAP, 0);
+	lv_obj_set_style_pad_column(plate, MENU_GAP, 0);
 
 	for (i = 0; i < n_apps; i++) {
 		if (is_clock(apps[i].id))
 			continue;
 		row = lv_button_create(plate);
 		lv_obj_set_size(row, item_w, MENU_ROW_H);
-		lv_obj_set_style_radius(row, 8, 0);
+		lv_obj_set_style_radius(row, CORNER_R, 0);
 		lv_obj_set_style_shadow_width(row, 0, 0);
 		lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
 		lv_obj_set_style_bg_color(row, octopus_color(OCTOPUS_COLOR_BG), LV_STATE_PRESSED);
@@ -927,15 +929,15 @@ static void menu_open(void)
 		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 				      LV_FLEX_ALIGN_CENTER);
-		lv_obj_set_style_pad_left(row, 10, 0);
-		lv_obj_set_style_pad_column(row, 12, 0);
+		lv_obj_set_style_pad_left(row, octopus_px(10), 0);
+		lv_obj_set_style_pad_column(row, octopus_px(12), 0);
 		lv_obj_add_event_cb(row, menu_row_cb, LV_EVENT_CLICKED, &apps[i]);
 
 		l = lv_label_create(row);
 		lv_label_set_text(l, apps[i].icon);
 		lv_obj_set_style_text_font(l, octopus_icon_font(20), 0);
 		lv_obj_set_style_text_color(l, octopus_accent(apps[i].color), 0);
-		lv_obj_set_width(l, 24);
+		lv_obj_set_width(l, octopus_px(24));
 		lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
 		l = lv_label_create(row);
 		lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_LARGE), 0);
@@ -944,7 +946,7 @@ static void menu_open(void)
 			 * anything longer still on one line, cut with dots. */
 			const lv_font_t *f = octopus_font(OCTOPUS_FONT_LARGE);
 			const char *name = apps[i].name;
-			int room = item_w - 10 - 24 - 12 - 8;	/* pads, icon, gap */
+			int room = item_w - octopus_px(10 + 24 + 12 + 8);	/* pads, icon, gap */
 			/* (A struct, not a letter spacing: 0 there was NULL.) */
 			lv_text_attributes_t attr = { .max_width = LV_COORD_MAX };
 
@@ -1066,7 +1068,7 @@ static void tabs_rebuild(void)
 
 	/* Home: a button for the menu, filled only while that is open. */
 	btn_home = tab_create(bar_tabs, LV_SYMBOL_HOME, NULL, menu_disp != NULL);
-	lv_obj_set_style_pad_hor(btn_home, 13, 0);	/* a little roomier */
+	lv_obj_set_style_pad_hor(btn_home, octopus_px(13), 0);	/* a little roomier */
 	lv_obj_add_event_cb(btn_home, home_tab_cb, LV_EVENT_CLICKED, NULL);
 	home_style();
 	if (cur && !clock_front) {	/* the clock's tab is at the right */
@@ -1233,11 +1235,12 @@ static void popup_layout(void)
 	if (!popup_bar)
 		return;
 	if (popup_stop && !lv_obj_is_hidden(popup_stop)) {
-		lv_obj_set_size(popup_bar, OCTOPUS_POPUP_W - 8 - STOP_SIZE - 10 - 16,
-				OCTOPUS_POPUP_H - 2 * 14);
-		lv_obj_align(popup_bar, LV_ALIGN_LEFT_MID, 8 + STOP_SIZE + 10, 0);
+		lv_obj_set_size(popup_bar, OCTOPUS_POPUP_W - octopus_px(8 + 10 + 16) - STOP_SIZE,
+				OCTOPUS_POPUP_H - octopus_px(2 * 14));
+		lv_obj_align(popup_bar, LV_ALIGN_LEFT_MID, octopus_px(8 + 10) + STOP_SIZE, 0);
 	} else {
-		lv_obj_set_size(popup_bar, OCTOPUS_POPUP_W - 2 * 16, OCTOPUS_POPUP_H - 2 * 14);
+		lv_obj_set_size(popup_bar, OCTOPUS_POPUP_W - octopus_px(2 * 16),
+				OCTOPUS_POPUP_H - octopus_px(2 * 14));
 		lv_obj_center(popup_bar);
 	}
 }
@@ -1356,7 +1359,7 @@ static void popup_open(enum popup_kind kind)
 		popup_stop = stop;
 		lv_obj_set_hidden(stop, !media_playing);
 		lv_obj_set_size(stop, STOP_SIZE, STOP_SIZE);
-		lv_obj_align(stop, LV_ALIGN_LEFT_MID, 8, 0);
+		lv_obj_align(stop, LV_ALIGN_LEFT_MID, octopus_px(8), 0);
 		lv_obj_set_style_radius(stop, LV_RADIUS_CIRCLE, 0);
 		lv_obj_set_style_shadow_width(stop, 0, 0);
 		lv_obj_set_style_bg_color(stop, octopus_color(OCTOPUS_COLOR_BG), 0);
@@ -1378,7 +1381,7 @@ static void popup_open(enum popup_kind kind)
 	lv_obj_set_style_bg_opa(popup_bar, LV_OPA_TRANSP, LV_PART_KNOB);
 	lv_obj_set_style_pad_all(popup_bar, 0, LV_PART_KNOB);
 	/* The whole popup height is the touch target. */
-	lv_obj_set_ext_click_area(popup_bar, 14);
+	lv_obj_set_ext_click_area(popup_bar, octopus_px(14));
 	lv_obj_add_event_cb(popup_bar, popup_bar_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(popup_bar, popup_bar_cb, LV_EVENT_PRESSING, NULL);
 
@@ -1451,7 +1454,7 @@ static void build_panel(lv_obj_t *scr)
 	lv_obj_remove_style_all(tray);
 	lv_obj_set_scrollable(tray, false);
 	lv_obj_set_size(tray, LV_SIZE_CONTENT, OCTOPUS_BAR_H + TAB_FOOT);
-	lv_obj_align(tray, LV_ALIGN_TOP_RIGHT, -4, 0);
+	lv_obj_align(tray, LV_ALIGN_TOP_RIGHT, -octopus_px(4), 0);
 	lv_obj_set_flex_flow(tray, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(tray, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END,
 			      LV_FLEX_ALIGN_END);
@@ -1479,12 +1482,12 @@ static void build_panel(lv_obj_t *scr)
 	lv_label_set_text(bar_clock, "Clock");
 	lv_obj_set_style_text_font(bar_clock, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_update_layout(bar_clock);
-	w = lv_obj_get_width(bar_clock) + 2 * 9;
+	w = lv_obj_get_width(bar_clock) + octopus_px(2 * 9);
 	lv_label_set_text(bar_clock, "00:00");
 	lv_obj_set_style_text_font(bar_clock, octopus_font(OCTOPUS_FONT_LARGE), 0);
 	lv_obj_update_layout(bar_clock);
-	if (lv_obj_get_width(bar_clock) + 2 * 4 > w)
-		w = lv_obj_get_width(bar_clock) + 2 * 4;
+	if (lv_obj_get_width(bar_clock) + octopus_px(2 * 4) > w)
+		w = lv_obj_get_width(bar_clock) + octopus_px(2 * 4);
 	lv_obj_set_width(box, w);
 	lv_label_set_text(bar_clock, "");
 

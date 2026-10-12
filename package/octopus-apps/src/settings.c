@@ -39,9 +39,10 @@
 #define SSH_ON_FILE	"/run/octopus-config/ssh-on"
 #define SSH_PW_FILE	"/var/lib/octopus-root/ssh-password"
 #define TZ_FILE		"/etc/timezone"
-#define CAT_W		118		/* the category list */
-#define CAT_H		36		/* five fit: 5 x (36 + 2) + 8 <= 208 */
-#define PAD		8
+/* Sizes are 320x240's, scaled for the screen (octopus_px()). */
+#define CAT_W		octopus_px(118)	/* the category list */
+#define CAT_H		octopus_px(36)	/* five fit: 5 x (36 + 2) + 8 <= 208 */
+#define PAD		OCTOPUS_MARGIN	/* the panel's content: the apps' margins */
 #define PANEL_W		(OCTOPUS_APP_W - CAT_W)
 
 struct category {
@@ -103,7 +104,7 @@ static lv_obj_t *row(lv_obj_t *parent, const char *text)
 	lv_obj_t *r = lv_obj_create(parent), *l;
 
 	lv_obj_remove_style_all(r);
-	lv_obj_set_size(r, LV_PCT(100), 36);
+	lv_obj_set_size(r, LV_PCT(100), octopus_px(36));
 	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
@@ -118,7 +119,7 @@ static lv_obj_t *switch_in(lv_obj_t *r, bool on, lv_event_cb_t cb)
 {
 	lv_obj_t *sw = lv_switch_create(r);
 
-	lv_obj_set_size(sw, 52, 28);
+	lv_obj_set_size(sw, octopus_px(52), octopus_px(28));
 	lv_obj_set_style_bg_color(sw, octopus_color(OCTOPUS_COLOR_ACCENT),
 				  LV_PART_INDICATOR | LV_STATE_CHECKED);
 	if (on)
@@ -136,15 +137,15 @@ static void choice_buttons(lv_obj_t *parent, const char *const *names, int n, in
 	int i;
 
 	lv_obj_remove_style_all(r);
-	lv_obj_set_size(r, LV_PCT(100), 38);
+	lv_obj_set_size(r, LV_PCT(100), octopus_px(38));
 	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
-	lv_obj_set_style_pad_column(r, 4, 0);
+	lv_obj_set_style_pad_column(r, octopus_px(4), 0);
 	for (i = 0; i < n; i++) {
 		lv_obj_t *b = lv_button_create(r), *l;
 
-		lv_obj_set_height(b, 36);
+		lv_obj_set_height(b, octopus_px(36));
 		lv_obj_set_flex_grow(b, 1);
-		lv_obj_set_style_radius(b, 8, 0);
+		lv_obj_set_style_radius(b, octopus_px(8), 0);
 		lv_obj_set_style_shadow_width(b, 0, 0);
 		if (i == chosen)
 			octopus_glossy(b, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
@@ -290,8 +291,8 @@ static void saver_build(lv_obj_t *p)
 	r = row(p, "After");
 	dropdown_in(r, mopts, msel, 116, minutes_cb);
 	b = lv_button_create(p);
-	lv_obj_set_size(b, 96, 36);
-	lv_obj_set_style_radius(b, 8, 0);
+	lv_obj_set_size(b, octopus_px(96), octopus_px(36));
+	lv_obj_set_style_radius(b, octopus_px(8), 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
 	octopus_glossy(b, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
 	l = lv_label_create(b);
@@ -392,13 +393,13 @@ static void time_build(lv_obj_t *p)
 	free(opts);
 	lv_roller_set_visible_row_count(tz_roller, 3);
 	lv_roller_set_selected(tz_roller, sel, LV_ANIM_OFF);
-	lv_obj_set_width(tz_roller, 116);	/* "Johannesburg" */
+	lv_obj_set_width(tz_roller, octopus_px(116));	/* "Johannesburg" */
 	lv_obj_set_style_text_font(tz_roller, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_set_style_bg_color(tz_roller, octopus_color(OCTOPUS_COLOR_ACCENT), LV_PART_SELECTED);
 	lv_obj_set_style_text_color(tz_roller, octopus_on_accent(), LV_PART_SELECTED);
 	b = lv_button_create(r);
-	lv_obj_set_size(b, 56, 40);
-	lv_obj_set_style_radius(b, 8, 0);
+	lv_obj_set_size(b, octopus_px(56), octopus_px(40));
+	lv_obj_set_style_radius(b, octopus_px(8), 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
 	octopus_glossy(b, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
 	l = lv_label_create(b);
@@ -564,7 +565,7 @@ static void sound_build(lv_obj_t *p)
 	dd = lv_dropdown_create(r);
 	lv_dropdown_set_options(dd, "Off\nLow\nMedium\nHigh");
 	lv_dropdown_set_selected(dd, sel);
-	lv_obj_set_width(dd, 110);
+	lv_obj_set_width(dd, octopus_px(110));
 	lv_obj_set_style_text_font(dd, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_add_event_cb(dd, bass_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
@@ -590,7 +591,7 @@ static void sound_build(lv_obj_t *p)
 	dd = lv_dropdown_create(r);
 	lv_dropdown_set_options(dd, opts);
 	lv_dropdown_set_selected(dd, sel);
-	lv_obj_set_width(dd, 110);
+	lv_obj_set_width(dd, octopus_px(110));
 	lv_obj_set_style_text_font(dd, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_add_event_cb(dd, eq_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	custom_note = note(p, "Custom: put eq.txt on the card's config partition "
@@ -649,8 +650,8 @@ static void build(void)
 	lv_obj_set_size(cat_list, CAT_W, OCTOPUS_APP_H);
 	lv_obj_set_style_bg_opa(cat_list, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(cat_list, octopus_color(OCTOPUS_COLOR_SURFACE), 0);
-	lv_obj_set_style_pad_all(cat_list, 4, 0);
-	lv_obj_set_style_pad_row(cat_list, 2, 0);
+	lv_obj_set_style_pad_all(cat_list, octopus_px(4), 0);
+	lv_obj_set_style_pad_row(cat_list, octopus_px(2), 0);
 	lv_obj_set_flex_flow(cat_list, LV_FLEX_FLOW_COLUMN);
 	for (i = 0; i < N_CATEGORIES; i++) {
 		lv_obj_t *b, *l;
@@ -659,17 +660,17 @@ static void build(void)
 			continue;
 		b = lv_button_create(cat_list);
 		lv_obj_set_size(b, LV_PCT(100), CAT_H);
-		lv_obj_set_style_radius(b, 8, 0);
+		lv_obj_set_style_radius(b, octopus_px(8), 0);
 		lv_obj_set_style_shadow_width(b, 0, 0);
 		lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
 		lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_CHECKED);
 		lv_obj_set_style_bg_color(b, octopus_color(OCTOPUS_COLOR_ACCENT), LV_STATE_CHECKED);
-		lv_obj_set_style_pad_left(b, 4, 0);	/* room for "Appearance" */
-		lv_obj_set_style_pad_right(b, 2, 0);
+		lv_obj_set_style_pad_left(b, octopus_px(4), 0);	/* room for "Appearance" */
+		lv_obj_set_style_pad_right(b, octopus_px(2), 0);
 		lv_obj_set_flex_flow(b, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(b, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 				      LV_FLEX_ALIGN_CENTER);
-		lv_obj_set_style_pad_column(b, 4, 0);
+		lv_obj_set_style_pad_column(b, octopus_px(4), 0);
 		l = lv_label_create(b);
 		lv_obj_set_style_text_font(l, octopus_icon_font(20), 0);
 		lv_label_set_text(l, categories[i].icon);
@@ -688,7 +689,7 @@ static void build(void)
 	lv_obj_set_size(panel, PANEL_W, OCTOPUS_APP_H);
 	lv_obj_set_pos(panel, CAT_W, 0);
 	lv_obj_set_style_pad_all(panel, PAD, 0);
-	lv_obj_set_style_pad_row(panel, 6, 0);
+	lv_obj_set_style_pad_row(panel, octopus_px(6), 0);
 	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_scroll_dir(panel, LV_DIR_VER);
 	panel_show(cur_cat);

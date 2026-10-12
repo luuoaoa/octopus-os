@@ -18,7 +18,7 @@
 #include <time.h>
 #include <octopus.h>
 
-#define GAP	8
+#define GAP	octopus_px(8)	/* sizes: 320x240's, scaled for the screen */
 #define BAR_H	OCTOPUS_TOUCH_MIN
 
 static lv_obj_t *scr;
@@ -60,7 +60,7 @@ static lv_obj_t *button(lv_obj_t *parent, const char *text, const lv_font_t *fon
 	lv_obj_t *l = lv_label_create(b);
 
 	lv_obj_set_size(b, w, h);
-	lv_obj_set_style_radius(b, 12, 0);
+	lv_obj_set_style_radius(b, octopus_px(12), 0);
 	lv_label_set_text(l, text);
 	lv_obj_set_style_text_font(l, font, 0);
 	lv_obj_center(l);
@@ -175,7 +175,7 @@ static void build_clock(void)
 {
 	lv_obj_t *b;
 
-	face = octopus_group(view_clock, LV_FLEX_FLOW_COLUMN, 2);
+	face = octopus_group(view_clock, LV_FLEX_FLOW_COLUMN, octopus_px(2));
 	lbl_time = label(face, OCTOPUS_FONT_HUGE, OCTOPUS_COLOR_TEXT);
 	lbl_date = label(face, OCTOPUS_FONT_MEDIUM, OCTOPUS_COLOR_TEXT_DIM);
 	lv_obj_align(face, LV_ALIGN_TOP_MID, 0, 0);
@@ -190,17 +190,17 @@ static void build_clock(void)
 	/* A small pill at the bottom opens the alarms. */
 	b = lv_button_create(view_clock);
 	lv_obj_set_size(b, LV_SIZE_CONTENT, OCTOPUS_TOUCH_MIN);
-	lv_obj_set_style_pad_hor(b, 16, 0);
+	lv_obj_set_style_pad_hor(b, octopus_px(16), 0);
 	lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_flex_flow(b, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(b, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_column(b, 8, 0);
+	lv_obj_set_style_pad_column(b, octopus_px(8), 0);
 	lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -GAP);
 	lv_obj_add_event_cb(b, alarms_btn_cb, LV_EVENT_CLICKED, NULL);
 	ic_next = lv_label_create(b);
 	lv_label_set_text(ic_next, LV_SYMBOL_BELL);
-	lv_obj_set_style_text_font(ic_next, &lv_font_montserrat_14, 0);
+	lv_obj_set_style_text_font(ic_next, octopus_symbol_font(14), 0);
 	lbl_next = lv_label_create(b);
 	lv_obj_set_style_text_font(lbl_next, octopus_font(OCTOPUS_FONT_SMALL), 0);
 	face_center();
@@ -312,15 +312,17 @@ static void edit_delete_cb(lv_event_t *e)
  * In the app's 208 px: the buttons along the top, then the time with each
  * number's + over - beside it (outside: [+-] HH : MM [+-]), then the days.
  */
-#define STEP_W		56
-#define DIGITS_W	72
-#define COLON_W		28
-#define STEP_Y		54			/* under the top row */
-#define DAYS_H		44
+#define STEP_W		octopus_px(56)
+#define DIGITS_W	octopus_px(72)
+#define COLON_W		octopus_px(28)
+#define STEP_Y		octopus_px(54)		/* under the top row */
+#define DAYS_H		octopus_px(44)
+#define TOP_W		octopus_px(56)		/* the buttons along the top */
+#define TOP_Y		octopus_px(4)
 
 static lv_obj_t *step_button(const char *sym, int which, int x, int y)
 {
-	lv_obj_t *b = button(view_edit, sym, &lv_font_montserrat_28, STEP_W, BAR_H,
+	lv_obj_t *b = button(view_edit, sym, octopus_symbol_font(28), STEP_W, BAR_H,
 			     step_cb, (void *)(intptr_t)which);
 
 	lv_obj_add_event_cb(b, step_cb, LV_EVENT_LONG_PRESSED_REPEAT,
@@ -332,22 +334,22 @@ static lv_obj_t *step_button(const char *sym, int which, int x, int y)
 static void build_edit(void)
 {
 	lv_obj_t *b, *colon, *h_up, *h_down, *m_up, *m_down;
-	const int row_w = 2 * (STEP_W + 6 + DIGITS_W) + COLON_W;
+	const int row_w = 2 * (STEP_W + octopus_px(6) + DIGITS_W) + COLON_W;
 	const int x0 = (OCTOPUS_APP_W - row_w) / 2;
-	const int hour_x = x0 + STEP_W + 6, min_x = hour_x + DIGITS_W + COLON_W;
-	const int down_y = STEP_Y + BAR_H + 4;
-	const int days_y = down_y + BAR_H + 10;
+	const int hour_x = x0 + STEP_W + octopus_px(6), min_x = hour_x + DIGITS_W + COLON_W;
+	const int down_y = STEP_Y + BAR_H + octopus_px(4);
+	const int days_y = down_y + BAR_H + octopus_px(10);
 
-	b = button(view_edit, LV_SYMBOL_CLOSE, &lv_font_montserrat_28, 56, BAR_H,
+	b = button(view_edit, LV_SYMBOL_CLOSE, octopus_symbol_font(28), TOP_W, BAR_H,
 		   edit_cancel_cb, NULL);
-	lv_obj_set_pos(b, GAP, 4);
-	btn_delete = button(view_edit, LV_SYMBOL_TRASH, &lv_font_montserrat_28, 56, BAR_H,
+	lv_obj_set_pos(b, GAP, TOP_Y);
+	btn_delete = button(view_edit, LV_SYMBOL_TRASH, octopus_symbol_font(28), TOP_W, BAR_H,
 			    edit_delete_cb, NULL);
-	lv_obj_set_pos(btn_delete, GAP + 56 + GAP, 4);
+	lv_obj_set_pos(btn_delete, GAP + TOP_W + GAP, TOP_Y);
 	b = button(view_edit, LV_SYMBOL_OK "  Save", octopus_font(OCTOPUS_FONT_BODY),
-		   96, BAR_H, edit_save_cb, NULL);
+		   octopus_px(96), BAR_H, edit_save_cb, NULL);
 	lv_obj_set_style_bg_color(b, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
-	lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -GAP, 4);
+	lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -GAP, TOP_Y);
 
 	h_up = step_button(LV_SYMBOL_PLUS, 1, x0, STEP_Y);
 	h_down = step_button(LV_SYMBOL_MINUS, -1, x0, down_y);
@@ -371,7 +373,7 @@ static void build_edit(void)
 
 	b = lv_button_create(view_edit);
 	lv_obj_set_size(b, row_w, DAYS_H);
-	lv_obj_set_style_radius(b, 12, 0);
+	lv_obj_set_style_radius(b, octopus_px(12), 0);
 	lv_obj_set_pos(b, x0, days_y);
 	lv_obj_add_event_cb(b, days_cb, LV_EVENT_CLICKED, NULL);
 	lbl_days = lv_label_create(b);
@@ -423,15 +425,15 @@ static void list_rebuild(void)
 		lv_obj_t *row = lv_button_create(list), *text, *t, *d, *sw;
 
 		/* Row: tap to edit; the On/Off button on the right toggles. */
-		lv_obj_set_size(row, OCTOPUS_APP_W - 2 * GAP, 56);
-		lv_obj_set_style_radius(row, 12, 0);
+		lv_obj_set_size(row, OCTOPUS_APP_W - 2 * GAP, octopus_px(56));
+		lv_obj_set_style_radius(row, octopus_px(12), 0);
 		lv_obj_set_style_pad_all(row, 0, 0);
 		lv_obj_add_event_cb(row, row_edit_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
-		text = octopus_group(row, LV_FLEX_FLOW_COLUMN, 2);
+		text = octopus_group(row, LV_FLEX_FLOW_COLUMN, octopus_px(2));
 		lv_obj_set_flex_align(text, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
 				      LV_FLEX_ALIGN_START);
-		lv_obj_align(text, LV_ALIGN_LEFT_MID, 12, 0);
+		lv_obj_align(text, LV_ALIGN_LEFT_MID, octopus_px(12), 0);
 		t = label(text, OCTOPUS_FONT_LARGE, a->enabled ? OCTOPUS_COLOR_TEXT :
 			  OCTOPUS_COLOR_TEXT_DIM);
 		lv_label_set_text_fmt(t, "%02d:%02d", a->time / 60, a->time % 60);
@@ -440,10 +442,10 @@ static void list_rebuild(void)
 		octopus_center_y_on(text, row);
 
 		sw = button(row, a->enabled ? "On" : "Off", octopus_font(OCTOPUS_FONT_BODY),
-			    72, BAR_H, row_toggle_cb, (void *)(intptr_t)i);
+			    octopus_px(72), BAR_H, row_toggle_cb, (void *)(intptr_t)i);
 		lv_obj_set_style_bg_color(sw, octopus_color(a->enabled ? OCTOPUS_COLOR_ACCENT :
 					  OCTOPUS_COLOR_BG), 0);
-		lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -7, 0);
+		lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -octopus_px(7), 0);
 	}
 	if (!n_alarms) {
 		lv_obj_t *l = label(list, OCTOPUS_FONT_BODY, OCTOPUS_COLOR_TEXT_DIM);
@@ -451,7 +453,7 @@ static void list_rebuild(void)
 		lv_label_set_text(l, "No alarms.\nTap " LV_SYMBOL_PLUS " to add one.");
 		lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
 		lv_obj_set_width(l, LV_PCT(100));
-		lv_obj_set_style_pad_top(l, 40, 0);
+		lv_obj_set_style_pad_top(l, octopus_px(40), 0);
 	}
 	if (n_alarms < OCTOPUS_MAX_ALARMS)
 		lv_obj_set_hidden(btn_add, false);
@@ -470,21 +472,21 @@ static void build_list(void)
 {
 	lv_obj_t *b, *title;
 
-	b = button(view_list, LV_SYMBOL_LEFT, &lv_font_montserrat_28, 56, BAR_H,
+	b = button(view_list, LV_SYMBOL_LEFT, octopus_symbol_font(28), TOP_W, BAR_H,
 		   list_back_cb, NULL);
-	lv_obj_set_pos(b, GAP, 4);
+	lv_obj_set_pos(b, GAP, TOP_Y);
 	title = label(view_list, OCTOPUS_FONT_LARGE, OCTOPUS_COLOR_TEXT);
 	lv_label_set_text(title, "Alarms");
 	lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 	octopus_center_y_on(title, b);
-	btn_add = button(view_list, LV_SYMBOL_PLUS, &lv_font_montserrat_28, 56, BAR_H,
+	btn_add = button(view_list, LV_SYMBOL_PLUS, octopus_symbol_font(28), TOP_W, BAR_H,
 			 list_add_cb, NULL);
-	lv_obj_align(btn_add, LV_ALIGN_TOP_RIGHT, -GAP, 4);
+	lv_obj_align(btn_add, LV_ALIGN_TOP_RIGHT, -GAP, TOP_Y);
 
 	list = lv_obj_create(view_list);
 	lv_obj_remove_style_all(list);
-	lv_obj_set_size(list, LV_PCT(100), OCTOPUS_APP_H - 52);
-	lv_obj_set_pos(list, 0, 52);
+	lv_obj_set_size(list, LV_PCT(100), OCTOPUS_APP_H - octopus_px(52));
+	lv_obj_set_pos(list, 0, octopus_px(52));
 	lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
@@ -512,11 +514,11 @@ static void build_ring(void)
 	lv_obj_set_style_bg_color(view_ring, octopus_color(OCTOPUS_COLOR_BG), 0);
 	lv_obj_set_clickable(view_ring, true);
 
-	head = octopus_group(view_ring, LV_FLEX_FLOW_ROW, 10);
-	lv_obj_align(head, LV_ALIGN_TOP_MID, 0, 12);
+	head = octopus_group(view_ring, LV_FLEX_FLOW_ROW, octopus_px(10));
+	lv_obj_align(head, LV_ALIGN_TOP_MID, 0, octopus_px(12));
 	ic = lv_label_create(head);
 	lv_label_set_text(ic, LV_SYMBOL_BELL);
-	lv_obj_set_style_text_font(ic, &lv_font_montserrat_28, 0);
+	lv_obj_set_style_text_font(ic, octopus_symbol_font(28), 0);
 	lv_obj_set_style_text_color(ic, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
 	t = label(head, OCTOPUS_FONT_LARGE, OCTOPUS_COLOR_ACCENT);
 	lv_label_set_text(t, "Alarm");
@@ -525,18 +527,18 @@ static void build_ring(void)
 	lv_obj_align(lbl_ring_time, LV_ALIGN_TOP_MID, 0, 0);
 
 	b = button(view_ring, "Snooze", octopus_font(OCTOPUS_FONT_LARGE),
-		   (OCTOPUS_APP_W - 3 * 12) / 2, 72, ring_cmd_cb, "snooze");
-	lv_obj_align(b, LV_ALIGN_BOTTOM_LEFT, 12, -28);
+		   (OCTOPUS_APP_W - octopus_px(3 * 12)) / 2, octopus_px(72), ring_cmd_cb, "snooze");
+	lv_obj_align(b, LV_ALIGN_BOTTOM_LEFT, octopus_px(12), -octopus_px(28));
 	b = button(view_ring, "Stop", octopus_font(OCTOPUS_FONT_LARGE),
-		   (OCTOPUS_APP_W - 3 * 12) / 2, 72, ring_cmd_cb, "stop");
+		   (OCTOPUS_APP_W - octopus_px(3 * 12)) / 2, octopus_px(72), ring_cmd_cb, "stop");
 	lv_obj_set_style_bg_color(b, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
-	lv_obj_align(b, LV_ALIGN_BOTTOM_RIGHT, -12, -28);
+	lv_obj_align(b, LV_ALIGN_BOTTOM_RIGHT, -octopus_px(12), -octopus_px(28));
 	octopus_center_y_between(lbl_ring_time, head, b);
 
 	hint = label(view_ring, OCTOPUS_FONT_SMALL, OCTOPUS_COLOR_TEXT_DIM);
 	lv_label_set_text(hint, "The top button snoozes too");
 	lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 0);
-	octopus_center_y_at(hint, OCTOPUS_APP_H - 28 / 2);
+	octopus_center_y_at(hint, OCTOPUS_APP_H - octopus_px(28) / 2);
 }
 
 /* ------------------------------------------------------------------ */

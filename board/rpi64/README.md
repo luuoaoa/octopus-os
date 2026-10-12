@@ -26,13 +26,16 @@ to their Pi 5 versions. Wi-Fi (brcmfmac) and Ethernet both get DHCP. The
 serial console is `serial0`: GPIO 14/15 on every model, 115200
 (`dtparam=uart0_console` on the Pi 5); Bluetooth is off.
 
-## Display: 320x240 at a whole-number scale
+## Display: 320x240 or 640x360, at a whole-number scale
 
-The UI is drawn at 320x240 (the Chumby One's screen). octopus-wm shows it
-at the largest whole-number scale that fits the screen - 3 on a 1280x800
-panel (960x720, with a black border), 4 on 1080p - and scales every
-window nearest, so pixels stay square and sharp. Nothing in the apps
-changes. A screen whose own mode is bigger than 1920x1200 (a 4K TV) is
+The UI is drawn at 320x240 (4:3, the Chumby One's screen) or 640x360
+(16:9: the same UI at 1.5x, wider), whichever fills more of the screen:
+640x360 at 2x on a 1280x800 panel (1280x720, a black band above and
+below) or 1280x720, at 3x on 1080p; 320x240 on 4:3 screens and the 800x480
+official touchscreen. `screen = 4:3` or `screen = 16:9` in
+`/var/lib/octopus/settings.conf` picks one (from the next start of the
+UI). octopus-wm scales every window nearest, so pixels stay square and
+sharp. A screen whose own mode is bigger than 1920x1200 (a 4K TV) is
 driven at the biggest mode that isn't. Try a size headless with
 `OCTOPUS_WM_SIZE=1280x800`.
 

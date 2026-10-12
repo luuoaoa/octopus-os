@@ -51,7 +51,7 @@ unprivileged user, and over-the-air updates by rsync.
 | Part | What works | Notes |
 |---|---|---|
 | **Raspberry Pi** | Any 64-bit one: 3, 3B+, Zero 2 W, 4, 400, 5, 500, CM3/4/5 | A Pi 4 or 5 is comfortable. Wi-Fi is built in (or use Ethernet). |
-| **Screen + touch** | An HDMI screen with a USB touch panel | The UI is 320x240, scaled up by a whole number, so any size works; a mouse works too. |
+| **Screen + touch** | An HDMI screen with a USB touch panel | The UI is 320x240 (4:3) or 640x360 (16:9), scaled up by a whole number, so any size works; a mouse works too. |
 | **Speakers** | Through the Pi's first HDMI port | e.g. a screen with speakers, or an HDMI audio board with an amplifier. Other outputs need one line changed (below). |
 | **A shell** | Anything that holds it all on a nightstand | A case or stand for the screen, room for the Pi and speakers, some airflow. |
 | Power, storage | The Pi's official power supply; a microSD card | The image is about 320 MB. |
@@ -62,8 +62,8 @@ unprivileged user, and over-the-air updates by rsync.
   I2C/SPI touch controllers (Goodix, FocalTech/EDT, ADS7846) are built
   too, but untested, and they need their `dtoverlay=` line in
   `config.txt` on the card. The picture is sharpest when the screen's
-  height is a multiple of 240 (720, 960, 1080...): the rest is a black
-  border. The UI has no brightness control unless the screen has a kernel
+  height is a multiple of 240 or 360 (720, 960, 1080...): the rest is a
+  black border. The UI has no brightness control unless the screen has a kernel
   backlight driver; night mode darkens it either way.
 - **Speakers:** the sound goes to the first HDMI port's audio, through the
   bass and EQ chain. For the 3.5 mm jack (not on a Pi 5), a USB sound card

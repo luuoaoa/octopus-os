@@ -1064,7 +1064,7 @@
 #define LV_FONT_MONTSERRAT_40 0
 
 /** Montserrat 42 */
-#define LV_FONT_MONTSERRAT_42 0
+#define LV_FONT_MONTSERRAT_42 1	/* octopus: symbols at 28 px x 1.5 (640x360) */
 
 /** Montserrat 44 */
 #define LV_FONT_MONTSERRAT_44 0

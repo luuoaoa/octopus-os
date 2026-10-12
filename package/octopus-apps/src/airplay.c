@@ -31,12 +31,13 @@
 #define REMOTE		"/usr/bin/octopus-airplay-remote"
 #define AIRPLAY_SOURCE	"/usr/share/octopus/audio.d/airplay"
 #define MESSAGE_MS	2500
-#define SMALL_SIZE	38	/* the disconnect button */
-#define ART_X		14
-#define ART_SIZE	92
-#define COL_X		(ART_X + ART_SIZE + 12)
-#define COL_W		(OCTOPUS_APP_W - 10 - COL_X)
-#define LINE_GAP	2
+/* Sizes are 320x240's, scaled for the screen (octopus_px()). */
+#define SMALL_SIZE	octopus_px(38)	/* the disconnect button */
+#define ART_X		OCTOPUS_MARGIN
+#define ART_SIZE	octopus_px(92)
+#define COL_X		(ART_X + ART_SIZE + OCTOPUS_MARGIN)
+#define COL_W		(OCTOPUS_APP_W - OCTOPUS_MARGIN - COL_X)
+#define LINE_GAP	octopus_px(2)
 
 static char st_state[16], st_title[256], st_artist[256], st_album[256], st_client[128];
 static char st_cover[96];
@@ -271,12 +272,12 @@ int main(void)
 	row = lv_obj_create(scr);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_scrollable(row, false);
-	lv_obj_set_size(row, OCTOPUS_APP_W, 56);
-	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -8);
+	lv_obj_set_size(row, octopus_px(320), octopus_px(56));
+	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -octopus_px(8));
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
-	btn_disc = round_button(row, LV_SYMBOL_STOP, SMALL_SIZE, &lv_font_montserrat_14);
+	btn_disc = round_button(row, LV_SYMBOL_STOP, SMALL_SIZE, octopus_symbol_font(14));
 	lv_obj_set_style_bg_opa(btn_disc, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_bg_opa(btn_disc, LV_OPA_COVER, LV_STATE_PRESSED);
 	lv_obj_set_style_border_width(btn_disc, 1, 0);
@@ -284,11 +285,11 @@ int main(void)
 	lv_obj_set_ext_click_area(btn_disc, (OCTOPUS_TOUCH_MIN - SMALL_SIZE) / 2);
 	lv_obj_add_event_cb(btn_disc, disconnect_cb, LV_EVENT_SHORT_CLICKED, NULL);
 	lv_obj_add_event_cb(btn_disc, disconnect_cb, LV_EVENT_LONG_PRESSED, NULL);
-	btn_prev = round_button(row, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
+	btn_prev = round_button(row, LV_SYMBOL_PREV, octopus_px(52), octopus_symbol_font(28));
 	lv_obj_add_event_cb(btn_prev, remote_cb, LV_EVENT_CLICKED, "previtem");
-	btn_play = round_button(row, LV_SYMBOL_PAUSE, 56, &lv_font_montserrat_28);
+	btn_play = round_button(row, LV_SYMBOL_PAUSE, octopus_px(56), octopus_symbol_font(28));
 	lv_obj_add_event_cb(btn_play, remote_cb, LV_EVENT_CLICKED, "playpause");
-	btn_next = round_button(row, LV_SYMBOL_NEXT, 52, &lv_font_montserrat_28);
+	btn_next = round_button(row, LV_SYMBOL_NEXT, octopus_px(52), octopus_symbol_font(28));
 	lv_obj_add_event_cb(btn_next, remote_cb, LV_EVENT_CLICKED, "nextitem");
 	lbl_hint = lv_label_create(scr);
 	lv_obj_set_width(lbl_hint, OCTOPUS_APP_W - 2 * ART_X);
@@ -296,16 +297,16 @@ int main(void)
 	lv_obj_set_style_text_font(lbl_hint, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_set_style_text_align(lbl_hint, LV_TEXT_ALIGN_CENTER, 0);
 	lv_label_set_text(lbl_hint, "");
-	lv_obj_align(lbl_hint, LV_ALIGN_BOTTOM_MID, 0, -14);
+	lv_obj_align(lbl_hint, LV_ALIGN_BOTTOM_MID, 0, -OCTOPUS_MARGIN);
 	lv_obj_update_layout(scr);
 
 	/* The art, centred in the space above the buttons (as the radios). */
-	art_y = (lv_obj_get_y(row) - ART_SIZE) / 2;
+	art_y = OCTOPUS_MARGIN;	/* top left at the margins, as in every app */
 	art_tile = lv_obj_create(scr);
 	lv_obj_remove_style_all(art_tile);
 	lv_obj_set_pos(art_tile, ART_X, art_y);
 	lv_obj_set_size(art_tile, ART_SIZE, ART_SIZE);
-	lv_obj_set_style_radius(art_tile, 10, 0);
+	lv_obj_set_style_radius(art_tile, octopus_px(10), 0);
 	lv_obj_set_style_bg_opa(art_tile, LV_OPA_COVER, 0);
 	lv_obj_set_style_clip_corner(art_tile, true, 0);
 	lv_obj_set_clickable(art_tile, false);

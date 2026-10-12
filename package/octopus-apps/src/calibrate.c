@@ -39,10 +39,18 @@
 #define W		OCTOPUS_SCREEN_W
 #define H		OCTOPUS_SCREEN_H
 
-static const int targets[N_TARGETS][2] = {
-	{ INSET, INSET }, { W - INSET, INSET }, { W - INSET, H - INSET },
-	{ INSET, H - INSET }, { W / 2, H / 2 },
-};
+/* The screen's size is known at run time: set in main(). */
+static int targets[N_TARGETS][2];
+
+static void targets_init(void)
+{
+	const int t[N_TARGETS][2] = {
+		{ INSET, INSET }, { W - INSET, INSET }, { W - INSET, H - INSET },
+		{ INSET, H - INSET }, { W / 2, H / 2 },
+	};
+
+	memcpy(targets, t, sizeof(targets));
+}
 
 static int fd = -1;
 static int x_min, x_max, y_min, y_max;
@@ -342,6 +350,7 @@ int main(void)
 	y_max = ay.maximum;
 
 	octopus_init();
+	targets_init();
 	disp = octopus_window_create("octopus-calibrate", W, H);
 	if (!disp)
 		return 1;

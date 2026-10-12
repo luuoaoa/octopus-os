@@ -48,18 +48,20 @@
 
 static char stations_user[256], stations_default[256], station_file[256], art_dir[256];
 #define MAX_CATS	16
-#define ART_X		14
-#define ART_SIZE	92
-#define ART_PAD		8
-#define COL_X		(ART_X + ART_SIZE + 12)	/* the right column */
-#define COL_W		(OCTOPUS_APP_W - 10 - COL_X)
-#define SMALL_BTN	38
-#define INFO_W		70			/* "AAC 320k" */
+/* Sizes are 320x240's, scaled for the screen (octopus_px()). */
+#define ART_X		OCTOPUS_MARGIN
+#define ART_SIZE	octopus_px(92)
+#define ART_PAD		octopus_px(8)
+#define COL_X		(ART_X + ART_SIZE + OCTOPUS_MARGIN)	/* the right column */
+#define COL_W		(OCTOPUS_APP_W - OCTOPUS_MARGIN - COL_X)
+#define SMALL_BTN	octopus_px(38)
+#define INFO_W		octopus_px(70)			/* "AAC 320k" */
 #define START_GRACE_MS	4000	/* a stream just started: no status yet */
-#define LINE_GAP	2	/* between the category and the name */
-#define TILE_H		44
-#define TILE_GAP	6
-#define LIST_HEAD_H	30
+#define LINE_GAP	octopus_px(2)	/* between the category and the name */
+#define TILE_H		octopus_px(44)
+#define TILE_GAP	octopus_px(6)
+#define LIST_HEAD_H	octopus_px(30)
+#define TILE_W		((OCTOPUS_APP_W - 2 * OCTOPUS_MARGIN - octopus_px(8)) / 2)
 
 struct station {
 	char name[64];
@@ -546,10 +548,10 @@ static lv_obj_t *tile(lv_obj_t *parent, const char *text, const char *sub, bool 
 {
 	lv_obj_t *b = lv_button_create(parent), *l;
 
-	lv_obj_set_size(b, (OCTOPUS_APP_W - 3 * 8) / 2, TILE_H);
-	lv_obj_set_style_radius(b, 8, 0);
+	lv_obj_set_size(b, TILE_W, TILE_H);
+	lv_obj_set_style_radius(b, octopus_px(8), 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
-	lv_obj_set_style_pad_hor(b, 8, 0);
+	lv_obj_set_style_pad_hor(b, octopus_px(8), 0);
 	lv_obj_set_style_bg_color(b, octopus_color(OCTOPUS_COLOR_SURFACE), 0);
 	lv_obj_set_style_text_color(b, octopus_color(OCTOPUS_COLOR_TEXT), 0);
 	if (on) {	/* the selected one: the accent, glossy */
@@ -559,7 +561,7 @@ static lv_obj_t *tile(lv_obj_t *parent, const char *text, const char *sub, bool 
 	l = lv_label_create(b);
 	lv_label_set_text(l, text);
 	lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_LARGE), 0);
-	lv_obj_set_width(l, (OCTOPUS_APP_W - 3 * 8) / 2 - 16 - (sub ? 24 : 0));
+	lv_obj_set_width(l, TILE_W - octopus_px(16 + (sub ? 24 : 0)));
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
 	/* Up to two lines (a tile has room), the rest cut with dots. */
 	lv_obj_update_layout(l);
@@ -595,8 +597,8 @@ static void list_show(int cat)
 	/* Header: where we are (tap it to go back up), and close. */
 	head = lv_button_create(list_panel);
 	lv_obj_remove_style_all(head);
-	lv_obj_set_size(head, OCTOPUS_APP_W - 8 - OCTOPUS_TOUCH_MIN, LIST_HEAD_H + 4);
-	lv_obj_set_pos(head, 8, 0);
+	lv_obj_set_size(head, OCTOPUS_APP_W - OCTOPUS_MARGIN - OCTOPUS_TOUCH_MIN, LIST_HEAD_H + octopus_px(4));
+	lv_obj_set_pos(head, OCTOPUS_MARGIN, 0);
 	l = lv_label_create(head);
 	lv_label_set_text_fmt(l, "%s%s", cat < 0 ? "" : LV_SYMBOL_LEFT "  ",
 			      cat < 0 ? "Stations" : cats[cat]);
@@ -607,7 +609,7 @@ static void list_show(int cat)
 		lv_obj_add_event_cb(head, back_cb, LV_EVENT_CLICKED, NULL);
 	b = lv_button_create(list_panel);
 	lv_obj_remove_style_all(b);
-	lv_obj_set_size(b, OCTOPUS_TOUCH_MIN, LIST_HEAD_H + 4);
+	lv_obj_set_size(b, OCTOPUS_TOUCH_MIN, LIST_HEAD_H + octopus_px(4));
 	lv_obj_align(b, LV_ALIGN_TOP_RIGHT, 0, 0);
 	l = lv_label_create(b);
 	lv_label_set_text(l, LV_SYMBOL_CLOSE);
@@ -617,13 +619,13 @@ static void list_show(int cat)
 
 	grid = lv_obj_create(list_panel);
 	lv_obj_remove_style_all(grid);
-	lv_obj_set_size(grid, OCTOPUS_APP_W, OCTOPUS_APP_H - LIST_HEAD_H - 4);
-	lv_obj_set_pos(grid, 0, LIST_HEAD_H + 4);
+	lv_obj_set_size(grid, OCTOPUS_APP_W, OCTOPUS_APP_H - LIST_HEAD_H - octopus_px(4));
+	lv_obj_set_pos(grid, 0, LIST_HEAD_H + octopus_px(4));
 	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_style_pad_hor(grid, 8, 0);
-	lv_obj_set_style_pad_bottom(grid, 8, 0);
+	lv_obj_set_style_pad_hor(grid, OCTOPUS_MARGIN, 0);
+	lv_obj_set_style_pad_bottom(grid, octopus_px(8), 0);
 	lv_obj_set_style_pad_gap(grid, TILE_GAP, 0);
-	lv_obj_set_style_pad_column(grid, 8, 0);
+	lv_obj_set_style_pad_column(grid, octopus_px(8), 0);
 	lv_obj_set_scroll_dir(grid, LV_DIR_VER);
 
 	if (cat < 0) {
@@ -736,37 +738,38 @@ int main(void)
 	scr = octopus_app_init(APP_ID);
 	lv_obj_set_scrollable(scr, false);
 
-	/* Bottom: the station list (small), previous, play/stop, next. */
+	/* Bottom: the station list (small), previous, play/stop, next - as
+	 * far apart as on 320x240 on a wider screen too. */
 	row = lv_obj_create(scr);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_scrollable(row, false);
-	lv_obj_set_size(row, OCTOPUS_APP_W, 56);
-	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -8);
+	lv_obj_set_size(row, octopus_px(320), octopus_px(56));
+	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -octopus_px(8));
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
-	btn_list = round_button(row, LV_SYMBOL_LIST, SMALL_BTN, &lv_font_montserrat_14);
+	btn_list = round_button(row, LV_SYMBOL_LIST, SMALL_BTN, octopus_symbol_font(14));
 	lv_obj_set_style_bg_opa(btn_list, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_bg_opa(btn_list, LV_OPA_COVER, LV_STATE_PRESSED);
 	lv_obj_set_style_border_width(btn_list, 1, 0);
 	lv_obj_set_style_border_opa(btn_list, LV_OPA_40, 0);
 	lv_obj_set_ext_click_area(btn_list, (OCTOPUS_TOUCH_MIN - SMALL_BTN) / 2);
 	lv_obj_add_event_cb(btn_list, list_cb, LV_EVENT_CLICKED, NULL);
-	btn_prev = round_button(row, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
+	btn_prev = round_button(row, LV_SYMBOL_PREV, octopus_px(52), octopus_symbol_font(28));
 	lv_obj_add_event_cb(btn_prev, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
-	btn_play = round_button(row, LV_SYMBOL_PLAY, 56, &lv_font_montserrat_28);
+	btn_play = round_button(row, LV_SYMBOL_PLAY, octopus_px(56), octopus_symbol_font(28));
 	lv_obj_add_event_cb(btn_play, play_cb, LV_EVENT_CLICKED, NULL);
-	btn_next = round_button(row, LV_SYMBOL_NEXT, 52, &lv_font_montserrat_28);
+	btn_next = round_button(row, LV_SYMBOL_NEXT, octopus_px(52), octopus_symbol_font(28));
 	lv_obj_add_event_cb(btn_next, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
 	lv_obj_update_layout(scr);
 
-	/* The logo, centred in the space above the buttons. */
-	art_y = (lv_obj_get_y(row) - ART_SIZE) / 2;
+	/* The logo, top left, at the margins (as in every app). */
+	art_y = OCTOPUS_MARGIN;
 	art_tile = lv_obj_create(scr);
 	lv_obj_remove_style_all(art_tile);
 	lv_obj_set_pos(art_tile, ART_X, art_y);
 	lv_obj_set_size(art_tile, ART_SIZE, ART_SIZE);
-	lv_obj_set_style_radius(art_tile, 10, 0);
+	lv_obj_set_style_radius(art_tile, octopus_px(10), 0);
 	lv_obj_set_style_bg_opa(art_tile, LV_OPA_COVER, 0);
 	lv_obj_set_style_clip_corner(art_tile, true, 0);
 	lv_obj_set_clickable(art_tile, false);
@@ -775,7 +778,7 @@ int main(void)
 	lv_obj_set_hidden(art_img, true);
 	art_note = lv_label_create(art_tile);
 	lv_label_set_text(art_note, LV_SYMBOL_AUDIO);
-	lv_obj_set_style_text_font(art_note, &lv_font_montserrat_48, 0);
+	lv_obj_set_style_text_font(art_note, octopus_symbol_font(48), 0);
 	lv_obj_center(art_note);
 
 	/* Right column, top, level with the logo's top: the category, and
@@ -783,7 +786,7 @@ int main(void)
 	 * small. */
 	lbl_cat = lv_label_create(scr);
 	lv_obj_set_style_text_font(lbl_cat, octopus_font(OCTOPUS_FONT_BODY), 0);
-	lv_obj_set_width(lbl_cat, COL_W - INFO_W - 6);
+	lv_obj_set_width(lbl_cat, COL_W - INFO_W - octopus_px(6));
 	lv_obj_set_height(lbl_cat, lv_font_get_line_height(octopus_font(OCTOPUS_FONT_BODY)));
 	lv_label_set_long_mode(lbl_cat, LV_LABEL_LONG_MODE_DOTS);
 	lv_obj_set_pos(lbl_cat, COL_X, art_y);

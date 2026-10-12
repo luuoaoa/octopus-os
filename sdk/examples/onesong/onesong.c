@@ -79,24 +79,24 @@ int main(void)
 
 	/* The button: big and round (a finger on a resistive screen). */
 	button = lv_button_create(scr);
-	lv_obj_set_size(button, 96, 96);
+	lv_obj_set_size(button, octopus_px(96), octopus_px(96));
 	lv_obj_set_style_radius(button, LV_RADIUS_CIRCLE, 0);
-	lv_obj_align(button, LV_ALIGN_CENTER, 0, -24);
+	lv_obj_align(button, LV_ALIGN_CENTER, 0, -octopus_px(24));
 	lv_obj_add_event_cb(button, pressed, LV_EVENT_CLICKED, NULL);
 	button_icon = lv_label_create(button);
-	lv_obj_set_style_text_font(button_icon, &lv_font_montserrat_48, 0);
+	lv_obj_set_style_text_font(button_icon, octopus_symbol_font(48), 0);
 	lv_obj_center(button_icon);
 
 	title = lv_label_create(scr);
 	lv_obj_set_style_text_font(title, octopus_font(OCTOPUS_FONT_LARGE), 0);
 	lv_label_set_text(title, TITLE);
-	lv_obj_align_to(title, button, LV_ALIGN_OUT_BOTTOM_MID, 0, 14);
+	lv_obj_align_to(title, button, LV_ALIGN_OUT_BOTTOM_MID, 0, octopus_px(14));
 
 	status = lv_label_create(scr);
 	lv_obj_set_style_text_font(status, octopus_font(OCTOPUS_FONT_SMALL), 0);
 	lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_width(status, OCTOPUS_APP_W);	/* centred however long the text */
-	lv_obj_align_to(status, title, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
+	lv_obj_align_to(status, title, LV_ALIGN_OUT_BOTTOM_MID, 0, octopus_px(6));
 
 	octopus_on_mode_change(on_mode, NULL);
 	lv_timer_ready(lv_timer_create(poll, 500, NULL));
