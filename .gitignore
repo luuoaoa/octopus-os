@@ -4,8 +4,7 @@
 /customize-octopus/
 *.swp
 *.swo
-/output-falconwing/
-/board/falconwing/stock/
+/board/falconwing-mainline/stock/
 /output-falconwing-mainline/
 /output-raspad/
 /customize-raspad/

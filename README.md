@@ -183,7 +183,7 @@ If you have one, building for it needs an image of its stock SD card
 (the bootloader is reused):
 
 ```sh
-board/falconwing/extract-stock.sh /path/to/stock-sdcard.img   # once
+board/falconwing-mainline/extract-stock.sh /path/to/stock-sdcard.img   # once
 bash docker-build.sh falconwing-mainline
 # -> output-falconwing-mainline/images/sdcard.img
 bin/update-chumby.sh <its address>     # updating a running one
@@ -199,8 +199,7 @@ hardware watchdog, and trying builds without reflashing (`bin/chumby-try`).
 configs/raspad_defconfig                the Raspberry Pi image
 configs/falconwing_mainline_defconfig   the Chumby One image
 board/raspad/                           Pi board files and root overlay
-board/falconwing-mainline/              Chumby One board files, kernel patches, root overlay
-board/falconwing/                       the Chumby One stock-kernel image, the shared overlay
+board/falconwing-mainline/              Chumby One board files, kernel patches, the root overlay (shared with the Pi)
 package/
   octopus-wm/        the Wayland compositor (wlroots)
   octopus-shell/     tab bar, Home menu, alarms, buttons, screen saver policy

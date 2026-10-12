@@ -1,7 +1,7 @@
 # Chumby One (falconwing) with a mainline kernel.
 #
 # The stock Chumby bootloader and config block (partition 1, extracted by
-# board/falconwing/extract-stock.sh) are kept; post-image.sh writes our
+# board/falconwing-mainline/extract-stock.sh) are kept; post-image.sh writes our
 # zImage + appended DTB into the krnA slot instead of the 2.6.28 kernel.
 BR2_arm=y
 BR2_arm926t=y
@@ -33,7 +33,7 @@ BR2_SYSTEM_BIN_SH_BUSYBOX=y
 # Time zones: "timezone:" in the config partition's user-data picks one.
 BR2_TARGET_TZ_INFO=y
 BR2_TARGET_LOCALTIME="Etc/UTC"
-BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/rootfs-common $(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/rootfs"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/rootfs"
 BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/post-build.sh"
 BR2_ROOTFS_POST_FAKEROOT_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/post-fakeroot.sh"
 BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/users.table"

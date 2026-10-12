@@ -5,20 +5,20 @@
 set -euo pipefail
 
 BOARD_DIR="$(dirname "$0")"
-FW_DIR="${BOARD_DIR}/../falconwing"
+STOCK_DIR="${BOARD_DIR}/stock"
 GENIMAGE_CFG="${BOARD_DIR}/genimage.cfg"
 GENIMAGE_TMP="${BUILD_DIR}/genimage.tmp"
 KERNEL="${BINARIES_DIR}/zImage.imx23-chumby-one"
 BOOT_IMG="${BINARIES_DIR}/falconwing-boot.img"
 
-if [ ! -f "${FW_DIR}/stock/boot.img" ]; then
-    echo "ERROR: ${FW_DIR}/stock/boot.img missing; run board/falconwing/extract-stock.sh first" >&2
+if [ ! -f "${STOCK_DIR}/boot.img" ]; then
+    echo "ERROR: ${STOCK_DIR}/boot.img missing; run board/falconwing-mainline/extract-stock.sh first" >&2
     exit 1
 fi
 
 # Find krnA in the config block table (Cfg* at 0xC000, 16-byte entries
 # {offset, size, flags, name} from 0xC400) rather than hardcoding it.
-read -r KRN_OFF KRN_SIZE < <(python3 - "${FW_DIR}/stock/boot.img" <<'PY'
+read -r KRN_OFF KRN_SIZE < <(python3 - "${STOCK_DIR}/boot.img" <<'PY'
 import struct, sys
 d = open(sys.argv[1], 'rb').read()
 assert d[0xC000:0xC004] == b'Cfg*', 'no config block'
@@ -45,12 +45,12 @@ fi
 # Stock boot partition with the slot zeroed, then our kernel in it. The
 # bootloader loads the whole slot; the decompressor finds the DTB right
 # after the zImage, so the zero padding is harmless.
-cp "${FW_DIR}/stock/boot.img" "${BOOT_IMG}"
+cp "${STOCK_DIR}/boot.img" "${BOOT_IMG}"
 dd if=/dev/zero of="${BOOT_IMG}" bs=1 seek="${KRN_OFF}" count="${KRN_SIZE}" conv=notrunc status=none
 dd if="${KERNEL}" of="${BOOT_IMG}" bs=1 seek="${KRN_OFF}" conv=notrunc status=none
 
 rm -rf "${BINARIES_DIR}/config"
-cp -r "${FW_DIR}/config-partition" "${BINARIES_DIR}/config"
+cp -r "${BOARD_DIR}/config-partition" "${BINARIES_DIR}/config"
 
 # p2, the "carrier": early boot (busybox + its libraries + /sbin/init-ram),
 # the system image (rootfs.squashfs, mounted read-only as the root) and the

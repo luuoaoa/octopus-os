@@ -9,7 +9,7 @@
 # customize-raspad/{network-config,user-data,authorized_keys,
 # wpa_supplicant.conf} at the top of the tree (gitignored: your WiFi
 # password) go onto the boot FAT too, so a fresh card joins your network.
-# The formats are sdcard-config-apply's (board/falconwing/rootfs-common).
+# The formats are sdcard-config-apply's (board/falconwing-mainline/rootfs/usr/bin).
 set -eu
 
 BOARD_DIR="$(dirname "$0")"

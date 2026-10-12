@@ -1,7 +1,7 @@
 #!/bin/sh
-# Apply the user-editable config from the FAT partition (/boot, p3) to
-# the rootfs. Runs every boot from /etc/init.d/S30sdcard-config; edit the
-# files on the card from any PC and reboot to change settings.
+# Apply the user-editable config from the card's FAT partition (/boot) to
+# the system. Runs every boot (octopus-config.service); edit the files on
+# the card from any PC and reboot to change settings.
 #
 #   /boot/wpa_supplicant.conf  used verbatim if present (power users), else
 #   /boot/network-config       Pi Imager style; first access point wins:
@@ -43,35 +43,21 @@ strip() {
 # FAT tools sometimes leave CRLF line endings; strip them into a temp copy.
 unix() { tr -d '\r' < "$1"; }
 
-# Where the results go. Stock-kernel board: the real files in a writable
-# /etc. falconwing-mainline (systemd) has a read-only root whose /etc
-# entries are symlinks into /run/octopus-config (see its post-build.sh), so
-# everything is written there, in RAM, every boot.
-if [ -d /run/systemd/system ]; then
-    OUT=/run/octopus-config
-    mkdir -p "$OUT"
-    WPA=$OUT/wpa_supplicant-wlan0.conf
-    HOSTNAME_FILE=$OUT/hostname
-    LOCALTIME=$OUT/localtime
-    TIMEZONE_FILE=$OUT/timezone
-    SHADOW_IN=/etc/shadow.default
-    SHADOW=$OUT/shadow
-    AUTH_KEYS=$OUT/authorized_keys
-    DROPBEAR_DEFAULT=$OUT/dropbear
-    LOCATION_FILE=$OUT/location
-    EQ_FILE=$OUT/eq.txt
-else
-    WPA=/etc/wpa_supplicant.conf
-    HOSTNAME_FILE=/etc/hostname
-    LOCALTIME=/etc/localtime
-    TIMEZONE_FILE=/etc/timezone
-    SHADOW_IN=/etc/shadow
-    SHADOW=/etc/shadow
-    AUTH_KEYS=/root/.ssh/authorized_keys
-    DROPBEAR_DEFAULT=/etc/default/dropbear
-    LOCATION_FILE=/etc/octopus-location
-    EQ_FILE=
-fi
+# Where the results go: the root is read-only (the Chumby One) or treated
+# so, and its /etc entries are symlinks into /run/octopus-config (see
+# post-fakeroot.sh), so everything is written there, in RAM, every boot.
+OUT=/run/octopus-config
+mkdir -p "$OUT"
+WPA=$OUT/wpa_supplicant-wlan0.conf
+HOSTNAME_FILE=$OUT/hostname
+LOCALTIME=$OUT/localtime
+TIMEZONE_FILE=$OUT/timezone
+SHADOW_IN=/etc/shadow.default
+SHADOW=$OUT/shadow
+AUTH_KEYS=$OUT/authorized_keys
+DROPBEAR_DEFAULT=$OUT/dropbear
+LOCATION_FILE=$OUT/location
+EQ_FILE=$OUT/eq.txt
 
 if ! mountpoint -q "$BOOT"; then
     mount "$BOOT" 2>/dev/null || { log "no config partition at $BOOT; nothing to apply"; exit 0; }
@@ -218,14 +204,12 @@ if [ -f "$BOOT/authorized_keys" ]; then
 fi
 
 # === The custom EQ: readable to the apps (the FAT is root's only) ===
-if [ -n "$EQ_FILE" ]; then
-    if [ -f "$BOOT/eq.txt" ]; then
-        unix "$BOOT/eq.txt" > "$EQ_FILE.new" && chmod 644 "$EQ_FILE.new" &&
-            mv "$EQ_FILE.new" "$EQ_FILE"
-        log "custom EQ: $BOOT/eq.txt"
-    else
-        rm -f "$EQ_FILE"
-    fi
+if [ -f "$BOOT/eq.txt" ]; then
+    unix "$BOOT/eq.txt" > "$EQ_FILE.new" && chmod 644 "$EQ_FILE.new" &&
+        mv "$EQ_FILE.new" "$EQ_FILE"
+    log "custom EQ: $BOOT/eq.txt"
+else
+    rm -f "$EQ_FILE"
 fi
 
 if [ "$SSH_PWAUTH" = true ]; then

@@ -79,7 +79,7 @@ The Chumby's image reuses its stock bootloader, so the build needs it,
 extracted once from an image of the original SD card:
 
 ```sh
-board/falconwing/extract-stock.sh /path/to/stock-sdcard.img
+board/falconwing-mainline/extract-stock.sh /path/to/stock-sdcard.img
 sdk/make-sdk.sh falconwing_mainline
 ```
 

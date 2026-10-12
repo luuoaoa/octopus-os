@@ -1,7 +1,7 @@
 # falconwing-mainline (Chumby One on a current kernel)
 
-The same Chumby One image as `board/falconwing`, but with a mainline Linux
-kernel (6.19.x) instead of the stock 2.6.28-chumby, and a glibc userland.
+Octopus OS for the Chumby One, on a mainline Linux kernel (6.19.x) in
+place of its stock 2.6.28, with a glibc userland.
 
 Only the stock **bootloader and config block** are reused: post-image.sh
 writes our `zImage` + appended `imx23-chumby-one.dtb` into the `krnA` slot
@@ -10,14 +10,15 @@ DRAM, clock, USB and panel bring-up, then loads the whole slot to
 0x40008000 and jumps to it.
 
 ```sh
-board/falconwing/extract-stock.sh /path/to/stock-sdcard.img   # once
+board/falconwing-mainline/extract-stock.sh /path/to/stock-sdcard.img   # once
 bash docker-build.sh falconwing-mainline
 # -> output-falconwing-mainline/images/sdcard.img
 ```
 
-Same FAT config partition as `board/falconwing` (network-config /
-user-data / authorized_keys; the apply script is shared via
-`board/falconwing/rootfs-common`), but systemd, and a read-only root.
+The card's FAT config partition (`config-partition/`: network-config,
+user-data, authorized_keys) is applied at every boot by
+`sdcard-config-apply`, which the Raspberry Pi image shares. The system
+runs systemd on a read-only root.
 
 ## Read-only root
 

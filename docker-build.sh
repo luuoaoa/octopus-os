@@ -4,7 +4,6 @@
 #
 #   bash docker-build.sh                      # Chumby One -> output-falconwing-mainline/
 #   bash docker-build.sh raspad               # Raspberry Pi -> output-raspad/
-#   bash docker-build.sh falconwing           # Chumby One, stock kernel -> output-falconwing/
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
