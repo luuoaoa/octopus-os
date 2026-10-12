@@ -126,10 +126,19 @@ BR2_PACKAGE_ALSA_UTILS_APLAY=y
 # BR2_PACKAGE_ALSA_UTILS_ALSAMIXER is not set
 # BR2_PACKAGE_IFUPDOWN_SCRIPTS is not set
 
-# Root filesystem: ext4 on p2, read-write.
+# Root filesystem: ext4 on p2, read-write, 512 MB. What's kept (settings,
+# apps, their data) is on LVM volumes in the rest of the card, made on
+# the first boot (board/rpi64/rootfs/usr/libexec/octopus-storage): LVM2,
+# e2fsprogs to format and grow them, util-linux's partx to add the
+# partition on a disk in use.
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y
-BR2_TARGET_ROOTFS_EXT2_SIZE="256M"
+BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
+BR2_PACKAGE_LVM2=y
+BR2_PACKAGE_E2FSPROGS=y
+BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
+BR2_PACKAGE_UTIL_LINUX=y
+BR2_PACKAGE_UTIL_LINUX_PARTX=y
 # A tar of the root too: the SDK's simulator image (sdk/make-sdk.sh).
 BR2_TARGET_ROOTFS_TAR=y
 BR2_PACKAGE_HOST_DOSFSTOOLS=y

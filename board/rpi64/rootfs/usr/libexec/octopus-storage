@@ -1,0 +1,191 @@
+#!/bin/sh
+# The Pi's storage: the card's space past the image, as LVM, for what's
+# kept (octopus-storage.service, at every boot, before the local mounts).
+#
+# The image is p1 (boot, FAT) and p2 (the root, 512 MB). p3 is ours, made
+# here on the first boot: from START (1 GiB, on every card, whatever the
+# image's root - so a bigger root in a later image still fits under it,
+# and flashing one never reaches it) to the card's end, an LVM physical
+# volume in the volume group "octopus", with
+#
+#   octopus/state    /var/lib/octopus       settings, alarms, calibration
+#   octopus/appdata  /var/lib/octopus/apps  the apps' own data (a
+#                                           podcast's cache, a station list)
+#   octopus/apps     /var/apps              installed app bundles
+#
+# (mounted here, at every boot, once they're active - not by fstab, whose
+# wait for a device can't know they're still being made), the rest of
+# the group left free: a volume grows
+# later (lvextend -r) without touching the others. Flashing an image
+# again writes its partition table, which has no p3: the volume group is
+# still there on the card, at START, and is found again - settings, apps
+# and their data survive a reflash. A card whose p2 reaches START (a
+# root grown by hand) is left alone, as is any p3 that's not ours.
+#
+# The first boot after an OTA update to this (the old root on p2, its
+# /var/lib/octopus and /var/apps in it): those moved into the volumes.
+set -u
+
+VG=octopus
+START_MIB=1024		# p3's start: 1 GiB
+MIN_MIB=1024		# less than this past START: no volumes (all on the root)
+
+say() { echo "octopus-storage: $*"; }
+
+# The card the root is on (cmdline.txt: root=/dev/mmcblk0p2), its p3.
+# (OCTOPUS_STORAGE_DISK=loop0: another, its p2 as the root - for trying
+# this on an image, never set on a device.)
+if [ -n "${OCTOPUS_STORAGE_DISK:-}" ]; then
+	disk=$OCTOPUS_STORAGE_DISK
+	case "$disk" in
+		loop[0-9]*) ;;
+		*) say "OCTOPUS_STORAGE_DISK: loop devices only"; exit 0 ;;
+	esac
+	root_sys=/sys/block/$disk/${disk}p2
+else
+	root_dev=$(mountpoint -d / 2>/dev/null)
+	root_sys=$(readlink -f "/sys/dev/block/$root_dev" 2>/dev/null)
+	disk=$(basename "$(dirname "$root_sys")")
+	# A card or disk the Pi boots from, and nothing else.
+	case "$disk" in
+		mmcblk[0-9]*|nvme[0-9]*n[0-9]*|sd[a-z]) ;;
+		*) say "the root isn't on a card or disk ($disk): nothing done"; exit 0 ;;
+	esac
+fi
+case "$disk" in
+	*[0-9]) p3=/dev/${disk}p3 ;;
+	*) p3=/dev/${disk}3 ;;
+esac
+DISK=/dev/$disk
+num() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
+# Touch nothing unless it's what we think: a whole disk, the root (or the
+# loop device's p2) its partition 2, and every number read a number.
+if [ ! -b "$DISK" ] || [ ! -d "/sys/block/$disk" ] ||
+   [ "$(cat "$root_sys/partition" 2>/dev/null)" != 2 ] ||
+   ! num "$(cat "/sys/block/$disk/size" 2>/dev/null)" ||
+   ! num "$(cat "$root_sys/start" 2>/dev/null)" || ! num "$(cat "$root_sys/size" 2>/dev/null)"; then
+	say "$DISK isn't a disk with the root as its p2: nothing done"
+	exit 0
+fi
+
+modprobe dm_mod 2>/dev/null
+# LVM's devices file lives on the root, which a reflash or an update
+# replaces: ours is found on the card without one.
+lvm_() { cmd=$1; shift; "$cmd" --devicesfile "" "$@"; }
+
+# The volumes on their mount points (state first: appdata is in it),
+# checked first; one that won't mount leaves its directory on the root.
+mount_all() {
+	for spec in "state /var/lib/octopus" "appdata /var/lib/octopus/apps" "apps /var/apps"; do
+		set -- $spec
+		dev=/dev/mapper/$VG-$1
+		[ -b "$dev" ] || continue
+		mkdir -p "$2"
+		mountpoint -q "$2" && continue
+		fsck.ext4 -p "$dev" >/dev/null 2>&1
+		mount -t ext4 -o noatime "$dev" "$2" || say "can't mount $VG/$1 on $2"
+	done
+}
+
+# Our volume group already there (any boot but the first, or a reflash
+# that kept it): on with it.
+activate() {
+	lvm_ vgchange -ay "$VG" >/dev/null 2>&1 || return 1
+	udevadm settle --timeout=10
+	mount_all
+	say "$VG active: $(lvm_ lvs --noheadings -o lv_name "$VG" 2>/dev/null | tr -s ' \n' ' ')"
+}
+
+if [ ! -b "$p3" ]; then
+	sectors=$(cat "/sys/block/$disk/size")
+	ss=$(cat "/sys/block/$disk/queue/hw_sector_size" 2>/dev/null || echo 512)
+	start=$((START_MIB * 1024 * 1024 / ss))
+	p2_end=$(( $(cat "$root_sys/start") + $(cat "$root_sys/size") ))
+	if [ "$p2_end" -gt "$start" ]; then
+		say "p2 reaches past ${START_MIB} MiB: no volumes, all on the root"
+		exit 0
+	fi
+	if [ $(( (sectors - start) * ss / 1024 / 1024 )) -lt "$MIN_MIB" ]; then
+		say "under ${MIN_MIB} MiB past ${START_MIB} MiB: no volumes, all on the root"
+		exit 0
+	fi
+	say "making $p3: sector $start to the end, LVM"
+	# busybox fdisk; the kernel can't re-read a table on a disk in use
+	# (the root's): partx adds the one partition instead.
+	fdisk -u "$DISK" >/dev/null 2>&1 <<EOF
+n
+p
+3
+$start
+
+t
+3
+8e
+w
+EOF
+	partx -a --nr 3 "$DISK" 2>/dev/null
+	udevadm settle --timeout=10
+	if [ ! -b "$p3" ]; then
+		say "$p3 didn't appear: no volumes this boot"
+		exit 0
+	fi
+fi
+
+if activate; then
+	exit 0
+fi
+
+# p3 there but no volume group of ours on it: make one - unless it holds
+# something else (a filesystem, another's LVM), which stays.
+type=$(blkid "$p3" 2>/dev/null | sed -n 's/.* TYPE="\([^"]*\)".*/\1/p')	# (busybox's)
+if [ -n "$type" ] && [ "$type" != LVM2_member ]; then
+	say "$p3 holds $type, not ours: left alone"
+	exit 0
+fi
+if [ "$type" = LVM2_member ]; then
+	say "$p3 is LVM but not $VG: left alone"
+	exit 0
+fi
+
+say "setting up $VG on $p3"
+lvm_ pvcreate -ff -y "$p3" >/dev/null || exit 0
+lvm_ vgcreate "$VG" "$p3" >/dev/null || exit 0
+free_mib=$(lvm_ vgs --noheadings --units m --nosuffix -o vg_free "$VG" | tr -d ' ' | cut -d. -f1)
+# The app data (podcast episodes) gets the most, up to 2 GiB; 256 MiB
+# kept free to grow into - unless the card's too small for that too.
+appdata_mib=$(( free_mib - 128 - 512 - 256 ))
+[ "$appdata_mib" -lt 256 ] && appdata_mib=$(( free_mib - 128 - 512 ))
+[ "$appdata_mib" -gt 2048 ] && appdata_mib=2048
+lvm_ lvcreate -y -n state -L 128m "$VG" >/dev/null &&
+	lvm_ lvcreate -y -n apps -L 512m "$VG" >/dev/null &&
+	lvm_ lvcreate -y -n appdata -L "${appdata_mib}m" "$VG" >/dev/null || exit 0
+udevadm settle --timeout=10
+for lv in state apps appdata; do
+	mkfs.ext4 -q -F -L "$lv" "/dev/mapper/$VG-$lv" || exit 0
+done
+
+# What the root held (an OTA'd Pi): into the volumes, then gone from the
+# root (its space back). Mounted here, then on their places (activate).
+mnt=/run/octopus-storage
+mkdir -p $mnt
+move() {	# from (on the root), lv, what to leave out (a dir name or "")
+	[ -d "$1" ] || return 0
+	mount -t ext4 "/dev/mapper/$VG-$2" $mnt || return 1
+	(cd "$1" && for f in * .[!.]*; do
+		[ -e "$f" ] || continue
+		[ -n "$3" ] && [ "$f" = "$3" ] && continue
+		cp -a "$f" $mnt/ || exit 1
+	done) && (cd "$1" && for f in * .[!.]*; do
+		[ -e "$f" ] || continue
+		[ -n "$3" ] && [ "$f" = "$3" ] && continue
+		rm -rf "$f"
+	done)
+	umount $mnt
+	say "moved $1 to $VG/$2"
+}
+move /var/lib/octopus/apps appdata ""
+move /var/lib/octopus state apps
+move /var/apps apps ""
+rmdir $mnt
+activate
+exit 0

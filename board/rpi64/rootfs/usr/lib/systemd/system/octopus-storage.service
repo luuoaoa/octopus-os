@@ -1,0 +1,21 @@
+[Unit]
+Description=The card's space past the image: LVM volumes for state and apps
+# Its volumes (octopus/state, apps, appdata) made on the first boot, found
+# again at every boot - a reflash too - activated and mounted, before the
+# local filesystems are up (see /usr/libexec/octopus-storage). The root
+# is read-write by then (an OTA'd Pi's data is moved off it, the first
+# time).
+DefaultDependencies=no
+After=systemd-udevd.service systemd-udev-trigger.service systemd-remount-fs.service
+Before=local-fs-pre.target shutdown.target
+Wants=local-fs-pre.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/octopus-storage
+TimeoutStartSec=5min
+
+[Install]
+WantedBy=local-fs.target

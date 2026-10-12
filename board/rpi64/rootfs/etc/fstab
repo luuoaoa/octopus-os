@@ -7,3 +7,7 @@ tmpfs		/tmp		tmpfs	mode=1777,size=32m	0	0
 # config files (network-config, user-data, authorized_keys) read by
 # octopus-config.service. Read-only: edit it from another machine.
 /dev/mmcblk0p1	/boot		vfat	ro,noatime,fmask=0177,dmask=0077,nofail	0	0
+# The rest of the card (p3, LVM, made on the first boot) holds what's kept
+# across updates and reflashes: octopus-storage.service mounts its volumes
+# on /var/lib/octopus, /var/lib/octopus/apps and /var/apps (not here:
+# they're still being made when the first boot's mounts would wait).
