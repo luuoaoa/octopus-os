@@ -35,7 +35,15 @@ echo "== $BOARD: the image and the SDK (in $OUT/)"
 # (This repository's own packages - liboctopus, the shell, the apps - are
 # local sources buildroot doesn't watch: rebuilt every time, or a pull's
 # changes to them wouldn't reach the image or the SDK.)
-docker run --rm -v "$TOP:/work" -w /work/buildroot "$BUILDER" bash -c '
+# Rootless Docker: the container's root is you (its other users map to
+# sub-ids that can't write here), so build as root in it; some packages'
+# configure refuses root unless told it's fine.
+AS_BUILDER=
+if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+	AS_BUILDER="--user 0:0 -e FORCE_UNSAFE_CONFIGURE=1"
+fi
+# shellcheck disable=SC2086
+docker run --rm $AS_BUILDER -v "$TOP:/work" -w /work/buildroot "$BUILDER" bash -c '
 	set -e
 	make O=/work/'"$OUT"' BR2_EXTERNAL=/work '"$DEFCONFIG"'
 	rebuild=

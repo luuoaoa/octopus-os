@@ -42,7 +42,11 @@ in_sdk() { [ -n "${OCTOPUS_SDK:-}" ] && [ -d "$OCTOPUS_SDK" ]; }
 sdk_run() {
 	docker image inspect "$SDK_IMAGE" >/dev/null 2>&1 ||
 		die "no $SDK_IMAGE image: build it with sdk/make-sdk.sh $BOARD (docs/sdk-build.md)"
-	docker run --rm -i $( [ -t 0 ] && echo -t ) -u "$(id -u):$(id -g)" \
+	# You, in the container: your ids - or its root, with rootless Docker
+	# (where that's you; your ids there would be another's).
+	as="-u $(id -u):$(id -g)"
+	docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless && as="-u 0:0"
+	docker run --rm -i $( [ -t 0 ] && echo -t ) $as \
 		-v "$PWD:/work" -w /work "$SDK_IMAGE" octopus-app "$@"
 }
 
