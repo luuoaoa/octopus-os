@@ -1,0 +1,146 @@
+From: falconwing bring-up
+Subject: [PATCH] drm: mxsfb: really reset the LCDIF, with its pixel clock on
+
+On the Chumby One (i.MX23) the picture now and then came up split: the
+top left corner in the middle of the panel, wrapped around - the
+console's cursor already there when the driver took over from the
+bootloader - and stayed so through every later modeset.
+
+The reset before each modeset reset nothing: mxsfb_reset_block() only
+cleared SFTRST and CLKGATE, it never asserted SFTRST. And it ran with
+the pixel clock gated (mxsfb_enable_controller() turns it on after the
+mode is set; at boot, the unused clocks were turned off long before,
+with the bootloader's scanout still running), so the part of the block
+it clocks wasn't reset either.
+
+Checked on the board: a split picture survived the old reset, and a
+reset with SFTRST asserted and the pixel clock running brought it back.
+
+So stop a running scanout cleanly (end of frame, then off the bus: a
+block reset in the middle of its fetches hung the board), then reset the
+block with stmp_reset_block(), with the pixel clock at its new rate and
+running on into the scanout. (This replaces restarting the scanout after
+a FIFO underflow: forced underflows never split the picture.)
+
+---
+--- a/drivers/gpu/drm/mxsfb/mxsfb_kms.c	2026-04-11 05:29:58.000000000 -0700
++++ b/drivers/gpu/drm/mxsfb/mxsfb_kms.c	2026-10-12 15:51:54.172555747 -0700
+@@ -14,6 +14,7 @@
+ #include <linux/media-bus-format.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/spinlock.h>
++#include <linux/stmp_device.h>
+ 
+ #include <drm/drm_atomic.h>
+ #include <drm/drm_atomic_helper.h>
+@@ -32,9 +33,6 @@
+ #include "mxsfb_drv.h"
+ #include "mxsfb_regs.h"
+ 
+-/* 1 second delay should be plenty of time for block reset */
+-#define RESET_TIMEOUT		1000000
+-
+ /* -----------------------------------------------------------------------------
+  * CRTC
+  */
+@@ -227,40 +225,37 @@
+ 		clk_disable_unprepare(mxsfb->clk_disp_axi);
+ }
+ 
+-/*
+- * Clear the bit and poll it cleared.  This is usually called with
+- * a reset address and mask being either SFTRST(bit 31) or CLKGATE
+- * (bit 30).
+- */
+-static int clear_poll_bit(void __iomem *addr, u32 mask)
+-{
+-	u32 reg;
+-
+-	writel(mask, addr + REG_CLR);
+-	return readl_poll_timeout(addr, reg, !(reg & mask), 0, RESET_TIMEOUT);
+-}
+-
+ static int mxsfb_reset_block(struct mxsfb_drm_private *mxsfb)
+ {
++	u32 reg;
+ 	int ret;
+ 
+ 	/*
+ 	 * It seems, you can't re-program the controller if it is still
+ 	 * running. This may lead to shifted pictures (FIFO issue?), so
+ 	 * first stop the controller and drain its FIFOs.
++	 *
++	 * Merely clearing SFTRST and CLKGATE, as was done here, resets
++	 * nothing: on the i.MX23 pixels left in the FIFO then stay there,
++	 * and the picture is shifted right and wrapped around until the
++	 * next real reset. Assert SFTRST (with the pixel clock running,
++	 * see mxsfb_crtc_mode_set_nofb()).
++	 *
++	 * But not in the middle of its fetches: a block reset while it is
++	 * bus master hung the i.MX23. A scanout still running (the
++	 * bootloader's at boot; mxsfb_disable_controller() waits only 1 ms)
++	 * is let finish its frame - a frame is 35 ms at most here - and
++	 * taken off the bus first, as the vendor kernel stopped it.
+ 	 */
++	if (readl(mxsfb->base + LCDC_CTRL) & CTRL_RUN) {
++		writel(CTRL_DOTCLK_MODE, mxsfb->base + LCDC_CTRL + REG_CLR);
++		readl_poll_timeout(mxsfb->base + LCDC_CTRL, reg,
++				   !(reg & CTRL_RUN), 100, 100000);
++	}
++	writel(CTRL_MASTER, mxsfb->base + LCDC_CTRL + REG_CLR);
++	udelay(100);
+ 
+-	ret = clear_poll_bit(mxsfb->base + LCDC_CTRL, CTRL_SFTRST);
+-	if (ret)
+-		return ret;
+-
+-	writel(CTRL_CLKGATE, mxsfb->base + LCDC_CTRL + REG_CLR);
+-
+-	ret = clear_poll_bit(mxsfb->base + LCDC_CTRL, CTRL_SFTRST);
+-	if (ret)
+-		return ret;
+-
+-	ret = clear_poll_bit(mxsfb->base + LCDC_CTRL, CTRL_CLKGATE);
++	ret = stmp_reset_block(mxsfb->base + LCDC_CTRL);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -297,15 +292,24 @@
+ 			     bus_flags);
+ 	DRM_DEV_DEBUG_DRIVER(drm->dev, "Mode flags: 0x%08X\n", m->flags);
+ 
+-	/* Mandatory eLCDIF reset as per the Reference Manual */
++	/*
++	 * Mandatory eLCDIF reset as per the Reference Manual. With the
++	 * pixel clock at its new rate and running: the part of the block
++	 * it clocks (the FIFO's output side) isn't reset without it, and
++	 * it's gated here - by mxsfb_disable_controller(), or at boot by
++	 * the unused clocks being turned off while the bootloader's
++	 * scanout still runs. And left running into the scanout: gating
++	 * it again before mxsfb_enable_controller() brought the shift back.
++	 * The caller drops this reference once the controller has its own.
++	 */
++	clk_set_rate(mxsfb->clk, m->crtc_clock * 1000);
++	clk_prepare_enable(mxsfb->clk);
++
+ 	err = mxsfb_reset_block(mxsfb);
+ 	if (err)
+ 		return;
+ 
+ 	mxsfb_set_formats(mxsfb, bus_format);
+-
+-	clk_set_rate(mxsfb->clk, m->crtc_clock * 1000);
+-
+ 	mxsfb_set_mode(mxsfb, bus_flags);
+ }
+ 
+@@ -396,6 +400,9 @@
+ 	}
+ 
+ 	mxsfb_enable_controller(mxsfb);
++
++	/* mxsfb_crtc_mode_set_nofb()'s, the controller holds its own now */
++	clk_disable_unprepare(mxsfb->clk);
+ }
+ 
+ static void mxsfb_crtc_atomic_disable(struct drm_crtc *crtc,
