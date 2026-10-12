@@ -5,7 +5,7 @@
 ################################################################################
 
 QN8005_VERSION = 1.0
-QN8005_SITE = $(BR2_EXTERNAL_PIFANSRF_PATH)/package/qn8005/src
+QN8005_SITE = $(BR2_EXTERNAL_OCTOPUS_PATH)/package/qn8005/src
 QN8005_SITE_METHOD = local
 QN8005_LICENSE = GPL-2.0+
 

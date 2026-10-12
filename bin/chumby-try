@@ -2,7 +2,7 @@
 # Try builds on a Chumby One without reflashing it, and measure.
 #
 #   bin/chumby-try HOST push PATH...   stage this build's PATH (e.g.
-#                     /usr/bin/chumby-wm, /usr/lib/libchumby.so.1) for the
+#                     /usr/bin/octopus-wm, /usr/lib/liboctopus.so.1) for the
 #                     Chumby's run overlay: an unstripped copy (named
 #                     functions in perf) on its SD card, /var/try/root,
 #                     which /var/run-overlay binds over the read-only image
@@ -13,7 +13,7 @@
 #   bin/chumby-try HOST apply          reboot into it (and wait)
 #   bin/chumby-try HOST status         the overlay: armed or not, its files,
 #                     its last log. (An update - bin/update-chumby.sh, or any
-#                     new image - ends it; chumby-wm frames the screen in
+#                     new image - ends it; octopus-wm frames the screen in
 #                     magenta while anything is bound over the image.)
 #   bin/chumby-try HOST reset          the overlay gone, reboot: the image's
 #   bin/chumby-try HOST restart        restart the UI session
@@ -29,12 +29,12 @@
 #                     (the DAC at 0) and left so: nothing is heard.
 #
 # The overlay is the escape hatch: init-ram disables it before running it
-# (a boot it breaks comes back as the image's) and chumby-overlay-ok
+# (a boot it breaks comes back as the image's) and octopus-overlay-ok
 # re-arms it after a boot that went well. Nothing is swapped under a
 # running session (that reset the Chumby: its 64 MB, the watchdog). Load is
 # shares of the ticks counted, not of wall time: this kernel counts fewer
 # ticks than pass while idle. Key auth, else password "root"
-# (CHUMBY_SSH_PASSWORD), as bin/update-chumby.sh.
+# (OCTOPUS_SSH_PASSWORD), as bin/update-chumby.sh.
 set -eu
 
 HOST="${1:-}"
@@ -57,7 +57,7 @@ on() { ssh ${SSH_OPTS} "${HOST}" "$@"; }
 login() {
 	if ! SSH_ASKPASS_REQUIRE=never ssh ${SSH_OPTS} -o BatchMode=yes "${HOST}" true 2>/dev/null; then
 		command -v sshpass >/dev/null 2>&1 || { echo "key auth failed and sshpass is not installed" >&2; exit 1; }
-		SSH_ASKPASS_REQUIRE=never sshpass -p "${CHUMBY_SSH_PASSWORD:-root}" \
+		SSH_ASKPASS_REQUIRE=never sshpass -p "${OCTOPUS_SSH_PASSWORD:-root}" \
 			ssh ${SSH_OPTS} -o PubkeyAuthentication=no "${HOST}" true
 	fi
 }
@@ -84,7 +84,7 @@ wait_up() {
 	ssh ${SSH_OPTS} -O exit "${HOST}" 2>/dev/null || true
 	i=0
 	until ssh ${SSH_OPTS} -o BatchMode=yes "${HOST}" \
-		'test $(cut -d. -f1 /proc/uptime) -gt 40 && systemctl is-active -q chumby-session' 2>/dev/null; do
+		'test $(cut -d. -f1 /proc/uptime) -gt 40 && systemctl is-active -q octopus-session' 2>/dev/null; do
 		i=$((i + 1))
 		[ $i -lt 40 ] || { echo "${HOST}: not back after a reboot" >&2; exit 1; }
 		sleep 5
@@ -146,7 +146,7 @@ reset)
 	echo "back on the image's files ($(on "grep -c ' /usr/' /proc/mounts" || true) bound)"
 	;;
 restart)
-	on 'systemctl restart chumby-session && echo "session restarted"'
+	on 'systemctl restart octopus-session && echo "session restarted"'
 	;;
 perf)
 	secs="${1:-10}"
@@ -160,11 +160,11 @@ perf)
 	;;
 bench)
 	on "mkdir -p ${TRY} && TRY=${TRY} SCENARIOS='$*' sh -s" <<'EOF'
-export XDG_RUNTIME_DIR=/run/chumby WAYLAND_DISPLAY=wayland-0
-C=/run/chumby/shell.cmd
+export XDG_RUNTIME_DIR=/run/octopus WAYLAND_DISPLAY=wayland-0
+C=/run/octopus/shell.cmd
 T=15
-STATION=$(grep -v '^[#[]' /usr/lib/chumby/apps/NetRadio/streams.conf | grep -m1 '|' | cut -d'|' -f2 | tr -d ' ')
-EPISODE=$(head -1 "$(ls /var/lib/chumby/apps/Podcasts/*.feed 2>/dev/null | head -1)" 2>/dev/null | cut -f4)
+STATION=$(grep -v '^[#[]' /usr/lib/octopus/apps/NetRadio/streams.conf | grep -m1 '|' | cut -d'|' -f2 | tr -d ' ')
+EPISODE=$(head -1 "$(ls /var/lib/octopus/apps/Podcasts/*.feed 2>/dev/null | head -1)" 2>/dev/null | cut -f4)
 
 snap() {	# pid ticks name
 	for p in /proc/[0-9]*; do
@@ -199,9 +199,9 @@ say() {
 # after anything starts playing (a player may set its level).
 mute() { amixer -q sset DAC 0 mute 2>/dev/null; }
 # Players as the apps' user, as the apps start them (files they leave in
-# /run/chumby stay the apps'), allowed nice -10 as chumby-shell allows it.
-as_app() { ( ulimit -e 30 2>/dev/null; exec su -s /bin/sh -c 'exec "$@"' chumby as_app "$@" ); }
-quiet() { say active; as_app chumby-stream stop 2>/dev/null; as_app radio off >/dev/null 2>&1; mute; }
+# /run/octopus stay the apps'), allowed nice -10 as octopus-shell allows it.
+as_app() { ( ulimit -e 30 2>/dev/null; exec su -s /bin/sh -c 'exec "$@"' octopus as_app "$@" ); }
+quiet() { say active; as_app octopus-stream stop 2>/dev/null; as_app radio off >/dev/null 2>&1; mute; }
 # The screen on (the power button's "screen on": it may have been turned off):
 # a dark screen gets no saver, and draws nothing.
 lit() { [ "$(cat /sys/class/backlight/backlight/bl_power 2>/dev/null)" = 0 ] || { say "screen on"; sleep 2; }; }
@@ -210,7 +210,7 @@ lit
 front() { say "launch $1"; sleep ${2:-12}; }
 saver() {
 	say saver; sleep 4
-	ls -l /proc/[0-9]*/exe 2>/dev/null | grep -q /usr/lib/chumby/savers/ || echo "   (no saver: see the journal, \"no screen saver: ...\")"
+	ls -l /proc/[0-9]*/exe 2>/dev/null | grep -q /usr/lib/octopus/savers/ || echo "   (no saver: see the journal, \"no screen saver: ...\")"
 }
 
 [ -n "$SCENARIOS" ] || SCENARIOS="idle saver stream podcast saver-stream"
@@ -219,13 +219,13 @@ for SC in $SCENARIOS; do
 	case $SC in
 	idle)	front Clock; measure ;;
 	saver)	front "FM Radio"; saver; measure ;;
-	stream)	as_app chumby-stream "$STATION" Bench 2>/dev/null; mute; front Clock 15; mute; measure ;;
+	stream)	as_app octopus-stream "$STATION" Bench 2>/dev/null; mute; front Clock 15; mute; measure ;;
 	podcast)
-		kill $(pidof chumby-podcasts) 2>/dev/null
-		as_app chumby-stream "$EPISODE" Bench 10000000 2>/dev/null; mute; sleep 3
+		kill $(pidof octopus-podcasts) 2>/dev/null
+		as_app octopus-stream "$EPISODE" Bench 10000000 2>/dev/null; mute; sleep 3
 		front Podcasts 15; mute; measure ;;
 	saver-stream)
-		as_app chumby-stream "$STATION" Bench 2>/dev/null; mute; front "FM Radio" 15; mute; saver; measure ;;
+		as_app octopus-stream "$STATION" Bench 2>/dev/null; mute; front "FM Radio" 15; mute; saver; measure ;;
 	*)	echo "== $SC: unknown" ;;
 	esac
 done 2>&1 | grep -v "ALSA lib"

@@ -1,28 +1,28 @@
-# Tutorial: One Song, a Chumby app that plays a song
+# Tutorial: One Song, an Octopus app that plays a song
 
 In this tutorial you build **One Song**: an app with one big button that
 plays a song from the internet, or stops it. You'll try it in the
-simulator on your PC, then install it on a device running the Chumby's
-UI - a Raspberry Pi, or the Chumby One itself. It takes about 15 minutes,
+simulator on your PC, then install it on a device running Octopus
+OS - a Raspberry Pi, or the Chumby One itself. It takes about 15 minutes,
 and needs no device until the last step.
 
 What you'll learn:
 - the shape of an app (an LVGL screen, the main loop, day and night
   colours);
-- playing sound with the Chumby's stream player, which goes on while your
+- playing sound with Octopus's stream player, which goes on while your
   app is in the background;
 - bundles: building, packing, the simulator, installing.
 
 You need the SDK for your board, built once with `sdk/make-sdk.sh`
-([sdk-build.md](sdk-build.md)), ARM emulation, and `chumby-app` on your
-PATH ([sdk.md](sdk.md), "Setting up"). `chumby-app` builds for a Raspberry
-Pi unless `CHUMBY_BOARD` says otherwise (`falconwing_mainline` for the
+([sdk-build.md](sdk-build.md)), ARM emulation, and `octopus-app` on your
+PATH ([sdk.md](sdk.md), "Setting up"). `octopus-app` builds for a Raspberry
+Pi unless `OCTOPUS_BOARD` says otherwise (`falconwing_mainline` for the
 Chumby One).
 
 ## 1. Start from the template
 
 ```sh
-chumby-app new OneSong
+octopus-app new OneSong
 cd OneSong
 ```
 
@@ -30,12 +30,12 @@ That makes `onesong.c` (a label in the middle of the screen), `app.conf`
 and a `Makefile`. Build it and try it now, before changing anything:
 
 ```sh
-chumby-app build      # cross-compiles into bundle/
-chumby-app sim        # the Chumby's UI in a window
+octopus-app build      # cross-compiles into bundle/
+octopus-app sim        # Octopus OS in a window
 ```
 
 In the window, open the Home menu (the house, top left) and pick "OneSong":
-"Hello, Chumby" in the middle of the screen. Close the window (or Ctrl-C)
+"Hello, Octopus" in the middle of the screen. Close the window (or Ctrl-C)
 to stop the simulator.
 
 ## 2. Describe the app: app.conf
@@ -53,11 +53,11 @@ Color = #d35400
 ```
 
 - **`Id`** is how the shell knows your app's window. The program must pass
-  the same string to `chumby_app_init()`.
+  the same string to `octopus_app_init()`.
 - **`Name`** is shown in the Home menu, and **`Short`** on the app's tab
   (tabs are narrow).
 - **`Icon`** is one of the shell's icons; **`Color`** is your app's hue (its
-  tab, and `CHUMBY_COLOR_ACCENT` in your code).
+  tab, and `OCTOPUS_COLOR_ACCENT` in your code).
 - **`Exec`** is the program, inside the bundle.
 
 ## 3. The code
@@ -70,7 +70,7 @@ file is also in the SDK: `sdk/examples/onesong/onesong.c`.)
 ```c
 #include <stdio.h>
 #include <string.h>
-#include <chumby.h>
+#include <octopus.h>
 
 #define APP_ID	"OneSong"	/* = Id in app.conf */
 #define SONG	"https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
@@ -79,24 +79,24 @@ file is also in the SDK: `sdk/examples/onesong/onesong.c`.)
 static lv_obj_t *button, *button_icon, *title, *status;
 ```
 
-`chumby.h` is libchumby: LVGL 9 (all of `lv_*`) plus the Chumby's own
-`chumby_*` functions. The song is a plain MP3 file on the web; a radio
+`octopus.h` is liboctopus: LVGL 9 (all of `lv_*`) plus Octopus's own
+`octopus_*` functions. The song is a plain MP3 file on the web; a radio
 stream's URL works too.
 
 ### Asking the player what plays
 
 ```c
 /* Is our song the one playing (or connecting)? */
-static bool ours(struct chumby_stream_status *st)
+static bool ours(struct octopus_stream_status *st)
 {
-	return chumby_stream_status(st) && !strcmp(st->url, SONG);
+	return octopus_stream_status(st) && !strcmp(st->url, SONG);
 }
 ```
 
-The app doesn't play the song itself. The Chumby has one **stream player**,
-`chumby-stream`, a process of its own, so the song goes on while your app
-is in the background, frozen (the Chumby freezes apps out of sight) or
-closed. `chumby_stream_status()` reads what it's doing: false when nothing
+The app doesn't play the song itself. Octopus OS has one **stream player**,
+`octopus-stream`, a process of its own, so the song goes on while your app
+is in the background, frozen (the shell freezes apps out of sight) or
+closed. `octopus_stream_status()` reads what it's doing: false when nothing
 plays; otherwise the URL, the state ("connecting", "playing", "error"), and
 for a file, the seconds played.
 
@@ -108,20 +108,20 @@ stream. So the app checks that the stream is **ours**, by its URL.
 ```c
 static void pressed(lv_event_t *e)
 {
-	struct chumby_stream_status st;
+	struct octopus_stream_status st;
 
 	(void)e;
 	if (ours(&st))
-		chumby_stream_stop();
+		octopus_stream_stop();
 	else
-		chumby_stream_play(SONG, TITLE);	/* stops FM, AirPlay, another stream */
+		octopus_stream_play(SONG, TITLE);	/* stops FM, AirPlay, another stream */
 	lv_label_set_text(status, "...");	/* until the player says */
 }
 ```
 
-`chumby_stream_play()` starts the player in the background and returns at
+`octopus_stream_play()` starts the player in the background and returns at
 once (never block the UI: the Chumby's CPU is slow, and a stuck main loop
-is a frozen screen). Whatever else was playing stops: the Chumby has one
+is a frozen screen). Whatever else was playing stops: there is one
 speaker, and the newest source takes it. The name (`TITLE`) is what the
 volume control's stop button shows.
 
@@ -130,7 +130,7 @@ volume control's stop button shows.
 ```c
 static void poll(lv_timer_t *t)
 {
-	struct chumby_stream_status st;
+	struct octopus_stream_status st;
 	char text[64];
 
 	(void)t;
@@ -158,27 +158,27 @@ app comes back from the background.
 ### Day and night
 
 ```c
-static void on_mode(chumby_mode_t mode, void *user)
+static void on_mode(octopus_mode_t mode, void *user)
 {
 	(void)mode; (void)user;
-	chumby_glossy(button, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-	lv_obj_set_style_text_color(button_icon, chumby_on_accent(), 0);
-	lv_obj_set_style_text_color(title, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_style_text_color(status, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	octopus_glossy(button, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(button_icon, octopus_on_accent(), 0);
+	lv_obj_set_style_text_color(title, octopus_color(OCTOPUS_COLOR_TEXT), 0);
+	lv_obj_set_style_text_color(status, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
 }
 ```
 
-The Chumby has a day theme and a darker, warmer night theme. Set colours
+Octopus OS has a day theme and a darker, warmer night theme. Set colours
 in a mode callback, never once at start: it's called once when you register
-it, and again at every switch. `CHUMBY_COLOR_ACCENT` is your app's `Color`
-(dimmed at night); `chumby_on_accent()` is the text colour that reads on it.
+it, and again at every switch. `OCTOPUS_COLOR_ACCENT` is your app's `Color`
+(dimmed at night); `octopus_on_accent()` is the text colour that reads on it.
 
 ### Putting it together
 
 ```c
 int main(void)
 {
-	lv_obj_t *scr = chumby_app_init(APP_ID);
+	lv_obj_t *scr = octopus_app_init(APP_ID);
 
 	lv_obj_set_scrollable(scr, false);
 
@@ -193,38 +193,38 @@ int main(void)
 	lv_obj_center(button_icon);
 
 	title = lv_label_create(scr);
-	lv_obj_set_style_text_font(title, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_style_text_font(title, octopus_font(OCTOPUS_FONT_LARGE), 0);
 	lv_label_set_text(title, TITLE);
 	lv_obj_align_to(title, button, LV_ALIGN_OUT_BOTTOM_MID, 0, 14);
 
 	status = lv_label_create(scr);
-	lv_obj_set_style_text_font(status, chumby_font(CHUMBY_FONT_SMALL), 0);
+	lv_obj_set_style_text_font(status, octopus_font(OCTOPUS_FONT_SMALL), 0);
 	lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_width(status, CHUMBY_APP_W);	/* centred however long the text */
+	lv_obj_set_width(status, OCTOPUS_APP_W);	/* centred however long the text */
 	lv_obj_align_to(status, title, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
 
-	chumby_on_mode_change(on_mode, NULL);
+	octopus_on_mode_change(on_mode, NULL);
 	lv_timer_ready(lv_timer_create(poll, 500, NULL));
-	return chumby_run();
+	return octopus_run();
 }
 ```
 
-- `chumby_app_init()` connects to the compositor and gives you your
+- `octopus_app_init()` connects to the compositor and gives you your
   window's screen: 320x208 under the shell's tab bar.
-- The fonts are the Chumby's bitmap fonts (`chumby_font()`); the play and
+- The fonts are Octopus's bitmap fonts (`octopus_font()`); the play and
   stop symbols come from LVGL's Montserrat, at 14, 20, 28 or 48 px.
 - `lv_timer_ready()` runs the first poll at once, so the button is right
   from the start.
-- `chumby_run()` is the main loop: LVGL's timers, input, the compositor. It
-  returns when the window is closed (holding its tab, or the Chumby closing
+- `octopus_run()` is the main loop: LVGL's timers, input, the compositor. It
+  returns when the window is closed (holding its tab, or the shell closing
   background apps when memory runs short). Your app can be ended any time:
-  keep anything worth keeping in `chumby_app_data_dir()` as it changes.
+  keep anything worth keeping in `octopus_app_data_dir()` as it changes.
 
 ## 4. Build and try it
 
 ```sh
-chumby-app build
-chumby-app sim
+octopus-app build
+octopus-app sim
 ```
 
 Home menu → One Song. Tap the button (click it): "Connecting...", then
@@ -241,29 +241,29 @@ Things to try:
 ## 5. Pack and install it on your device
 
 ```sh
-chumby-app pack                 # -> OneSong.chumbyapp (a few KB)
+octopus-app pack                 # -> OneSong.octopusapp (a few KB)
 ```
 
 Then either:
-- **USB:** copy `OneSong.chumbyapp` into a folder named `chumby-apps` on a
+- **USB:** copy `OneSong.octopusapp` into a folder named `octopus-apps` on a
   FAT-formatted stick, and plug it into the device. One Song appears in the
   Home menu.
-- **Network:** `chumby-app deploy <the device's address>` (SSH, as root:
+- **Network:** `octopus-app deploy <the device's address>` (SSH, as root:
   turn the SSH server on in Settings > Network first, which shows the
   address and the password).
 
-Remove it with `chumby-install --remove OneSong` on the device. A bundle
-runs only on the kind of board its SDK was built for: `chumby-install`
+Remove it with `octopus-install --remove OneSong` on the device. A bundle
+runs only on the kind of board its SDK was built for: `octopus-install`
 says so if it's another's.
 
 ## Where next
 
-- [writing-chumby-apps.md](writing-chumby-apps.md): the rest of libchumby,
+- [writing-octopus-apps.md](writing-octopus-apps.md): the rest of libchumby,
   sound (the FM radio, playing your own sounds), input, and the LVGL traps
   we've hit.
-- `chumby.h` in the SDK (`/opt/chumby-sdk/arm-buildroot-linux-gnueabi/sysroot/usr/include/chumby/`):
+- `octopus.h` in the SDK (`/opt/octopus-sdk/arm-buildroot-linux-gnueabi/sysroot/usr/include/octopus/`):
   every function, with comments.
-- Screen savers are programs too, on libchumby's saver kit
-  (`chumby_saver.h`; Flying Toasters, `package/chumby-apps/src/toasters.c`,
+- Screen savers are programs too, on liboctopus's saver kit
+  (`octopus_saver.h`; Flying Toasters, `package/octopus-apps/src/toasters.c`,
   is the example). They're part of the image for now
-  (`/usr/lib/chumby/savers`): bundles can't install one yet.
+  (`/usr/lib/octopus/savers`): bundles can't install one yet.

@@ -92,7 +92,7 @@ echo "carrier: rootfs.squashfs $(stat -c %s "${CARRIER}/rootfs.squashfs") bytes,
 	"early boot $(du -sk "${CARRIER}/bin" "${CARRIER}/lib" | awk '{s+=$1} END {print s}') KiB"
 
 rm -f "${BINARIES_DIR}/carrier.ext4"
-"${HOST_DIR}/sbin/mkfs.ext4" -q -F -L chumby -E root_owner=0:0 \
+"${HOST_DIR}/sbin/mkfs.ext4" -q -F -L octopus -E root_owner=0:0 \
 	-d "${CARRIER}" "${BINARIES_DIR}/carrier.ext4" 256M
 
 trap 'rm -rf "${ROOTPATH_TMP}"' EXIT

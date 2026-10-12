@@ -1,0 +1,28 @@
+#!/bin/sh
+# octopus-airplay-hook begin|end: shairport-sync's session hooks
+# (/etc/shairport-sync.conf).
+#
+#   begin   before the sound card opens: whatever else plays stops
+#           (octopus-audio play airplay), and the shell brings up the
+#           AirPlay app
+#   end     the phone stopped: octopus-audio's "playing" goes
+#
+# /run/shairport-sync/playing marks a session for audio.d/airplay.
+
+RUN=${OCTOPUS_RUN_DIR:-/run/octopus}
+MARK=/run/shairport-sync/playing
+
+case "$1" in
+	begin)
+		touch "$MARK"
+		octopus-audio play airplay
+		# In the background: with no shell reading the FIFO, a write
+		# would wait, and shairport-sync with it.
+		[ -p "$RUN/shell.cmd" ] && (echo "launch AirPlay" > "$RUN/shell.cmd") &
+		;;
+	end)
+		rm -f "$MARK"
+		octopus-audio stopped airplay
+		;;
+esac
+exit 0

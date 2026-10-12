@@ -20,9 +20,9 @@ endef
 
 define AFTER_DARK_TOASTERS_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0644 $(@D)/toaster-sprite.gif \
-		$(TARGET_DIR)/usr/share/chumby/toasters/toaster-sprite.gif
+		$(TARGET_DIR)/usr/share/octopus/toasters/toaster-sprite.gif
 	$(INSTALL) -D -m 0644 $(@D)/toast1.gif \
-		$(TARGET_DIR)/usr/share/chumby/toasters/toast1.gif
+		$(TARGET_DIR)/usr/share/octopus/toasters/toast1.gif
 endef
 
 $(eval $(generic-package))

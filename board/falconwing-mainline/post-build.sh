@@ -9,12 +9,12 @@ TARGET_DIR="$1"
 mkdir -p "${TARGET_DIR}/boot" "${TARGET_DIR}/etc/default"
 
 # The root is a read-only squashfs. SSH host keys live on the persistent
-# /var (dropbear.service.d/30-chumby.conf creates the directory).
+# /var (dropbear.service.d/30-octopus.conf creates the directory).
 rm -rf "${TARGET_DIR}/etc/dropbear"
 ln -sfn /var/lib/dropbear "${TARGET_DIR}/etc/dropbear"
-mkdir -p "${TARGET_DIR}/var/lib/chumby"
+mkdir -p "${TARGET_DIR}/var/lib/octopus"
 
-# (The /etc entries that point into /run/chumby-config are made in
+# (The /etc entries that point into /run/octopus-config are made in
 # post-fakeroot.sh, on the image's copy: buildroot itself still writes
 # /etc/hostname, /etc/timezone and /etc/shadow after this script.)
 # systemd mounts a generated machine-id over an empty one on a ro root.
@@ -36,13 +36,13 @@ done
 # systemd units replace the shared overlay's sysvinit scripts.
 rm -f "${TARGET_DIR}"/etc/init.d/S[0-9]*
 
-# chumby-stream uses libmpg123 and the fixed-point libfaad only: not the
+# octopus-stream uses libmpg123 and the fixed-point libfaad only: not the
 # command-line players, out123, or faad2's floating-point/DRM builds.
 rm -f "${TARGET_DIR}"/usr/bin/faad "${TARGET_DIR}"/usr/bin/mpg123* \
       "${TARGET_DIR}"/usr/bin/out123 "${TARGET_DIR}"/usr/lib/libout123.so* \
       "${TARGET_DIR}"/usr/lib/libfaad.so* "${TARGET_DIR}"/usr/lib/libfaad_drm.so*
 
-GIT_DIR="${BR2_EXTERNAL_PIFANSRF_PATH:-.}"
+GIT_DIR="${BR2_EXTERNAL_OCTOPUS_PATH:-.}"
 COMMIT=unknown
 DIRTY=
 if git -C "${GIT_DIR}" rev-parse --git-dir >/dev/null 2>&1; then

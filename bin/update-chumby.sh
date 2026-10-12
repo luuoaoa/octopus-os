@@ -16,7 +16,7 @@
 #   kernel + DTB      -> the krnA slot of p1, only if it differs; read
 #                        back and compared after writing (the one step
 #                        that could leave the board unbootable)
-#   customize-chumby/{network-config,user-data,authorized_keys}
+#   customize-octopus/{network-config,user-data,authorized_keys}
 #                     -> /boot (FAT, p3), only those present locally
 #
 # then reboots. /var (alarms, SSH host keys, ...) is left alone, but for a
@@ -24,7 +24,7 @@
 #
 # Usage:  bin/update-chumby.sh [user@]host [--no-reboot]
 #         Key auth if you have a key installed, else password "root"
-#         (CHUMBY_SSH_PASSWORD=... to override; needs sshpass).
+#         (OCTOPUS_SSH_PASSWORD=... to override; needs sshpass).
 set -eu
 
 HOST="${1:-}"
@@ -38,7 +38,7 @@ OUT="${SCRIPT_DIR}/output-falconwing-mainline"
 IMG_DIR="${OUT}/images"
 CARRIER="${OUT}/build/carrier"
 BOOT_IMG="${IMG_DIR}/falconwing-boot.img"
-CUSTOMIZE="${SCRIPT_DIR}/customize-chumby"
+CUSTOMIZE="${SCRIPT_DIR}/customize-octopus"
 
 for f in "${IMG_DIR}/rootfs.squashfs" "${BOOT_IMG}" "${CARRIER}/sbin/init-ram"; do
     [ -e "$f" ] || { echo "missing $f; run: bash docker-build.sh falconwing-mainline" >&2; exit 1; }
@@ -67,7 +67,7 @@ trap cleanup EXIT
 # Never let ssh fall back to an interactive or GUI password prompt.
 if ! SSH_ASKPASS_REQUIRE=never ssh ${SSH_OPTS} -o BatchMode=yes "${HOST}" true 2>/dev/null; then
     command -v sshpass >/dev/null 2>&1 || { echo "key auth failed and sshpass is not installed" >&2; exit 1; }
-    SSH_ASKPASS_REQUIRE=never sshpass -p "${CHUMBY_SSH_PASSWORD:-root}" \
+    SSH_ASKPASS_REQUIRE=never sshpass -p "${OCTOPUS_SSH_PASSWORD:-root}" \
         ssh ${SSH_OPTS} -o PubkeyAuthentication=no "${HOST}" true
 fi
 
@@ -157,7 +157,7 @@ if [ -d "${CUSTOMIZE}" ]; then
     on 'mount -o remount,rw /boot'
     for f in network-config user-data authorized_keys; do
         [ -f "${CUSTOMIZE}/${f}" ] || continue
-        echo "==> customize-chumby/${f} -> /boot/${f}"
+        echo "==> customize-octopus/${f} -> /boot/${f}"
         on "cat > /boot/${f}" < "${CUSTOMIZE}/${f}"
     done
     on 'sync; mount -o remount,ro /boot'

@@ -1,15 +1,15 @@
 [Unit]
 Description=AirPlay speaker (shairport-sync)
-Wants=network-online.target chumby-airplay-meta.service
+Wants=network-online.target octopus-airplay-meta.service
 After=network.target sound.target
 # On a Pi, its ALSA "default" is PipeWire.
 After=wireplumber.service
 
 [Service]
 # As the apps' user (sound through its audio group): its hooks call
-# chumby-audio and the shell's FIFO, as the apps do.
-User=chumby
-# Ahead of the UI, like chumby-stream: redraws mustn't make it late.
+# octopus-audio and the shell's FIFO, as the apps do.
+User=octopus
+# Ahead of the UI, like octopus-stream: redraws mustn't make it late.
 Nice=-10
 RuntimeDirectory=shairport-sync
 RuntimeDirectoryPreserve=yes

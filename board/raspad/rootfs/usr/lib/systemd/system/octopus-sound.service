@@ -1,0 +1,15 @@
+[Unit]
+Description=The speakers' bass and EQ, as set in Settings (octopus-sound)
+After=wireplumber.service octopus-config.service
+Wants=wireplumber.service
+
+[Service]
+Type=oneshot
+User=octopus
+Environment=PIPEWIRE_RUNTIME_DIR=/run/pipewire
+# The chain's node appears a moment after WirePlumber starts.
+ExecStartPre=/bin/sh -c 'i=0; until pw-cli ls Node 2>/dev/null | grep -q "node.name = \\"raspad-eq\\""; do i=$((i + 1)); [ $i -lt 30 ] || exit 1; sleep 1; done'
+ExecStart=/usr/bin/octopus-sound apply
+
+[Install]
+WantedBy=multi-user.target

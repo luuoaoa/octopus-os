@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * chumby-podcast-feed: a podcast's RSS feed, its newest episodes cached.
+ * octopus-podcast-feed: a podcast's RSS feed, its newest episodes cached.
  *
- *   chumby-podcast-feed <feed URL> <cache file> [max episodes]
+ *   octopus-podcast-feed <feed URL> <cache file> [max episodes]
  *
  * Feeds can be megabytes (a long-running show lists every episode ever,
  * newest first): it's parsed as it downloads (expat), and the download
@@ -26,7 +26,7 @@
 #include <time.h>
 
 #define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"
-#define USER_AGENT	"chumby-podcasts/1.0"
+#define USER_AGENT	"octopus-podcasts/1.0"
 #define MAX_DEFAULT	30
 
 struct episode {
@@ -169,7 +169,7 @@ static size_t on_data(char *p, size_t size, size_t n, void *user)
 	if (done)
 		return 0;	/* stops the download */
 	if (XML_Parse(parser, p, (int)(size * n), 0) == XML_STATUS_ERROR && !done) {
-		fprintf(stderr, "chumby-podcast-feed: %s\n", XML_ErrorString(XML_GetErrorCode(parser)));
+		fprintf(stderr, "octopus-podcast-feed: %s\n", XML_ErrorString(XML_GetErrorCode(parser)));
 		return 0;
 	}
 	return done ? 0 : size * n;
@@ -216,7 +216,7 @@ int main(int argc, char **argv)
 	fclose(out);
 
 	if (!found) {
-		fprintf(stderr, "chumby-podcast-feed: %s: no episodes (%s)\n", argv[1],
+		fprintf(stderr, "octopus-podcast-feed: %s: no episodes (%s)\n", argv[1],
 			res == CURLE_OK || done ? "none in the feed" : curl_easy_strerror(res));
 		remove(tmp);
 		return 1;

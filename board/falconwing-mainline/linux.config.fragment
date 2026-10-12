@@ -1,6 +1,6 @@
 # Chumby One (falconwing) on top of arch/arm/configs/mxs_defconfig.
 
-# Boot: the stock chumby bootloader loads the zImage with the DTB appended
+# Boot: the stock Chumby bootloader loads the zImage with the DTB appended
 # (buildroot enables ARM_APPENDED_DTB) into the 4 MiB krnA slot. Its ATAG
 # cmdline targets the vendor kernel, so ignore ATAGs and use DT bootargs.
 # CONFIG_ARM_ATAG_DTB_COMPAT is not set
@@ -166,7 +166,7 @@ CONFIG_CPU_FREQ_STAT=y
 # Boot at full speed: AHB (which the LCDIF fetches the framebuffer over)
 # is divided down with the CPU, and every frequency change glitches the
 # panel (seen on hardware with ondemand: a jerk about once a second).
-# chumby-shell switches to powersave while the screen is off.
+# octopus-shell switches to powersave while the screen is off.
 CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y
 CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
 CONFIG_CPU_FREQ_GOV_POWERSAVE=y

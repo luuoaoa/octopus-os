@@ -1,0 +1,10 @@
+config BR2_PACKAGE_OCTOPUS_WM
+	bool "octopus-wm"
+	depends on BR2_PACKAGE_WLROOTS_PIXMAN
+	help
+	  Minimal wlroots compositor for the Chumby One: a left-edge panel
+	  ("octopus-panel"), a home layer ("octopus-home") and maximized
+	  apps, exported to the shell via wlr-foreign-toplevel-management.
+
+comment "octopus-wm needs wlroots-pixman"
+	depends on !BR2_PACKAGE_WLROOTS_PIXMAN

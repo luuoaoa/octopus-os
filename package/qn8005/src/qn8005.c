@@ -67,7 +67,7 @@ static int wr(uint8_t reg, uint8_t val)
  * The QN8005's register read is not a standard write-then-read: it wants
  * START, the address with the *read* bit, the register number written,
  * then the data clocked out - one transaction, no repeated start (what
- * the vendor kernel's "CHUMBY_radio_fix" generated). A repeated-start
+ * the vendor kernel's "OCTOPUS_radio_fix" generated). A repeated-start
  * read is NAKed. In Linux terms: a write with I2C_M_REV_DIR_ADDR, then a
  * read with I2C_M_NOSTART - protocol mangling, which the bit-banged
  * i2c-gpio bus (see the DTS) supports.

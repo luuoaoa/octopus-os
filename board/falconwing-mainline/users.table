@@ -1,4 +1,4 @@
-# The apps' user (chumby-shell starts every app, saver and player as it):
+# The apps' user (octopus-shell starts every app, saver and player as it):
 # sound (audio), the touchscreen for the calibration (input), and its
-# group owns the tuner's bus (udev) and /run/chumby.
-chumby -1 chumby -1 * /var/lib/chumby /bin/sh audio,input Chumby apps
+# group owns the tuner's bus (udev) and /run/octopus.
+octopus -1 octopus -1 * /var/lib/octopus /bin/sh audio,input Octopus apps

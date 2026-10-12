@@ -1,0 +1,7 @@
+#!/bin/sh
+# octopus-audio source: the FM radio (see octopus-audio, radio).
+case "$1" in
+	stop) exec radio off >/dev/null ;;
+	pause | resume | active) exec radio "$1" >/dev/null ;;
+	*) exit 2 ;;
+esac

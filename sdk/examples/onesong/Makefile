@@ -1,12 +1,12 @@
-# One Song, built with the Chumby SDK: "chumby-app build" runs this with
-# CC and PKG_CONFIG pointing into the SDK (cross-compiling for the Chumby).
+# One Song, built with the Octopus SDK: "octopus-app build" runs this with
+# CC and PKG_CONFIG pointing into the SDK (cross-compiling for the device).
 # The bundle is everything in bundle/: app.conf and the program, plus any
-# pictures or sounds the app reads from chumby_app_dir().
+# pictures or sounds the app reads from octopus_app_dir().
 CC ?= cc
 PKG_CONFIG ?= pkg-config
 
-override CFLAGS += -O2 -Wall $(shell $(PKG_CONFIG) --cflags libchumby)
-override LDLIBS += $(shell $(PKG_CONFIG) --libs libchumby)
+override CFLAGS += -O2 -Wall $(shell $(PKG_CONFIG) --cflags liboctopus)
+override LDLIBS += $(shell $(PKG_CONFIG) --libs liboctopus)
 
 all: bundle/onesong bundle/app.conf
 
@@ -19,6 +19,6 @@ bundle/app.conf: app.conf
 	cp $< $@
 
 clean:
-	rm -rf bundle *.chumbyapp
+	rm -rf bundle *.octopusapp
 
 .PHONY: all clean

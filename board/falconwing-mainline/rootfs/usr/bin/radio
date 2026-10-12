@@ -9,10 +9,10 @@
 #
 # Usage:
 #   radio on [MHz] [--bypass]   init tuner, route audio (default: last station);
-#                               takes the sound from other sources (chumby-audio)
+#                               takes the sound from other sources (octopus-audio)
 #   radio tune <MHz>
 #   radio off                   audio off, the tuner to standby
-#   radio pause | resume        for chumby-audio: off for a while, tuner kept
+#   radio pause | resume        for octopus-audio: off for a while, tuner kept
 #                               tuned (quick to resume), then back on
 #   radio active                exit status: playing?
 #   radio scan [us|eu|jp]       find stations, save them for prev/next
@@ -20,20 +20,20 @@
 #   radio status
 #
 # While on, "qn8005 rds" decodes the station's RDS (name, RadioText, RT+
-# title/artist) into /run/chumby/rds for the FM app; restarted on every
+# title/artist) into /run/octopus/rds for the FM app; restarted on every
 # tune, so a new station starts blank.
 #
 # If tuning works but nothing is received, create an empty "fmradio_xclk"
 # file on the CHUMBY config partition (clocks the tuner from the SoC PWM3).
 
-STATION_FILE=/var/lib/chumby/radio.station
+STATION_FILE=/var/lib/octopus/radio.station
 # From the last scan: "#floor <rssi>", then "<MHz> <rssi>" per station.
-STATIONS_FILE=/var/lib/chumby/radio.stations
-PIDFILE=/run/chumby/radio-loop.pid
-PAUSED=/run/chumby/radio.paused	# paused by chumby-audio: resume to this
+STATIONS_FILE=/var/lib/octopus/radio.stations
+PIDFILE=/run/octopus/radio-loop.pid
+PAUSED=/run/octopus/radio.paused	# paused by octopus-audio: resume to this
 PCM=plughw:0,0
-RDS_PIDFILE=/run/chumby/radio-rds.pid
-RDS_FILE=/run/chumby/rds
+RDS_PIDFILE=/run/octopus/radio-rds.pid
+RDS_FILE=/run/octopus/rds
 
 die() { echo "radio: $*" >&2; exit 1; }
 
@@ -89,7 +89,7 @@ case "$1" in
 		done
 		# Whatever else plays (an internet stream) stops: one at a time.
 		rm -f "$PAUSED"
-		[ -x /usr/bin/chumby-audio ] && chumby-audio play fm
+		[ -x /usr/bin/octopus-audio ] && octopus-audio play fm
 		modprobe i2c-dev 2>/dev/null
 		xclk=; [ -e /boot/fmradio_xclk ] && xclk=--xclk
 		qn8005 init $xclk || die "tuner init failed (is /dev/i2c-0 there?)"
@@ -134,7 +134,7 @@ case "$1" in
 		loop_running
 		;;
 	off)
-		[ -x /usr/bin/chumby-audio ] && chumby-audio stopped fm
+		[ -x /usr/bin/octopus-audio ] && octopus-audio stopped fm
 		rm -f "$PAUSED"
 		stop_loop
 		stop_rds

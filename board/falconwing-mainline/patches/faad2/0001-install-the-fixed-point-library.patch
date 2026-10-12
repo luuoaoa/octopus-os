@@ -3,7 +3,7 @@ Subject: [PATCH] install the fixed-point library too
 
 libfaad_fixed is built but not installed. The i.MX233 (ARM926EJ-S) has
 no FPU, where the floating-point decoder would run on soft-float;
-chumby-stream links the fixed-point one.
+octopus-stream links the fixed-point one.
 
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt

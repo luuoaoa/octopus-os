@@ -1,0 +1,22 @@
+#!/bin/sh
+# Once, on a device updated from before the rename to Octopus OS: the
+# persistent state moves to its new names (octopus-migrate.service, before
+# tmpfiles hands /var/lib/octopus to the apps' user).
+#   /var/lib/chumby       -> /var/lib/octopus       (settings, alarms, app data)
+#   /var/lib/chumby-root  -> /var/lib/octopus-root  (SSH, time zone; root's)
+set -u
+
+move() {
+	[ -d "$1" ] || return 0
+	if [ -e "$2" ]; then
+		# Both: an empty new one (made before this ran) gives way.
+		rmdir "$2" 2>/dev/null || { echo "octopus-migrate: $1 and $2 both exist; left alone"; return 0; }
+	fi
+	mv "$1" "$2" && echo "octopus-migrate: $1 -> $2"
+}
+
+move /var/lib/chumby /var/lib/octopus
+move /var/lib/chumby-root /var/lib/octopus-root
+# The apps' group is a new one (its number may differ).
+[ -d /var/lib/octopus-root ] && chgrp -R octopus /var/lib/octopus-root
+exit 0

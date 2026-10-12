@@ -1,0 +1,14 @@
+config BR2_PACKAGE_OCTOPUS_BUNDLED_APPS
+	bool "octopus-bundled-apps"
+	depends on BR2_PACKAGE_OCTOPUS_APPS	# octopus-stream plays for them
+	select BR2_PACKAGE_LIBOCTOPUS
+	select BR2_PACKAGE_LIBCURL
+	select BR2_PACKAGE_LIBCURL_CURL	# podcast and station art
+	select BR2_PACKAGE_EXPAT
+	help
+	  The apps in apps/ (Internet Radio, Podcasts), built as app
+	  bundles - as anyone's, with the SDK (docs/sdk.md) - and
+	  preinstalled in the image, read-only, in /usr/lib/octopus/apps.
+	  They get no treatment the system apps get: the shell lists them
+	  with the bundles installed in /var/apps (one installed there of
+	  the same Id replaces the image's: an update).

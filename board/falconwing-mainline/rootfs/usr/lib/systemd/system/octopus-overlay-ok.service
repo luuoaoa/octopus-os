@@ -1,0 +1,19 @@
+[Unit]
+Description=Keep the run overlay for the next boot, this one having gone well
+Documentation=file:///sbin/init-ram
+# The early boot (init-ram) renames /var/run-overlay to run-overlay.disabled
+# before running it, and leaves /var/run-overlay.applied: a boot it breaks
+# runs without it next time. This boot up two minutes with the UI running
+# is a good one: the overlay goes back, for every boot after.
+After=octopus-session.service
+ConditionPathExists=/var/run-overlay.applied
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'sleep 120; \
+	systemctl is-active -q octopus-session || { rm -f /var/run-overlay.applied; exit 0; }; \
+	[ -e /var/run-overlay ] || mv /var/run-overlay.disabled /var/run-overlay; \
+	rm -f /var/run-overlay.applied; sync'
+
+[Install]
+WantedBy=multi-user.target

@@ -1,10 +1,10 @@
-# Built with the Chumby SDK: "chumby-app build" runs this with CC and
+# Built with the Octopus SDK: "octopus-app build" runs this with CC and
 # PKG_CONFIG pointing into the SDK. The bundle is everything in bundle/.
 CC ?= cc
 PKG_CONFIG ?= pkg-config
 
-override CFLAGS += -O2 -Wall $(shell $(PKG_CONFIG) --cflags libchumby)
-override LDLIBS += $(shell $(PKG_CONFIG) --libs libchumby)
+override CFLAGS += -O2 -Wall $(shell $(PKG_CONFIG) --cflags liboctopus)
+override LDLIBS += $(shell $(PKG_CONFIG) --libs liboctopus)
 
 all: bundle/hello bundle/app.conf
 
@@ -17,6 +17,6 @@ bundle/app.conf: app.conf
 	cp $< $@
 
 clean:
-	rm -rf bundle *.chumbyapp
+	rm -rf bundle *.octopusapp
 
 .PHONY: all clean

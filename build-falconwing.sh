@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the falconwing (Chumby One) image. Output lands in ./output-falconwing/,
-# dl cache shared with pifansrf in ./dl/.
+# dl cache in ./dl/.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

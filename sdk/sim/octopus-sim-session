@@ -1,0 +1,25 @@
+#!/bin/sh
+# The Octopus UI in the simulator (the octopus-sim image: the device's own
+# root filesystem, ARM, run through QEMU user emulation): what
+# octopus-session.service does on the device, as a window on the host's
+# Wayland desktop (or headless: OCTOPUS_SIM_HEADLESS=1, for tests).
+set -e
+
+rm -rf /run/octopus
+install -d -o octopus -g octopus -m 0775 /run/octopus /run/octopus/audio
+install -d -o octopus -g octopus /var/lib/octopus
+mkdir -p /var/apps /run/systemd/timesync
+# The clock is the host's, and right: as if NTP had synced (alarms on, no
+# "no network" mark).
+touch /run/systemd/timesync/synchronized
+
+export XDG_RUNTIME_DIR=/run/octopus WLR_RENDERER=pixman
+if [ -n "${OCTOPUS_SIM_HEADLESS:-}" ]; then
+	export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
+else
+	# octopus-wm is a client of the host's compositor (its socket is
+	# mounted at /run/host/wayland-0), at 3x: 960x720.
+	export WLR_BACKENDS=wayland WAYLAND_DISPLAY=/run/host/wayland-0
+	export OCTOPUS_WM_SIZE="${OCTOPUS_SIM_SIZE:-960x720}"
+fi
+exec /usr/bin/octopus-wm -s /usr/bin/octopus-shell

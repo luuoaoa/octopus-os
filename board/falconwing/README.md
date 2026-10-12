@@ -8,7 +8,7 @@ Only the userland is rebuilt. The bootloader, config block and the stock
 image, and so are the kernel modules and wifi firmware (they have to match
 that kernel).
 
-Unlike pifansrf, the rootfs is **not** a cpio in RAM — 64 MB doesn't
+Unlike a RAM-only image, the rootfs is **not** a cpio in RAM — 64 MB doesn't
 allow it. It's a regular ext3 partition, mounted rw.
 
 ## Build
@@ -40,7 +40,7 @@ The stock config block's active slot is A: `krnA` with
 ## Configuring (from any PC, on the `CHUMBY` partition)
 
 - `network-config` — WiFi SSID + password (Pi Imager format, same parser
-  as pifansrf). Or drop a full `wpa_supplicant.conf` there instead.
+  as Raspberry Pi Imager). Or drop a full `wpa_supplicant.conf` there instead.
 - `user-data` — `hostname:`, `ssh_pwauth: true|false`, `passwd:` (crypt hash
   for root).
 - `authorized_keys` — optional, installed as root's SSH keys.

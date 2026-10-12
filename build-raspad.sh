@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the RasPad / any 64-bit Raspberry Pi image (the Chumby's UI on a
+# Build the RasPad / any 64-bit Raspberry Pi image (the Octopus UI on a
 # Pi). Output lands in ./output-raspad/, dl cache shared in ./dl/.
 set -euo pipefail
 

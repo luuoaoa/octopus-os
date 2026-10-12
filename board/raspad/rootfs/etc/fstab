@@ -5,5 +5,5 @@
 tmpfs		/tmp		tmpfs	mode=1777,size=32m	0	0
 # The FAT boot partition: the Pi's firmware and config.txt, and the
 # config files (network-config, user-data, authorized_keys) read by
-# chumby-config.service. Read-only: edit it from another machine.
+# octopus-config.service. Read-only: edit it from another machine.
 /dev/mmcblk0p1	/boot		vfat	ro,noatime,fmask=0177,dmask=0077,nofail	0	0

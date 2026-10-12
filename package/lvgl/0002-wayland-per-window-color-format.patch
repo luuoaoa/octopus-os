@@ -1,4 +1,4 @@
-From: chumby <chumby@localhost>
+From: octopus <octopus@localhost>
 Subject: [PATCH] wayland: let a window be created with its own color format
 
 A window's SHM buffers take the display's color format when the window

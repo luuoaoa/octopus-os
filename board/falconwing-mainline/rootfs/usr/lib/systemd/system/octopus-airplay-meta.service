@@ -1,0 +1,15 @@
+[Unit]
+Description=What AirPlay plays, for the AirPlay app
+After=shairport-sync.service
+# Restarted with it: a session dropped on purpose (another player, the
+# app's disconnect) starts over at "stopped", forgetting the sender.
+PartOf=shairport-sync.service
+
+[Service]
+User=octopus
+ExecStart=/usr/bin/octopus-airplay-meta /run/shairport-sync/metadata
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

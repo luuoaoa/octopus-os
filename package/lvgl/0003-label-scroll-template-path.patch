@@ -1,4 +1,4 @@
-From: chumby <chumby@localhost>
+From: octopus <octopus@localhost>
 Subject: [PATCH] label: take the scroll animation's path from its template too
 
 A label's scroll animation takes its delay, repeats and completed

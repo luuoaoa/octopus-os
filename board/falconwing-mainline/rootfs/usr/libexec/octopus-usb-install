@@ -1,0 +1,23 @@
+#!/bin/sh
+# A USB stick (or card reader) plugged in: the bundles in its octopus-apps/
+# folder installed (octopus-install), the stick unmounted again. Started by
+# udev (90-octopus-usb.rules) through octopus-usb-install@<dev>.service.
+DEV=/dev/$1
+MNT=/run/octopus-usb/$1
+
+mkdir -p "$MNT"
+mount -t vfat -o ro,nosuid,nodev,noexec "$DEV" "$MNT" 2>/dev/null || {
+	rmdir "$MNT"
+	exit 0		# not FAT (or the whole disk of a partitioned stick): not ours
+}
+n=0
+for b in "$MNT"/octopus-apps/*.octopusapp "$MNT"/octopus-apps/*/; do
+	[ -e "$b" ] || continue
+	[ -d "$b" ] && [ ! -f "$b/app.conf" ] && continue
+	if octopus-install "${b%/}"; then
+		n=$((n + 1))
+	fi
+done
+umount "$MNT"
+rmdir "$MNT"
+echo "octopus-usb-install: $n bundle(s) from $DEV"

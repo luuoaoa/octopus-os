@@ -1,0 +1,157 @@
+#!/bin/sh
+# octopus-app: build, try and install Octopus apps (docs/sdk.md).
+#
+#   octopus-app new NAME          a new app in ./NAME, from the template
+#   octopus-app build             cross-compile the app in this directory
+#                                (its Makefile, into bundle/)
+#   octopus-app pack              bundle/ -> <Id>.octopusapp, to install
+#   octopus-app sim [--no-sound]  the Octopus UI as a window on this PC's
+#                                desktop, with this app installed (Home menu);
+#                                its sound through this PC's (PipeWire,
+#                                PulseAudio or ALSA)
+#   octopus-app sim-shot FILE     the same headless, a screenshot after 25 s
+#                                (FILE.ppm), the app brought to the front
+#   octopus-app deploy HOST       install <Id>.octopusapp on a device (SSH)
+#   octopus-app shell             a shell with the SDK, in this directory
+#
+# On the PC it needs Docker (and SSH for deploy), and the SDK's images for
+# the board (OCTOPUS_BOARD, raspad by default), built with sdk/make-sdk.sh
+# (docs/sdk-build.md): build, pack and new run in octopus-sdk:BOARD, sim in
+# octopus-sim:BOARD (the board's own software, ARM, through QEMU: register
+# it once with
+#   docker run --privileged --rm tonistiigi/binfmt --install arm,arm64
+# if "octopus-app sim" says "exec format error").
+set -eu
+
+# The board the SDK was built for (sdk/make-sdk.sh BOARD): its images are
+# tagged with it. raspad (any 64-bit Raspberry Pi) by default;
+# falconwing_mainline is the Chumby One.
+BOARD=${OCTOPUS_BOARD:-raspad}
+SDK_IMAGE=${OCTOPUS_SDK_IMAGE:-octopus-sdk:$BOARD}
+SIM_IMAGE=${OCTOPUS_SIM_IMAGE:-octopus-sim:$BOARD}
+
+usage() { sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+die() { echo "octopus-app: $*" >&2; exit 1; }
+conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$2" | head -1; }
+
+# In the SDK image, or on the PC (then: into it, for what needs the SDK).
+in_sdk() { [ -n "${OCTOPUS_SDK:-}" ] && [ -d "$OCTOPUS_SDK" ]; }
+sdk_run() {
+	docker image inspect "$SDK_IMAGE" >/dev/null 2>&1 ||
+		die "no $SDK_IMAGE image: build it with sdk/make-sdk.sh $BOARD (docs/sdk-build.md)"
+	docker run --rm -i $( [ -t 0 ] && echo -t ) -u "$(id -u):$(id -g)" \
+		-v "$PWD:/work" -w /work "$SDK_IMAGE" octopus-app "$@"
+}
+
+app_id() {
+	[ -f bundle/app.conf ] || die "no bundle/app.conf: octopus-app build first"
+	conf Id bundle/app.conf
+}
+
+cmd=${1:-}
+[ -n "$cmd" ] || usage
+shift
+
+case "$cmd" in
+new)
+	name=${1:-}
+	[ -n "$name" ] || usage
+	echo "$name" | grep -qE '^[A-Za-z][A-Za-z0-9_]{0,30}$' ||
+		die "NAME: letters, digits and _, starting with a letter"
+	in_sdk || { sdk_run new "$name"; exit; }
+	[ ! -e "$name" ] || die "$name is already there"
+	cp -r "$OCTOPUS_SDK/examples/hello" "$name"
+	lower=$(echo "$name" | tr 'A-Z' 'a-z')
+	mv "$name/hello.c" "$name/$lower.c"
+	# The Id (and name) and the file names; the label's text stays.
+	sed -i "s/^\(Id\|Name\) = Hello\$/\1 = $name/; s/hello/$lower/g" "$name/app.conf"
+	sed -i "s/\"Hello\"/\"$name\"/" "$name/$lower.c"
+	sed -i "s/hello/$lower/g" "$name/Makefile"
+	echo "$name/: $lower.c, app.conf, Makefile. Next: cd $name && octopus-app build"
+	;;
+build)
+	in_sdk || { sdk_run build "$@"; exit; }
+	make CC="$OCTOPUS_SDK/bin/${OCTOPUS_CROSS}gcc" \
+		PKG_CONFIG="$OCTOPUS_SDK/bin/pkg-config" "$@"
+	;;
+pack)
+	in_sdk || { sdk_run pack; exit; }
+	id=$(app_id)
+	[ -n "$id" ] || die "no Id in bundle/app.conf"
+	tmp=$(mktemp -d)
+	cp -r bundle "$tmp/$id"
+	tar -C "$tmp" --owner=0 --group=0 -czf "$id.octopusapp" "$id"
+	rm -rf "$tmp"
+	echo "$id.octopusapp ($(du -h "$id.octopusapp" | cut -f1))"
+	;;
+sim | sim-shot)
+	id=$(app_id)
+	set -- "$cmd" "$@"
+	shot=
+	if [ "$cmd" = sim-shot ]; then
+		shot=${2:-}
+		[ -n "$shot" ] || usage
+		docker rm -f octopus-sim-shot >/dev/null 2>&1 || true
+		docker run -d --init --name octopus-sim-shot -e OCTOPUS_SIM_HEADLESS=1 \
+			-v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE" >/dev/null
+		sleep 15
+		docker exec octopus-sim-shot sh -c "echo 'launch $id' > /run/octopus/shell.cmd"
+		sleep 10
+		docker exec -e XDG_RUNTIME_DIR=/run/octopus -e WAYLAND_DISPLAY=wayland-0 \
+			octopus-sim-shot octopus-screenshot > "$shot.ppm"
+		docker rm -f octopus-sim-shot >/dev/null
+		echo "$shot.ppm"
+		exit
+	fi
+	[ -n "${WAYLAND_DISPLAY:-}" ] || die "needs a Wayland desktop (WAYLAND_DISPLAY)"
+	case "$WAYLAND_DISPLAY" in
+		/*) sock=$WAYLAND_DISPLAY ;;
+		*) sock=${XDG_RUNTIME_DIR:?}/$WAYLAND_DISPLAY ;;
+	esac
+	# Sound: the simulator's ALSA writes 48 kHz 16-bit stereo into a FIFO
+	# (its asound.conf), played here. Opened read-write, so the player
+	# never sees an end between one stream and the next.
+	snd=$(mktemp -d)
+	chmod 755 "$snd"	# (the simulator's apps are another user, "octopus")
+	player=
+	if [ "${2:-}" != --no-sound ]; then
+		mkfifo -m 666 "$snd/pcm"
+		if command -v pw-cat >/dev/null; then
+			pw-cat --playback --raw --format s16 --rate 48000 --channels 2 - 0<>"$snd/pcm" &
+			player=$!
+		elif command -v paplay >/dev/null; then
+			paplay --raw --format=s16le --rate=48000 --channels=2 0<>"$snd/pcm" &
+			player=$!
+		elif command -v aplay >/dev/null; then
+			aplay -q -t raw -f S16_LE -r 48000 -c 2 0<>"$snd/pcm" &
+			player=$!
+		else
+			echo "octopus-app: no pw-cat, paplay or aplay here: no sound" >&2
+		fi
+		sleep 1
+		if [ -n "$player" ] && ! kill -0 "$player" 2>/dev/null; then
+			echo "octopus-app: the sound player stopped at once (see above): no sound" >&2
+			player=
+		fi
+	fi
+	trap '[ -n "$player" ] && kill "$player" 2>/dev/null; rm -rf "$snd"' EXIT INT TERM
+	echo "The Octopus UI in a window: Home (top left) > $(conf Name bundle/app.conf). Ctrl-C ends it."
+	docker run --rm -it --init --name octopus-sim -v "$snd:/run/host-sound" \
+		-v "$sock:/run/host/wayland-0" -v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE" || true
+	;;
+deploy)
+	host=${1:-}
+	[ -n "$host" ] || usage
+	id=$(app_id)
+	[ -f "$id.octopusapp" ] || die "no $id.octopusapp: octopus-app pack first"
+	case "$host" in *@*) ;; *) host="root@$host" ;; esac
+	ssh "$host" octopus-install - < "$id.octopusapp"
+	;;
+shell)
+	in_sdk || { sdk_run shell; exit; }
+	exec "${SHELL:-/bin/sh}"
+	;;
+*)
+	usage
+	;;
+esac

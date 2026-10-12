@@ -43,8 +43,8 @@ if [ -L "${TARGET_DIR}/etc/dropbear" ]; then
 fi
 mkdir -p "${TARGET_DIR}/etc/dropbear"
 
-# Build stamp, same idea as pifansrf's motd.
-GIT_DIR="${BR2_EXTERNAL_PIFANSRF_PATH:-.}"
+# Build stamp.
+GIT_DIR="${BR2_EXTERNAL_OCTOPUS_PATH:-.}"
 COMMIT=unknown
 DIRTY=
 if git -C "${GIT_DIR}" rev-parse --git-dir >/dev/null 2>&1; then

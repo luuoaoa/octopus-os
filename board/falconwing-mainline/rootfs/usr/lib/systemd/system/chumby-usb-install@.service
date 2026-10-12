@@ -1,7 +1,0 @@
-[Unit]
-Description=Install app bundles from USB storage %I
-# (A template: a stick needs no unit file of its own, nor a daemon-reload.)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/libexec/chumby-usb-install %I

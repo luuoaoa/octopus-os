@@ -1,0 +1,107 @@
+#!/bin/sh
+# octopus-install: install, list and remove app bundles (built with the SDK,
+# docs/sdk.md).
+#
+#   octopus-install BUNDLE       install (or update) a bundle: a .octopusapp
+#                               file (a gzipped tar of one directory,
+#                               app.conf at its top), a bundle directory, or
+#                               - for stdin (the SDK's "octopus-app deploy")
+#   octopus-install --remove ID  remove the bundle with Id ID (its data in
+#                               /var/lib/octopus/apps/ID stays: --purge too)
+#   octopus-install --list       the installed bundles: Id, version, name
+#
+# Bundles go to /var/apps/<Id>/, root's (apps run as "octopus": they can't
+# change themselves or each other), moved into place in one rename - the
+# shell watches /var/apps and lists the app at once. A bundle of an Id
+# already there replaces it; one of an Id the image has is refused.
+set -eu
+
+APPS=/var/apps
+DATA=/var/lib/octopus/apps
+IMAGE_APPS=/usr/share/octopus/apps
+
+die() { echo "octopus-install: $*" >&2; exit 1; }
+conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$2" | head -1; }
+
+# What an ELF program runs on: 32/64-bit, the CPU, and for 32-bit ARM the
+# float ABI (soft: the Chumby's ARMv5; hard: a Pi in 32 bits). Empty if it
+# isn't ELF (a script runs anywhere).
+elf_sig() {
+	[ "$(od -An -c -N4 "$1" 2>/dev/null | tr -d ' ')" = "177ELF" ] || return 0
+	cls=$(od -An -tu1 -j4 -N1 "$1" | tr -d ' ')
+	mach=$(od -An -tu2 -j18 -N2 "$1" | tr -d ' ')
+	abi=
+	[ "$cls" = 1 ] && [ "$mach" = 40 ] && abi=$(( $(od -An -tu4 -j36 -N4 "$1" | tr -d ' ') & 0x600 ))
+	echo "$cls/$mach/$abi"
+}
+
+[ "$(id -u)" = 0 ] || die "run as root"
+mkdir -p "$APPS"
+
+install_dir() {	# a bundle's directory, unpacked
+	src=$1
+	[ -f "$src/app.conf" ] || die "no app.conf in the bundle"
+	id=$(conf Id "$src/app.conf")
+	exec=$(conf Exec "$src/app.conf")
+	echo "$id" | grep -qE '^[A-Za-z0-9][A-Za-z0-9_.-]{0,30}$' ||
+		die "bad Id \"$id\" (letters, digits, _ . -; at most 31)"
+	[ -n "$exec" ] || die "no Exec in app.conf"
+	case "$exec" in /* | *..*) die "Exec must be a path inside the bundle" ;; esac
+	[ -f "$src/$exec" ] || die "Exec $exec isn't in the bundle"
+	sig=$(elf_sig "$src/$exec")
+	[ -z "$sig" ] || [ "$sig" = "$(elf_sig /bin/busybox)" ] ||
+		die "$exec is built for another kind of board (an SDK for this one: docs/sdk-build.md)"
+	grep -lsE "^[[:space:]]*Id[[:space:]]*=[[:space:]]*$id[[:space:]]*\$" "$IMAGE_APPS"/*.app >/dev/null &&
+		die "Id $id is one of the image's apps"
+	tmp="$APPS/.new-$id"
+	rm -rf "$tmp"
+	cp -a "$src" "$tmp"
+	# Ours: root's, nothing set-uid, the program runnable.
+	chown -R root:root "$tmp"
+	chmod -R u+rwX,go+rX,go-w,ug-s "$tmp"
+	chmod 755 "$tmp/$exec"
+	rm -rf "$APPS/.old-$id"
+	[ -e "$APPS/$id" ] && mv "$APPS/$id" "$APPS/.old-$id"
+	mv "$tmp" "$APPS/$id"
+	rm -rf "$APPS/.old-$id"
+	echo "installed $id $(conf Version "$APPS/$id/app.conf") ($(conf Name "$APPS/$id/app.conf"))"
+}
+
+install_archive() {	# a .octopusapp: gzipped tar of one directory
+	work=$(mktemp -d "$APPS/.unpack-XXXXXX")
+	trap 'rm -rf "$work"' EXIT
+	gzip -dc | tar -x -C "$work" -f - || die "not a .octopusapp (gzipped tar)"
+	set -- "$work"/*
+	[ $# = 1 ] && [ -d "$1" ] || die "a .octopusapp holds one directory"
+	install_dir "$1"
+}
+
+case "${1:-}" in
+	--list)
+		for c in "$APPS"/*/app.conf; do
+			[ -f "$c" ] || continue
+			echo "$(conf Id "$c") $(conf Version "$c") $(conf Name "$c")"
+		done
+		;;
+	--remove)
+		[ -n "${2:-}" ] && [ -d "$APPS/$2" ] || die "no bundle ${2:-}"
+		rm -rf "$APPS/$2"
+		[ "${3:-}" = --purge ] && rm -rf "${DATA:?}/$2"
+		echo "removed $2"
+		;;
+	-)
+		install_archive
+		;;
+	"")
+		sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2
+		exit 2
+		;;
+	*)
+		if [ -d "$1" ]; then
+			install_dir "$1"
+		else
+			[ -f "$1" ] || die "no such bundle: $1"
+			install_archive < "$1"
+		fi
+		;;
+esac

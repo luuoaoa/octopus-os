@@ -15,12 +15,12 @@
  *
  * Stations: "name | stream URL | logo URL" lines under "[Category]"
  * headers in streams.conf in the app's data directory
- * (chumby_app_data_dir()), else the bundle's. The list shows the
+ * (octopus_app_data_dir()), else the bundle's. The list shows the
  * categories as tiles, then a category's stations: few enough per screen
  * not to scroll much. Logos are fetched once into art/ in the data
  * directory; a note on a gradient tile until then (or when there is none).
  *
- * chumby-stream does the playing, in the background: it carries on when
+ * octopus-stream does the playing, in the background: it carries on when
  * this app closes, and tells us how it's doing through $run_dir/stream.
  */
 
@@ -32,16 +32,16 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#include <chumby.h>
+#include <octopus.h>
 
 #define APP_ID		"NetRadio"	/* = Id in app.conf */
-/* In the bundle (chumby_app_dir()) and the app's data directory
- * (chumby_app_data_dir()): paths_init(). */
+/* In the bundle (octopus_app_dir()) and the app's data directory
+ * (octopus_app_data_dir()): paths_init(). */
 #define STATIONS_USER	stations_user
 #define STATIONS_DEFAULT stations_default
 #define STATION_FILE	station_file	/* last URL */
 #define ART_DIR		art_dir
-#define STREAM_TOOL	"/usr/bin/chumby-stream"
+#define STREAM_TOOL	"/usr/bin/octopus-stream"
 #define CURL		"/usr/bin/curl"
 #define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"
 #define MAX_STATIONS	64
@@ -52,7 +52,7 @@ static char stations_user[256], stations_default[256], station_file[256], art_di
 #define ART_SIZE	92
 #define ART_PAD		8
 #define COL_X		(ART_X + ART_SIZE + 12)	/* the right column */
-#define COL_W		(CHUMBY_APP_W - 10 - COL_X)
+#define COL_W		(OCTOPUS_APP_W - 10 - COL_X)
 #define SMALL_BTN	38
 #define INFO_W		70			/* "AAC 320k" */
 #define START_GRACE_MS	4000	/* a stream just started: no status yet */
@@ -208,9 +208,9 @@ static void art_show_note(void)
 {
 	lv_obj_set_hidden(art_img, true);
 	lv_obj_set_hidden(art_note, false);
-	lv_obj_set_style_bg_color(art_tile, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-	lv_obj_set_style_text_color(art_note, chumby_on_accent(), 0);
-	lv_obj_set_style_bg_grad_color(art_tile, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_bg_color(art_tile, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(art_note, octopus_on_accent(), 0);
+	lv_obj_set_style_bg_grad_color(art_tile, octopus_color(OCTOPUS_COLOR_SURFACE), 0);
 	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_VER, 0);
 }
 
@@ -248,7 +248,7 @@ static void logo_fetch(int i)
 	struct station *s = &stations[i];
 	char base[300];
 	char *argv[] = { "curl", "-sfL", "-m", "20", "--cacert", CA_BUNDLE,
-			 "-A", "chumby-netradio/1.0", "-o", logo_tmp, s->logo, NULL };
+			 "-A", "octopus-netradio/1.0", "-o", logo_tmp, s->logo, NULL };
 
 	if (logo_child > 0 || s->logo_tried || !s->logo[0])
 		return;
@@ -257,7 +257,7 @@ static void logo_fetch(int i)
 	logo_base(s, base, sizeof(base));
 	snprintf(logo_tmp, sizeof(logo_tmp), "%s.tmp", base);
 	logo_station = i;
-	logo_child = chumby_spawn(CURL, argv);
+	logo_child = octopus_spawn(CURL, argv);
 }
 
 /* Name the fetched file by what it is: LVGL picks decoders by extension. */
@@ -292,7 +292,7 @@ static void art_update(void)
 	char path[220];
 
 	if (!n_stations || !logo_path(&stations[cur], path, sizeof(path)) ||
-	    !chumby_logo_set(art_img, path, ART_SIZE - 2 * ART_PAD)) {
+	    !octopus_logo_set(art_img, path, ART_SIZE - 2 * ART_PAD)) {
 		art_show_note();
 		if (n_stations)
 			logo_fetch(cur);
@@ -329,8 +329,8 @@ static void ui_update(void)
 		song = "can't reach the station, retrying...";
 	else if (playing)
 		song = "connecting...";
-	chumby_scroll_label_set(lbl_name, n_stations ? stations[cur].name : "No stations");
-	chumby_scroll_label_set(lbl_song, song);
+	octopus_scroll_label_set(lbl_name, n_stations ? stations[cur].name : "No stations");
+	octopus_scroll_label_set(lbl_song, song);
 	lv_label_set_text(lbl_cat, n_stations ? cats[stations[cur].cat] : "");
 	if (live && st_codec[0] && st_bitrate > 0)
 		snprintf(info, sizeof(info), "%s %dk", st_codec, st_bitrate);
@@ -345,11 +345,11 @@ static void ui_update(void)
 		lv_obj_remove_state(btn_play, LV_STATE_CHECKED);
 }
 
-/* chumby-stream stops the old stream (up to a second), then forks into
+/* octopus-stream stops the old stream (up to a second), then forks into
  * the background: reaped in poll_cb, so the UI never waits. */
 static void stream_run(char **argv)
 {
-	int pid = chumby_spawn(STREAM_TOOL, argv);
+	int pid = octopus_spawn(STREAM_TOOL, argv);
 
 	if (pid > 0)
 		stream_child = pid;
@@ -357,7 +357,7 @@ static void stream_run(char **argv)
 
 static void stream_start(void)
 {
-	char *argv[] = { "chumby-stream", stations[cur].url, stations[cur].name, NULL };
+	char *argv[] = { "octopus-stream", stations[cur].url, stations[cur].name, NULL };
 
 	if (!n_stations)
 		return;
@@ -371,7 +371,7 @@ static void stream_start(void)
 
 static void stream_stop(void)
 {
-	char *argv[] = { "chumby-stream", "stop", NULL };
+	char *argv[] = { "octopus-stream", "stop", NULL };
 
 	stream_run(argv);
 	start_grace_until = mono_ms() + START_GRACE_MS;
@@ -379,14 +379,14 @@ static void stream_stop(void)
 	st_bitrate = 0;
 }
 
-/* What chumby-stream says. */
+/* What octopus-stream says. */
 static void status_read(void)
 {
 	char path[256], line[600], state[16] = "", url[512] = "", title[256] = "", codec[8] = "";
 	int bitrate = 0;
 	FILE *f;
 
-	snprintf(path, sizeof(path), "%s/stream", chumby_run_dir());
+	snprintf(path, sizeof(path), "%s/stream", octopus_run_dir());
 	f = fopen(path, "r");
 	while (f && fgets(line, sizeof(line), f)) {
 		line[strcspn(line, "\n")] = '\0';
@@ -403,7 +403,7 @@ static void status_read(void)
 	}
 	if (f)
 		fclose(f);
-	/* chumby-stream plays podcasts too: a stream that isn't one of our
+	/* octopus-stream plays podcasts too: a stream that isn't one of our
 	 * stations is someone else's, as good as none for us. */
 	if (!f || station_by_url(url) < 0) {
 		/* Not running: stopped elsewhere (FM, an alarm, a podcast),
@@ -546,32 +546,32 @@ static lv_obj_t *tile(lv_obj_t *parent, const char *text, const char *sub, bool 
 {
 	lv_obj_t *b = lv_button_create(parent), *l;
 
-	lv_obj_set_size(b, (CHUMBY_APP_W - 3 * 8) / 2, TILE_H);
+	lv_obj_set_size(b, (OCTOPUS_APP_W - 3 * 8) / 2, TILE_H);
 	lv_obj_set_style_radius(b, 8, 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
 	lv_obj_set_style_pad_hor(b, 8, 0);
-	lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_SURFACE), 0);
-	lv_obj_set_style_text_color(b, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_style_bg_color(b, octopus_color(OCTOPUS_COLOR_SURFACE), 0);
+	lv_obj_set_style_text_color(b, octopus_color(OCTOPUS_COLOR_TEXT), 0);
 	if (on) {	/* the selected one: the accent, glossy */
-		chumby_glossy(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-		lv_obj_set_style_text_color(b, chumby_on_accent(), 0);
+		octopus_glossy(b, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
+		lv_obj_set_style_text_color(b, octopus_on_accent(), 0);
 	}
 	l = lv_label_create(b);
 	lv_label_set_text(l, text);
-	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_width(l, (CHUMBY_APP_W - 3 * 8) / 2 - 16 - (sub ? 24 : 0));
+	lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_LARGE), 0);
+	lv_obj_set_width(l, (OCTOPUS_APP_W - 3 * 8) / 2 - 16 - (sub ? 24 : 0));
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
 	/* Up to two lines (a tile has room), the rest cut with dots. */
 	lv_obj_update_layout(l);
-	if (lv_obj_get_height(l) > 2 * lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE))) {
-		lv_obj_set_height(l, 2 * lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE)));
+	if (lv_obj_get_height(l) > 2 * lv_font_get_line_height(octopus_font(OCTOPUS_FONT_LARGE))) {
+		lv_obj_set_height(l, 2 * lv_font_get_line_height(octopus_font(OCTOPUS_FONT_LARGE)));
 		lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
 	}
 	lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
 	if (sub) {
 		l = lv_label_create(b);
 		lv_label_set_text(l, sub);
-		lv_obj_set_style_text_color(l, on ? chumby_on_accent() : chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+		lv_obj_set_style_text_color(l, on ? octopus_on_accent() : octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
 		lv_obj_align(l, LV_ALIGN_RIGHT_MID, 0, 0);
 	}
 	return b;
@@ -587,37 +587,37 @@ static void list_show(int cat)
 	list_close();
 	list_panel = lv_obj_create(scr);
 	lv_obj_remove_style_all(list_panel);
-	lv_obj_set_size(list_panel, CHUMBY_APP_W, CHUMBY_APP_H);
+	lv_obj_set_size(list_panel, OCTOPUS_APP_W, OCTOPUS_APP_H);
 	lv_obj_set_style_bg_opa(list_panel, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(list_panel, chumby_color(CHUMBY_COLOR_BG), 0);
+	lv_obj_set_style_bg_color(list_panel, octopus_color(OCTOPUS_COLOR_BG), 0);
 	lv_obj_set_scrollable(list_panel, false);
 
 	/* Header: where we are (tap it to go back up), and close. */
 	head = lv_button_create(list_panel);
 	lv_obj_remove_style_all(head);
-	lv_obj_set_size(head, CHUMBY_APP_W - 8 - CHUMBY_TOUCH_MIN, LIST_HEAD_H + 4);
+	lv_obj_set_size(head, OCTOPUS_APP_W - 8 - OCTOPUS_TOUCH_MIN, LIST_HEAD_H + 4);
 	lv_obj_set_pos(head, 8, 0);
 	l = lv_label_create(head);
 	lv_label_set_text_fmt(l, "%s%s", cat < 0 ? "" : LV_SYMBOL_LEFT "  ",
 			      cat < 0 ? "Stations" : cats[cat]);
-	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_LARGE), 0);
+	lv_obj_set_style_text_color(l, octopus_color(OCTOPUS_COLOR_TEXT), 0);
 	lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
 	if (cat >= 0)
 		lv_obj_add_event_cb(head, back_cb, LV_EVENT_CLICKED, NULL);
 	b = lv_button_create(list_panel);
 	lv_obj_remove_style_all(b);
-	lv_obj_set_size(b, CHUMBY_TOUCH_MIN, LIST_HEAD_H + 4);
+	lv_obj_set_size(b, OCTOPUS_TOUCH_MIN, LIST_HEAD_H + 4);
 	lv_obj_align(b, LV_ALIGN_TOP_RIGHT, 0, 0);
 	l = lv_label_create(b);
 	lv_label_set_text(l, LV_SYMBOL_CLOSE);
-	lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(l, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
 	lv_obj_center(l);
 	lv_obj_add_event_cb(b, close_cb, LV_EVENT_CLICKED, NULL);
 
 	grid = lv_obj_create(list_panel);
 	lv_obj_remove_style_all(grid);
-	lv_obj_set_size(grid, CHUMBY_APP_W, CHUMBY_APP_H - LIST_HEAD_H - 4);
+	lv_obj_set_size(grid, OCTOPUS_APP_W, OCTOPUS_APP_H - LIST_HEAD_H - 4);
 	lv_obj_set_pos(grid, 0, LIST_HEAD_H + 4);
 	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_style_pad_hor(grid, 8, 0);
@@ -674,24 +674,24 @@ static lv_obj_t *round_button(lv_obj_t *parent, const char *sym, int size,
 	return b;
 }
 
-static void on_mode(chumby_mode_t mode, void *user)
+static void on_mode(octopus_mode_t mode, void *user)
 {
-	lv_color_t surface = chumby_color(CHUMBY_COLOR_SURFACE);
+	lv_color_t surface = octopus_color(OCTOPUS_COLOR_SURFACE);
 
 	(void)user;
-	lv_obj_set_style_text_color(lbl_name, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_style_text_color(lbl_cat, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_text_color(lbl_info, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_text_color(lbl_song, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_style_text_color(art_note, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_style_text_color(lbl_name, octopus_color(OCTOPUS_COLOR_TEXT), 0);
+	lv_obj_set_style_text_color(lbl_cat, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(lbl_info, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(lbl_song, octopus_color(OCTOPUS_COLOR_TEXT), 0);
+	lv_obj_set_style_text_color(art_note, octopus_color(OCTOPUS_COLOR_TEXT), 0);
 	/* A white logo tile would glare at night. */
-	lv_obj_set_style_opa(art_tile, mode == CHUMBY_MODE_NIGHT ? LV_OPA_50 : LV_OPA_COVER, 0);
+	lv_obj_set_style_opa(art_tile, mode == OCTOPUS_MODE_NIGHT ? LV_OPA_50 : LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(btn_prev, surface, 0);
 	lv_obj_set_style_bg_color(btn_next, surface, 0);
 	lv_obj_set_style_bg_color(btn_play, surface, 0);
 	lv_obj_set_style_bg_color(btn_list, surface, LV_STATE_PRESSED);
-	lv_obj_set_style_text_color(btn_list, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_border_color(btn_list, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(btn_list, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_border_color(btn_list, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
 	if (!lv_obj_is_hidden(art_note))
 		art_show_note();	/* gradient in the new palette */
 	if (list_panel)
@@ -703,18 +703,18 @@ static void on_mode(chumby_mode_t mode, void *user)
  * moved in, once. */
 static void paths_init(void)
 {
-	const char *app = chumby_app_dir(), *data = chumby_app_data_dir();
+	const char *app = octopus_app_dir(), *data = octopus_app_data_dir();
 	static const char *const old[][2] = {
-		{ "/var/lib/chumby/streams.conf", "streams.conf" },
-		{ "/var/lib/chumby/stream.station", "stream.station" },
+		{ "/var/lib/octopus/streams.conf", "streams.conf" },
+		{ "/var/lib/octopus/stream.station", "stream.station" },
 	};
 	char to[300];
 	unsigned int i;
 
 	if (!app)
-		app = "/usr/lib/chumby/apps/" APP_ID;
+		app = "/usr/lib/octopus/apps/" APP_ID;
 	if (!data)
-		data = "/var/lib/chumby/apps/" APP_ID;
+		data = "/var/lib/octopus/apps/" APP_ID;
 	snprintf(stations_default, sizeof(stations_default), "%s/streams.conf", app);
 	snprintf(stations_user, sizeof(stations_user), "%s/streams.conf", data);
 	snprintf(station_file, sizeof(station_file), "%s/stream.station", data);
@@ -723,7 +723,7 @@ static void paths_init(void)
 	for (i = 0; i < sizeof(old) / sizeof(old[0]); i++) {
 		snprintf(to, sizeof(to), "%s/%s", data, old[i][1]);
 		if (access(to, F_OK) != 0 && rename(old[i][0], to) == 0)
-			fprintf(stderr, "chumby-netradio: moved %s to %s\n", old[i][0], to);
+			fprintf(stderr, "octopus-netradio: moved %s to %s\n", old[i][0], to);
 	}
 }
 
@@ -733,14 +733,14 @@ int main(void)
 	int32_t art_y, name_y;
 
 	paths_init();
-	scr = chumby_app_init(APP_ID);
+	scr = octopus_app_init(APP_ID);
 	lv_obj_set_scrollable(scr, false);
 
 	/* Bottom: the station list (small), previous, play/stop, next. */
 	row = lv_obj_create(scr);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_scrollable(row, false);
-	lv_obj_set_size(row, CHUMBY_APP_W, 56);
+	lv_obj_set_size(row, OCTOPUS_APP_W, 56);
 	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -8);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
@@ -750,7 +750,7 @@ int main(void)
 	lv_obj_set_style_bg_opa(btn_list, LV_OPA_COVER, LV_STATE_PRESSED);
 	lv_obj_set_style_border_width(btn_list, 1, 0);
 	lv_obj_set_style_border_opa(btn_list, LV_OPA_40, 0);
-	lv_obj_set_ext_click_area(btn_list, (CHUMBY_TOUCH_MIN - SMALL_BTN) / 2);
+	lv_obj_set_ext_click_area(btn_list, (OCTOPUS_TOUCH_MIN - SMALL_BTN) / 2);
 	lv_obj_add_event_cb(btn_list, list_cb, LV_EVENT_CLICKED, NULL);
 	btn_prev = round_button(row, LV_SYMBOL_PREV, 52, &lv_font_montserrat_28);
 	lv_obj_add_event_cb(btn_prev, station_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
@@ -782,14 +782,14 @@ int main(void)
 	 * the codec and bitrate at the right (where FM has its signal bars),
 	 * small. */
 	lbl_cat = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_cat, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_style_text_font(lbl_cat, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_set_width(lbl_cat, COL_W - INFO_W - 6);
-	lv_obj_set_height(lbl_cat, lv_font_get_line_height(chumby_font(CHUMBY_FONT_BODY)));
+	lv_obj_set_height(lbl_cat, lv_font_get_line_height(octopus_font(OCTOPUS_FONT_BODY)));
 	lv_label_set_long_mode(lbl_cat, LV_LABEL_LONG_MODE_DOTS);
 	lv_obj_set_pos(lbl_cat, COL_X, art_y);
 	lv_label_set_text(lbl_cat, "");
 	lbl_info = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_info, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_style_text_font(lbl_info, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_set_width(lbl_info, INFO_W);
 	lv_obj_set_style_text_align(lbl_info, LV_TEXT_ALIGN_RIGHT, 0);
 	lv_label_set_text(lbl_info, "");
@@ -797,23 +797,23 @@ int main(void)
 
 	/* Under it, close together: the station's name, what's playing. */
 	lbl_name = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_name, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_style_text_font(lbl_name, octopus_font(OCTOPUS_FONT_LARGE), 0);
 	lv_obj_set_width(lbl_name, COL_W);
-	chumby_scroll_label_init(lbl_name);
-	name_y = art_y + lv_font_get_line_height(chumby_font(CHUMBY_FONT_BODY)) + LINE_GAP;
+	octopus_scroll_label_init(lbl_name);
+	name_y = art_y + lv_font_get_line_height(octopus_font(OCTOPUS_FONT_BODY)) + LINE_GAP;
 	lv_obj_set_pos(lbl_name, COL_X, name_y);
 	lbl_song = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_song, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_style_text_font(lbl_song, octopus_font(OCTOPUS_FONT_LARGE), 0);
 	lv_obj_set_width(lbl_song, COL_W);
-	chumby_scroll_label_init(lbl_song);
-	lv_obj_set_pos(lbl_song, COL_X, name_y + lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE)));
+	octopus_scroll_label_init(lbl_song);
+	lv_obj_set_pos(lbl_song, COL_X, name_y + lv_font_get_line_height(octopus_font(OCTOPUS_FONT_LARGE)));
 
 	switch_timer = lv_timer_create(switch_timer_cb, 600, NULL);
 	lv_timer_pause(switch_timer);
 
 	load_stations();
 	load_current();
-	chumby_on_mode_change(on_mode, NULL);
+	octopus_on_mode_change(on_mode, NULL);
 	status_read();		/* already playing? which station? */
 	if (playing && station_by_url(st_url) >= 0)
 		cur = station_by_url(st_url);
@@ -821,5 +821,5 @@ int main(void)
 	ui_update();
 	lv_timer_create(poll_cb, 500, NULL);
 
-	return chumby_run();
+	return octopus_run();
 }

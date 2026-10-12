@@ -1,4 +1,4 @@
-From: chumby <chumby@localhost>
+From: octopus <octopus@localhost>
 Subject: [PATCH] wayland: don't let a stale touch point take a new contact's up
 
 touch_handle_up() releases the first *pressed* point with the contact's

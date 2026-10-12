@@ -1,0 +1,10 @@
+prefix=/usr
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: liboctopus
+Description: Chumby One app framework (LVGL on Wayland, theme, night-mode policy)
+Version: 1.0
+Requires.private: wayland-client wayland-cursor xkbcommon alsa pixman-1
+Cflags: -I${includedir}/octopus -DLV_CONF_INCLUDE_SIMPLE
+Libs: -L${libdir} -loctopus

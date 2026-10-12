@@ -1,20 +1,20 @@
 # Chumby One (falconwing) with a mainline kernel.
 #
-# The stock chumby bootloader and config block (partition 1, extracted by
+# The stock Chumby bootloader and config block (partition 1, extracted by
 # board/falconwing/extract-stock.sh) are kept; post-image.sh writes our
 # zImage + appended DTB into the krnA slot instead of the 2.6.28 kernel.
 BR2_arm=y
 BR2_arm926t=y
-BR2_DL_DIR="$(BR2_EXTERNAL_PIFANSRF_PATH)/dl"
-BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/patches"
+BR2_DL_DIR="$(BR2_EXTERNAL_OCTOPUS_PATH)/dl"
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/patches"
 
 # A current kernel lifts the 2.6.28 constraints: glibc is fine.
 BR2_TOOLCHAIN_EXTERNAL=y
 BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV5_EABI_GLIBC_STABLE=y
 
 # System
-BR2_TARGET_GENERIC_HOSTNAME="chumby"
-BR2_TARGET_GENERIC_ISSUE="Welcome to falconwing (buildroot, mainline kernel)"
+BR2_TARGET_GENERIC_HOSTNAME="octopus"
+BR2_TARGET_GENERIC_ISSUE="Welcome to Octopus OS (Chumby One)"
 BR2_TARGET_GENERIC_ROOT_PASSWD="root"
 # systemd (its udev also serves libinput, the compositor's input stack).
 # Kept lean for 64 MB: no networkd/resolved (wpa_supplicant@wlan0 +
@@ -33,23 +33,23 @@ BR2_SYSTEM_BIN_SH_BUSYBOX=y
 # Time zones: "timezone:" in the config partition's user-data picks one.
 BR2_TARGET_TZ_INFO=y
 BR2_TARGET_LOCALTIME="Etc/UTC"
-BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing/rootfs-common $(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/rootfs"
-BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/post-build.sh"
-BR2_ROOTFS_POST_FAKEROOT_SCRIPT="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/post-fakeroot.sh"
-BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/users.table"
-BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/post-image.sh"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing/rootfs-common $(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/rootfs"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/post-build.sh"
+BR2_ROOTFS_POST_FAKEROOT_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/post-fakeroot.sh"
+BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/users.table"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/post-image.sh"
 
 # Kernel: latest mainline buildroot knows, mxs_defconfig + board fragment.
 BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_LATEST_VERSION=y
 BR2_LINUX_KERNEL_DEFCONFIG="mxs"
-BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/linux.config.fragment"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/linux.config.fragment"
 BR2_LINUX_KERNEL_APPENDED_ZIMAGE=y
 # xz: slower to unpack than gzip, but the 4 MiB krnA slot is the hard limit.
 BR2_LINUX_KERNEL_XZ=y
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
 BR2_LINUX_KERNEL_APPENDED_DTB=y
-BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_PIFANSRF_PATH)/board/falconwing-mainline/dts/imx23-chumby-one.dts"
+BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/falconwing-mainline/dts/imx23-chumby-one.dts"
 
 # Packages
 BR2_PACKAGE_DROPBEAR=y
@@ -67,15 +67,15 @@ BR2_PACKAGE_LINUX_FIRMWARE_RALINK_RT2XX=y
 BR2_PACKAGE_LINUX_FIRMWARE_RALINK_RT73=y
 BR2_PACKAGE_I2C_TOOLS=y
 BR2_PACKAGE_QN8005=y
-# GUI: Wayland. chumby-wm (wlroots, pixman renderer: no GPU) runs
-# chumby-shell (left-edge switcher + app list) and the libchumby apps.
+# GUI: Wayland. octopus-wm (wlroots, pixman renderer: no GPU) runs
+# octopus-shell (left-edge switcher + app list) and the liboctopus apps.
 BR2_PACKAGE_WLROOTS_PIXMAN=y
 BR2_PACKAGE_SEATD_BUILTIN=y
-BR2_PACKAGE_CHUMBY_WM=y
-BR2_PACKAGE_CHUMBY_SHELL=y
-BR2_PACKAGE_CHUMBY_APPS=y
-BR2_PACKAGE_CHUMBY_BUNDLED_APPS=y
-# FM station art: chumby-station-art looks the station up (FCC) and fetches
+BR2_PACKAGE_OCTOPUS_WM=y
+BR2_PACKAGE_OCTOPUS_SHELL=y
+BR2_PACKAGE_OCTOPUS_APPS=y
+BR2_PACKAGE_OCTOPUS_BUNDLED_APPS=y
+# FM station art: octopus-station-art looks the station up (FCC) and fetches
 # its logo (Wikipedia) over HTTPS. libcurl on OpenSSL (below), not mbed
 # TLS: OpenSSL's AES/GHASH/ChaCha20 are ARMv4 assembly, mbed TLS's are C,
 # and an HTTPS stream's decryption cost the ARM9 ~5% (an HTTP one, none).
@@ -89,7 +89,7 @@ BR2_PACKAGE_JQ=y
 # iPhone hangs up after the first request.
 BR2_PACKAGE_OPENSSL=y
 BR2_PACKAGE_SHAIRPORT_SYNC=y
-# Internet radio: chumby-stream decodes MP3 with libmpg123, AAC with
+# Internet radio: octopus-stream decodes MP3 with libmpg123, AAC with
 # faad2 (its fixed-point build, see board/.../patches/faad2).
 BR2_PACKAGE_MPG123=y
 BR2_PACKAGE_FAAD2=y

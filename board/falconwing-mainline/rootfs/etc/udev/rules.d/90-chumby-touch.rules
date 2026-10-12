@@ -1,9 +1,0 @@
-# Map the 4-wire resistive touchscreen's raw 12-bit LRADC values (0..4095)
-# onto the 320x240 panel for libinput (used by chumby-wm). Measured on
-# hardware with mainline mxs-lradc-ts by pressing the four corners: X runs
-# 217 (left) .. 3909 (right), Y 327 (top) .. 3859 (bottom), no axis swap.
-# (The stock driver's calibration had X inverted: not valid here.)
-#   x' = 1.1093 x - 0.0589,  y' = 1.1595 y - 0.0926   (normalised 0..1)
-ACTION=="add|change", KERNEL=="event*", ATTRS{name}=="mxs-lradc-ts", \
-	ENV{ID_INPUT}="1", ENV{ID_INPUT_TOUCHSCREEN}="1", \
-	ENV{LIBINPUT_CALIBRATION_MATRIX}="1.1093 0 -0.0589 0 1.1595 -0.0926"

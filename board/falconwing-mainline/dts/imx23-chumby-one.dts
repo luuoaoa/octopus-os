@@ -358,7 +358,7 @@
 	};
 
 	/* The vendor driver reported KEY_ENTER; the shell finds the device by
-	 * its "snooze" name, and chumby-wm keeps it away from apps. */
+	 * its "snooze" name, and octopus-wm keeps it away from apps. */
 	gpio-keys {
 		compatible = "gpio-keys";
 		label = "snooze";

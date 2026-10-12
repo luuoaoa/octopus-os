@@ -13,13 +13,13 @@
  *
  * Shows: "name | RSS feed URL | artwork URL" lines in /boot/podcasts.conf
  * (the config partition), else podcasts.conf in the bundle. Their feeds
- * are read by the bundle's chumby-podcast-feed (the newest 30 episodes)
- * into the app's data directory (chumby_app_data_dir()), again once an
+ * are read by the bundle's octopus-podcast-feed (the newest 30 episodes)
+ * into the app's data directory (octopus_app_data_dir()), again once an
  * hour old, one at a time, in the background. Artwork is fetched once into
  * art/ there.
  *
- * chumby-stream plays (in the background: it carries on when this app
- * closes, and takes the sound from other sources through chumby-audio),
+ * octopus-stream plays (in the background: it carries on when this app
+ * closes, and takes the sound from other sources through octopus-audio),
  * starting an episode where it was left: its status gives the byte it's
  * at, kept per episode in "positions" in the data directory, with the
  * finished ones marked. Pause stops it, remembering where; the skip
@@ -34,20 +34,20 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#include <chumby.h>
+#include <octopus.h>
 
 #define APP_ID		"Podcasts"	/* = Id in app.conf */
 #define CONF_USER	"/boot/podcasts.conf"
-/* In the bundle (chumby_app_dir()) and the app's data directory
- * (chumby_app_data_dir()): paths_init(). */
+/* In the bundle (octopus_app_dir()) and the app's data directory
+ * (octopus_app_data_dir()): paths_init(). */
 #define CONF_DEFAULT	conf_default
 #define DATA_DIR	data_dir
 #define POSITIONS_FILE	positions_file
 #define CURRENT_FILE	current_file
 #define ART_DIR		art_dir
 #define FEED_TOOL	feed_tool
-#define OLD_DATA_DIR	"/var/lib/chumby/podcasts"	/* before it was a bundle */
-#define STREAM_TOOL	"/usr/bin/chumby-stream"
+#define OLD_DATA_DIR	"/var/lib/octopus/podcasts"	/* before it was a bundle */
+#define STREAM_TOOL	"/usr/bin/octopus-stream"
 #define CURL		"/usr/bin/curl"
 #define CA_BUNDLE	"/etc/ssl/certs/ca-certificates.crt"
 #define MAX_SHOWS	16
@@ -58,11 +58,11 @@
 #define ART_SIZE	92
 #define ART_PAD		8
 #define COL_X		(ART_X + ART_SIZE + 12)
-#define COL_W		(CHUMBY_APP_W - 10 - COL_X)
+#define COL_W		(OCTOPUS_APP_W - 10 - COL_X)
 #define SMALL_BTN	38
 #define LINE_GAP	2
 #define BAR_H		4
-#define BAR_W		(CHUMBY_APP_W - 2 * ART_X)	/* the width: seeking precisely */
+#define BAR_W		(OCTOPUS_APP_W - 2 * ART_X)	/* the width: seeking precisely */
 #define BAR_GAP		8			/* between the art and the bar */
 #define BAR_TOUCH	12			/* the bar's touch area, above and below */
 #define STRIPE_W	28			/* the busy stripe on the bar */
@@ -107,15 +107,15 @@ static int n_positions;
 static int cur_show, cur_ep = -1;	/* what's selected */
 static bool playing;			/* we want it on (corrected by status) */
 static uint64_t start_grace_until;
-static long long st_byte, st_length;	/* where chumby-stream is, in the episode */
+static long long st_byte, st_length;	/* where octopus-stream is, in the episode */
 /* Where playing is, in seconds: where it started (the byte it started
- * from, at its bitrate: an estimate, made once) plus what chumby-stream
+ * from, at its bitrate: an estimate, made once) plus what octopus-stream
  * has actually played since ("played=", exact). It only moves on with
  * the sound, never back. (st_byte is what's been fed to the decoder: a
  * few seconds ahead, in network-sized steps.) */
 static double play_anchor_s = -1;	/* seconds at played=0; -1: not known */
 static long st_played = -1;		/* seconds played this run */
-/* Runs: chumby-stream's "start=", the byte a run started at. Ours (a
+/* Runs: octopus-stream's "start=", the byte a run started at. Ours (a
  * play, a skip, a seek) is req_start; the one the status is about,
  * run_start. Another (a resume after an alarm) carries on from where
  * the time was. */
@@ -207,18 +207,18 @@ static char conf_default[256], data_dir[256], positions_file[280], current_file[
 
 /* The bundle's files and the app's own directory - set by the shell for
  * a bundle; as installed in the image if run some other way. What the app
- * kept before it was a bundle (/var/lib/chumby/podcasts) is moved in, once. */
+ * kept before it was a bundle (/var/lib/octopus/podcasts) is moved in, once. */
 static void paths_init(void)
 {
-	const char *app = chumby_app_dir(), *data = chumby_app_data_dir();
+	const char *app = octopus_app_dir(), *data = octopus_app_data_dir();
 	struct stat st;
 
 	if (!app)
-		app = "/usr/lib/chumby/apps/" APP_ID;
+		app = "/usr/lib/octopus/apps/" APP_ID;
 	if (!data)
-		data = "/var/lib/chumby/apps/" APP_ID;
+		data = "/var/lib/octopus/apps/" APP_ID;
 	snprintf(conf_default, sizeof(conf_default), "%s/podcasts.conf", app);
-	snprintf(feed_tool, sizeof(feed_tool), "%s/chumby-podcast-feed", app);
+	snprintf(feed_tool, sizeof(feed_tool), "%s/octopus-podcast-feed", app);
 	snprintf(data_dir, sizeof(data_dir), "%s", data);
 	snprintf(positions_file, sizeof(positions_file), "%s/positions", data);
 	snprintf(current_file, sizeof(current_file), "%s/current", data);
@@ -226,7 +226,7 @@ static void paths_init(void)
 	if (stat(positions_file, &st) != 0 && stat(OLD_DATA_DIR, &st) == 0) {
 		rmdir(data_dir);	/* (made empty by the shell) */
 		if (rename(OLD_DATA_DIR, data_dir) == 0)
-			fprintf(stderr, "chumby-podcasts: moved " OLD_DATA_DIR " to %s\n", data_dir);
+			fprintf(stderr, "octopus-podcasts: moved " OLD_DATA_DIR " to %s\n", data_dir);
 	}
 }
 
@@ -271,7 +271,7 @@ static void load_shows(void)
 		fclose(f);
 }
 
-/* chumby-podcast-feed's cache: published, duration, bytes, URL, title. */
+/* octopus-podcast-feed's cache: published, duration, bytes, URL, title. */
 static void load_episodes(int s)
 {
 	struct show *sh = &shows[s];
@@ -467,7 +467,7 @@ static void load_current(void)
 
 static void feed_next(void)
 {
-	char path[256], *argv[] = { "chumby-podcast-feed", NULL, path, "30", NULL };
+	char path[256], *argv[] = { "octopus-podcast-feed", NULL, path, "30", NULL };
 	struct stat st;
 	int s;
 
@@ -480,7 +480,7 @@ static void feed_next(void)
 		mkdir(DATA_DIR, 0755);
 		argv[1] = shows[s].feed;
 		feed_show = s;
-		feed_child = chumby_spawn(FEED_TOOL, argv);
+		feed_child = octopus_spawn(FEED_TOOL, argv);
 		/* Tried, worked or not: not again for an hour. */
 		if (stat(path, &st) == 0) {
 			struct timespec t[2] = { { .tv_nsec = UTIME_NOW }, { .tv_nsec = UTIME_NOW } };
@@ -518,7 +518,7 @@ static void art_fetch(int s)
 	struct show *sh = &shows[s];
 	char base[200];
 	char *argv[] = { "curl", "-sfL", "-m", "20", "--cacert", CA_BUNDLE,
-			 "-A", "chumby-podcasts/1.0", "-o", art_tmp, sh->art, NULL };
+			 "-A", "octopus-podcasts/1.0", "-o", art_tmp, sh->art, NULL };
 
 	if (art_child > 0 || sh->art_tried || !sh->art[0])
 		return;
@@ -527,7 +527,7 @@ static void art_fetch(int s)
 	art_base(sh, base, sizeof(base));
 	snprintf(art_tmp, sizeof(art_tmp), "%s.tmp", base);
 	art_show = s;
-	art_child = chumby_spawn(CURL, argv);
+	art_child = octopus_spawn(CURL, argv);
 }
 
 /* Named by what it is: LVGL picks decoders by extension. */
@@ -560,9 +560,9 @@ static void art_show_note(void)
 {
 	lv_obj_set_hidden(art_img, true);
 	lv_obj_set_hidden(art_note, false);
-	lv_obj_set_style_bg_color(art_tile, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-	lv_obj_set_style_text_color(art_note, chumby_on_accent(), 0);
-	lv_obj_set_style_bg_grad_color(art_tile, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_bg_color(art_tile, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
+	lv_obj_set_style_text_color(art_note, octopus_on_accent(), 0);
+	lv_obj_set_style_bg_grad_color(art_tile, octopus_color(OCTOPUS_COLOR_SURFACE), 0);
 	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_VER, 0);
 }
 
@@ -571,7 +571,7 @@ static void art_update(void)
 	char path[220];
 
 	if (!n_shows || !art_path(&shows[cur_show], path, sizeof(path)) ||
-	    !chumby_logo_set(art_img, path, ART_SIZE)) {
+	    !octopus_logo_set(art_img, path, ART_SIZE)) {
 		art_show_note();
 		if (n_shows)
 			art_fetch(cur_show);
@@ -581,7 +581,7 @@ static void art_update(void)
 	lv_obj_center(art_img);
 	lv_obj_set_hidden(art_img, false);
 	lv_obj_set_hidden(art_note, true);
-	lv_obj_set_style_bg_color(art_tile, chumby_color(CHUMBY_COLOR_SURFACE), 0);
+	lv_obj_set_style_bg_color(art_tile, octopus_color(OCTOPUS_COLOR_SURFACE), 0);
 	lv_obj_set_style_bg_grad_dir(art_tile, LV_GRAD_DIR_NONE, 0);
 }
 
@@ -683,7 +683,7 @@ static void ui_update(void)
 		lv_label_set_text(lbl_elapsed, now);
 	if (strcmp(lv_label_get_text(lbl_total), total))
 		lv_label_set_text(lbl_total, total);
-	chumby_scroll_label_set(lbl_title, e ? e->title : n_shows ? "Fetching episodes..." : "");
+	octopus_scroll_label_set(lbl_title, e ? e->title : n_shows ? "Fetching episodes..." : "");
 	if (strcmp(lv_label_get_text(lbl_sub), sub))
 		lv_label_set_text(lbl_sub, sub);
 	label_set(lv_obj_get_child(btn_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
@@ -695,11 +695,11 @@ static void ui_update(void)
 	}
 }
 
-/* chumby-stream stops the old stream, then forks into the background:
+/* octopus-stream stops the old stream, then forks into the background:
  * reaped in poll_cb, so the UI never waits. */
 static void stream_run(char **argv)
 {
-	int pid = chumby_spawn(STREAM_TOOL, argv);
+	int pid = octopus_spawn(STREAM_TOOL, argv);
 
 	if (pid > 0)
 		stream_child = pid;
@@ -723,7 +723,7 @@ static void position_save(const struct episode *e, long long byte, long long len
 static void stream_start_at(long long byte)
 {
 	struct episode *e = episode();
-	char at[24], *argv[] = { "chumby-stream", NULL, shows[cur_show].name, at, NULL };
+	char at[24], *argv[] = { "octopus-stream", NULL, shows[cur_show].name, at, NULL };
 
 	if (!e)
 		return;
@@ -744,7 +744,7 @@ static void stream_start_at(long long byte)
 
 static void stream_stop(void)
 {
-	char *argv[] = { "chumby-stream", "stop", NULL };
+	char *argv[] = { "octopus-stream", "stop", NULL };
 
 	stream_run(argv);
 	start_grace_until = mono_ms() + START_GRACE_MS;
@@ -763,7 +763,7 @@ static void pause_here(void)
 	play_anchor_s = -1;
 }
 
-/* What chumby-stream says. */
+/* What octopus-stream says. */
 static void status_read(void)
 {
 	char path[256], line[1200], state[16] = "", url[1024] = "";
@@ -774,7 +774,7 @@ static void status_read(void)
 	struct episode *e;
 	FILE *f;
 
-	snprintf(path, sizeof(path), "%s/stream", chumby_run_dir());
+	snprintf(path, sizeof(path), "%s/stream", octopus_run_dir());
 	f = fopen(path, "r");
 	while (f && fgets(line, sizeof(line), f)) {
 		line[strcspn(line, "\n")] = '\0';
@@ -1051,31 +1051,31 @@ static lv_obj_t *tile(lv_obj_t *parent, const char *text, const char *sub, bool 
 {
 	lv_obj_t *b = lv_button_create(parent), *l;
 
-	lv_obj_set_size(b, (CHUMBY_APP_W - 3 * 8) / 2, TILE_H);
+	lv_obj_set_size(b, (OCTOPUS_APP_W - 3 * 8) / 2, TILE_H);
 	lv_obj_set_style_radius(b, 8, 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
 	lv_obj_set_style_pad_hor(b, 8, 0);
-	lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_SURFACE), 0);
-	lv_obj_set_style_text_color(b, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_style_bg_color(b, octopus_color(OCTOPUS_COLOR_SURFACE), 0);
+	lv_obj_set_style_text_color(b, octopus_color(OCTOPUS_COLOR_TEXT), 0);
 	if (on) {
-		chumby_glossy(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-		lv_obj_set_style_text_color(b, chumby_on_accent(), 0);
+		octopus_glossy(b, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
+		lv_obj_set_style_text_color(b, octopus_on_accent(), 0);
 	}
 	l = lv_label_create(b);
 	lv_label_set_text(l, text);
-	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_width(l, (CHUMBY_APP_W - 3 * 8) / 2 - 16 - (sub ? 24 : 0));
+	lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_LARGE), 0);
+	lv_obj_set_width(l, (OCTOPUS_APP_W - 3 * 8) / 2 - 16 - (sub ? 24 : 0));
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
 	lv_obj_update_layout(l);
-	if (lv_obj_get_height(l) > 2 * lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE))) {
-		lv_obj_set_height(l, 2 * lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE)));
+	if (lv_obj_get_height(l) > 2 * lv_font_get_line_height(octopus_font(OCTOPUS_FONT_LARGE))) {
+		lv_obj_set_height(l, 2 * lv_font_get_line_height(octopus_font(OCTOPUS_FONT_LARGE)));
 		lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
 	}
 	lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
 	if (sub) {
 		l = lv_label_create(b);
 		lv_label_set_text(l, sub);
-		lv_obj_set_style_text_color(l, on ? chumby_on_accent() : chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+		lv_obj_set_style_text_color(l, on ? octopus_on_accent() : octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
 		lv_obj_align(l, LV_ALIGN_RIGHT_MID, 0, 0);
 	}
 	return b;
@@ -1091,22 +1091,22 @@ static lv_obj_t *episode_row(lv_obj_t *parent, int s, int ep)
 	char date[16], info[64], left[16];
 	double bps = e->bytes > 0 && e->duration > 0 ? (double)e->bytes / e->duration : 16000.0;
 
-	lv_obj_set_size(b, CHUMBY_APP_W - 16, ROW_H);
+	lv_obj_set_size(b, OCTOPUS_APP_W - 16, ROW_H);
 	lv_obj_set_style_radius(b, 8, 0);
 	lv_obj_set_style_shadow_width(b, 0, 0);
 	lv_obj_set_style_pad_hor(b, 10, 0);
 	lv_obj_set_style_pad_ver(b, 0, 0);	/* the two lines need the height */
-	lv_obj_set_style_bg_color(b, chumby_color(CHUMBY_COLOR_SURFACE), 0);
-	lv_obj_set_style_text_color(b, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_style_bg_color(b, octopus_color(OCTOPUS_COLOR_SURFACE), 0);
+	lv_obj_set_style_text_color(b, octopus_color(OCTOPUS_COLOR_TEXT), 0);
 	if (on) {
-		chumby_glossy(b, chumby_color(CHUMBY_COLOR_ACCENT), 0);
-		lv_obj_set_style_text_color(b, chumby_on_accent(), 0);
+		octopus_glossy(b, octopus_color(OCTOPUS_COLOR_ACCENT), 0);
+		lv_obj_set_style_text_color(b, octopus_on_accent(), 0);
 	}
 	l = lv_label_create(b);
 	lv_label_set_text(l, e->title);
-	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_width(l, CHUMBY_APP_W - 16 - 20);
-	lv_obj_set_height(l, lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE)));
+	lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_LARGE), 0);
+	lv_obj_set_width(l, OCTOPUS_APP_W - 16 - 20);
+	lv_obj_set_height(l, lv_font_get_line_height(octopus_font(OCTOPUS_FONT_LARGE)));
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
 	lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, 4);
 
@@ -1123,8 +1123,8 @@ static lv_obj_t *episode_row(lv_obj_t *parent, int s, int ep)
 	}
 	l = lv_label_create(b);
 	lv_label_set_text(l, info);
-	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_BODY), 0);
-	lv_obj_set_style_text_color(l, on ? chumby_on_accent() : chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_BODY), 0);
+	lv_obj_set_style_text_color(l, on ? octopus_on_accent() : octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
 	lv_obj_align(l, LV_ALIGN_BOTTOM_LEFT, 0, -4);
 	return b;
 }
@@ -1139,38 +1139,38 @@ static void list_show(int level)
 	list_level = level;
 	list_panel = lv_obj_create(scr);
 	lv_obj_remove_style_all(list_panel);
-	lv_obj_set_size(list_panel, CHUMBY_APP_W, CHUMBY_APP_H);
+	lv_obj_set_size(list_panel, OCTOPUS_APP_W, OCTOPUS_APP_H);
 	lv_obj_set_style_bg_opa(list_panel, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(list_panel, chumby_color(CHUMBY_COLOR_BG), 0);
+	lv_obj_set_style_bg_color(list_panel, octopus_color(OCTOPUS_COLOR_BG), 0);
 	lv_obj_set_scrollable(list_panel, false);
 
 	head = lv_button_create(list_panel);
 	lv_obj_remove_style_all(head);
-	lv_obj_set_size(head, CHUMBY_APP_W - 8 - CHUMBY_TOUCH_MIN, LIST_HEAD_H + 4);
+	lv_obj_set_size(head, OCTOPUS_APP_W - 8 - OCTOPUS_TOUCH_MIN, LIST_HEAD_H + 4);
 	lv_obj_set_pos(head, 8, 0);
 	l = lv_label_create(head);
-	lv_obj_set_width(l, CHUMBY_APP_W - 8 - CHUMBY_TOUCH_MIN);
+	lv_obj_set_width(l, OCTOPUS_APP_W - 8 - OCTOPUS_TOUCH_MIN);
 	lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
 	lv_label_set_text_fmt(l, "%s%s", level < 0 ? "" : LV_SYMBOL_LEFT "  ",
 			      level < 0 ? "Podcasts" : shows[level].name);
-	lv_obj_set_style_text_font(l, chumby_font(CHUMBY_FONT_LARGE), 0);
-	lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_style_text_font(l, octopus_font(OCTOPUS_FONT_LARGE), 0);
+	lv_obj_set_style_text_color(l, octopus_color(OCTOPUS_COLOR_TEXT), 0);
 	lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
 	if (level >= 0)
 		lv_obj_add_event_cb(head, back_cb, LV_EVENT_CLICKED, NULL);
 	b = lv_button_create(list_panel);
 	lv_obj_remove_style_all(b);
-	lv_obj_set_size(b, CHUMBY_TOUCH_MIN, LIST_HEAD_H + 4);
+	lv_obj_set_size(b, OCTOPUS_TOUCH_MIN, LIST_HEAD_H + 4);
 	lv_obj_align(b, LV_ALIGN_TOP_RIGHT, 0, 0);
 	l = lv_label_create(b);
 	lv_label_set_text(l, LV_SYMBOL_CLOSE);
-	lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(l, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
 	lv_obj_center(l);
 	lv_obj_add_event_cb(b, close_cb, LV_EVENT_CLICKED, NULL);
 
 	grid = lv_obj_create(list_panel);
 	lv_obj_remove_style_all(grid);
-	lv_obj_set_size(grid, CHUMBY_APP_W, CHUMBY_APP_H - LIST_HEAD_H - 4);
+	lv_obj_set_size(grid, OCTOPUS_APP_W, OCTOPUS_APP_H - LIST_HEAD_H - 4);
 	lv_obj_set_pos(grid, 0, LIST_HEAD_H + 4);
 	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_style_pad_hor(grid, 8, 0);
@@ -1190,7 +1190,7 @@ static void list_show(int level)
 		l = lv_label_create(grid);
 		lv_label_set_text(l, feed_child > 0 && feed_show == level ? "Fetching episodes..." :
 				  "No episodes yet (no network?)");
-		lv_obj_set_style_text_color(l, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+		lv_obj_set_style_text_color(l, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
 		return;
 	}
 	for (i = 0; i < shows[level].n_eps; i++) {
@@ -1231,27 +1231,27 @@ static lv_obj_t *round_button(lv_obj_t *parent, const char *sym, int size,
 	return b;
 }
 
-static void on_mode(chumby_mode_t mode, void *user)
+static void on_mode(octopus_mode_t mode, void *user)
 {
-	lv_color_t surface = chumby_color(CHUMBY_COLOR_SURFACE);
+	lv_color_t surface = octopus_color(OCTOPUS_COLOR_SURFACE);
 
 	(void)user;
 	(void)mode;
-	lv_obj_set_style_text_color(lbl_show, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_text_color(lbl_elapsed, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_text_color(lbl_total, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_text_color(lbl_title, chumby_color(CHUMBY_COLOR_TEXT), 0);
-	lv_obj_set_style_text_color(lbl_sub, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_bg_color(bar, chumby_color(CHUMBY_COLOR_SURFACE), LV_PART_MAIN);
-	lv_obj_set_style_bg_color(bar, chumby_color(CHUMBY_COLOR_ACCENT), LV_PART_INDICATOR);
+	lv_obj_set_style_text_color(lbl_show, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(lbl_elapsed, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(lbl_total, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(lbl_title, octopus_color(OCTOPUS_COLOR_TEXT), 0);
+	lv_obj_set_style_text_color(lbl_sub, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_bg_color(bar, octopus_color(OCTOPUS_COLOR_SURFACE), LV_PART_MAIN);
+	lv_obj_set_style_bg_color(bar, octopus_color(OCTOPUS_COLOR_ACCENT), LV_PART_INDICATOR);
 	/* Shows on the track and on the filled part alike. */
-	lv_obj_set_style_bg_color(stripe, chumby_color(CHUMBY_COLOR_TEXT), 0);
+	lv_obj_set_style_bg_color(stripe, octopus_color(OCTOPUS_COLOR_TEXT), 0);
 	lv_obj_set_style_bg_color(btn_back, surface, 0);
 	lv_obj_set_style_bg_color(btn_ahead, surface, 0);
 	lv_obj_set_style_bg_color(btn_play, surface, 0);
 	lv_obj_set_style_bg_color(btn_list, surface, LV_STATE_PRESSED);
-	lv_obj_set_style_text_color(btn_list, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
-	lv_obj_set_style_border_color(btn_list, chumby_color(CHUMBY_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_text_color(btn_list, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
+	lv_obj_set_style_border_color(btn_list, octopus_color(OCTOPUS_COLOR_TEXT_DIM), 0);
 	if (!lv_obj_is_hidden(art_note))
 		art_show_note();
 	if (list_panel)
@@ -1265,16 +1265,16 @@ int main(void)
 	int s;
 
 	paths_init();
-	scr = chumby_app_init(APP_ID);
+	scr = octopus_app_init(APP_ID);
 	lv_obj_set_scrollable(scr, false);
-	line_large = lv_font_get_line_height(chumby_font(CHUMBY_FONT_LARGE));
-	line_body = lv_font_get_line_height(chumby_font(CHUMBY_FONT_BODY));
+	line_large = lv_font_get_line_height(octopus_font(OCTOPUS_FONT_LARGE));
+	line_body = lv_font_get_line_height(octopus_font(OCTOPUS_FONT_BODY));
 
 	/* Bottom: the episode list (small), back 10 s, play/pause, ahead 30 s. */
 	row = lv_obj_create(scr);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_scrollable(row, false);
-	lv_obj_set_size(row, CHUMBY_APP_W, 56);
+	lv_obj_set_size(row, OCTOPUS_APP_W, 56);
 	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -8);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
@@ -1284,13 +1284,13 @@ int main(void)
 	lv_obj_set_style_bg_opa(btn_list, LV_OPA_COVER, LV_STATE_PRESSED);
 	lv_obj_set_style_border_width(btn_list, 1, 0);
 	lv_obj_set_style_border_opa(btn_list, LV_OPA_40, 0);
-	lv_obj_set_ext_click_area(btn_list, (CHUMBY_TOUCH_MIN - SMALL_BTN) / 2);
+	lv_obj_set_ext_click_area(btn_list, (OCTOPUS_TOUCH_MIN - SMALL_BTN) / 2);
 	lv_obj_add_event_cb(btn_list, list_cb, LV_EVENT_CLICKED, NULL);
-	btn_back = round_button(row, CHUMBY_ICON_BACK10, 52, chumby_icon_font(28));
+	btn_back = round_button(row, OCTOPUS_ICON_BACK10, 52, octopus_icon_font(28));
 	lv_obj_add_event_cb(btn_back, skip_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-10);
 	btn_play = round_button(row, LV_SYMBOL_PLAY, 56, &lv_font_montserrat_28);
 	lv_obj_add_event_cb(btn_play, play_cb, LV_EVENT_CLICKED, NULL);
-	btn_ahead = round_button(row, CHUMBY_ICON_AHEAD30, 52, chumby_icon_font(28));
+	btn_ahead = round_button(row, OCTOPUS_ICON_AHEAD30, 52, octopus_icon_font(28));
 	lv_obj_add_event_cb(btn_ahead, skip_cb, LV_EVENT_CLICKED, (void *)(intptr_t)30);
 	lv_obj_update_layout(scr);
 
@@ -1309,15 +1309,15 @@ int main(void)
 	art_img = lv_image_create(art_tile);
 	lv_obj_set_hidden(art_img, true);
 	art_note = lv_label_create(art_tile);
-	lv_label_set_text(art_note, CHUMBY_ICON_PODCAST);
+	lv_label_set_text(art_note, OCTOPUS_ICON_PODCAST);
 	/* Its own size, not scaled up: a transform scales from the top left
 	 * corner (off centre), and blurs. */
-	lv_obj_set_style_text_font(art_note, chumby_icon_font(42), 0);
+	lv_obj_set_style_text_font(art_note, octopus_icon_font(42), 0);
 	lv_obj_center(art_note);
 
 	/* Right column, level with the art's top: the show, small. */
 	lbl_show = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_show, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_style_text_font(lbl_show, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_set_width(lbl_show, COL_W);
 	lv_obj_set_height(lbl_show, line_body);
 	lv_label_set_long_mode(lbl_show, LV_LABEL_LONG_MODE_DOTS);
@@ -1326,12 +1326,12 @@ int main(void)
 	/* Under them: the episode, its date (or how it's going). */
 	title_y = art_y + line_body + LINE_GAP;
 	lbl_title = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_title, chumby_font(CHUMBY_FONT_LARGE), 0);
+	lv_obj_set_style_text_font(lbl_title, octopus_font(OCTOPUS_FONT_LARGE), 0);
 	lv_obj_set_width(lbl_title, COL_W);
-	chumby_scroll_label_init(lbl_title);
+	octopus_scroll_label_init(lbl_title);
 	lv_obj_set_pos(lbl_title, COL_X, title_y);
 	lbl_sub = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_sub, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_style_text_font(lbl_sub, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_set_width(lbl_sub, COL_W);
 	lv_obj_set_height(lbl_sub, line_body);
 	lv_label_set_long_mode(lbl_sub, LV_LABEL_LONG_MODE_DOTS);
@@ -1344,11 +1344,11 @@ int main(void)
 	lv_obj_set_size(bar, BAR_W, BAR_H);
 	lv_obj_set_pos(bar, ART_X, art_y + ART_SIZE + BAR_GAP);
 	lbl_elapsed = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_elapsed, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_style_text_font(lbl_elapsed, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_label_set_text(lbl_elapsed, "");
 	lv_obj_set_pos(lbl_elapsed, ART_X, art_y + ART_SIZE + BAR_GAP + BAR_H + LINE_GAP);
 	lbl_total = lv_label_create(scr);
-	lv_obj_set_style_text_font(lbl_total, chumby_font(CHUMBY_FONT_BODY), 0);
+	lv_obj_set_style_text_font(lbl_total, octopus_font(OCTOPUS_FONT_BODY), 0);
 	lv_obj_set_width(lbl_total, BAR_W / 2);
 	lv_obj_set_style_text_align(lbl_total, LV_TEXT_ALIGN_RIGHT, 0);
 	lv_label_set_text(lbl_total, "");
@@ -1380,14 +1380,14 @@ int main(void)
 		load_episodes(s);
 	load_positions();
 	load_current();
-	chumby_on_mode_change(on_mode, NULL);
+	octopus_on_mode_change(on_mode, NULL);
 	status_read();		/* already playing? which episode? */
 	{
 		char path[256], line[1200];
 		FILE *f;
 
 		/* Playing one of ours (resumed after a restart): show it. */
-		snprintf(path, sizeof(path), "%s/stream", chumby_run_dir());
+		snprintf(path, sizeof(path), "%s/stream", octopus_run_dir());
 		f = fopen(path, "r");
 		while (f && fgets(line, sizeof(line), f))
 			if (!strncmp(line, "url=", 4)) {
@@ -1403,5 +1403,5 @@ int main(void)
 	feed_next();
 	lv_timer_create(poll_cb, 500, NULL);
 
-	return chumby_run();
+	return octopus_run();
 }

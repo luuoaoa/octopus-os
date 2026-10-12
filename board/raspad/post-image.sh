@@ -13,7 +13,7 @@
 set -eu
 
 BOARD_DIR="$(dirname "$0")"
-CUSTOMIZE="${BR2_EXTERNAL_PIFANSRF_PATH}/customize-raspad"
+CUSTOMIZE="${BR2_EXTERNAL_OCTOPUS_PATH}/customize-raspad"
 GENIMAGE_CFG="${BINARIES_DIR}/genimage-raspad.cfg"
 GENIMAGE_TMP="${BUILD_DIR}/genimage.tmp"
 ROOTPATH_TMP="$(mktemp -d)"

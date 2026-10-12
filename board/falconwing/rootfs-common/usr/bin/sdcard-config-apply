@@ -17,17 +17,16 @@
 #                                        default: guessed from the IP address)
 #                              ssh: true|false  (the SSH server; default false.
 #                                        The Settings app's choice, once made,
-#                                        wins: /var/lib/chumby-root)
+#                                        wins: /var/lib/octopus-root)
 #                              ssh_pwauth: true|false  (password logins; default
 #                                        true. Given at all, it also means
 #                                        ssh: true, as cards before "ssh:" had)
 #                              passwd: <crypt hash, e.g. from mkpasswd -m sha-512>
 #   /boot/authorized_keys      installed as /root/.ssh/authorized_keys
 #   /boot/eq.txt               the custom speaker EQ (Room EQ Wizard's filter
-#                              export; where there is one: chumby-sound),
+#                              export; where there is one: octopus-sound),
 #                              copied for the apps to read (/boot is root's)
 #
-# Same file formats as pifansrf's pi-imager-apply.sh.
 set -u
 
 BOOT=/boot
@@ -46,10 +45,10 @@ unix() { tr -d '\r' < "$1"; }
 
 # Where the results go. Stock-kernel board: the real files in a writable
 # /etc. falconwing-mainline (systemd) has a read-only root whose /etc
-# entries are symlinks into /run/chumby-config (see its post-build.sh), so
+# entries are symlinks into /run/octopus-config (see its post-build.sh), so
 # everything is written there, in RAM, every boot.
 if [ -d /run/systemd/system ]; then
-    OUT=/run/chumby-config
+    OUT=/run/octopus-config
     mkdir -p "$OUT"
     WPA=$OUT/wpa_supplicant-wlan0.conf
     HOSTNAME_FILE=$OUT/hostname
@@ -70,7 +69,7 @@ else
     SHADOW=/etc/shadow
     AUTH_KEYS=/root/.ssh/authorized_keys
     DROPBEAR_DEFAULT=/etc/default/dropbear
-    LOCATION_FILE=/etc/chumby-location
+    LOCATION_FILE=/etc/octopus-location
     EQ_FILE=
 fi
 
@@ -185,8 +184,8 @@ if [ -f "$BOOT/user-data" ]; then
     fi
 fi
 
-# === What the Settings app set (chumby-setting): over user-data ===
-ROOT_STATE=/var/lib/chumby-root
+# === What the Settings app set (octopus-setting): over user-data ===
+ROOT_STATE=/var/lib/octopus-root
 if [ -f "$ROOT_STATE/timezone" ]; then
     TZNAME=$(cat "$ROOT_STATE/timezone")
     if [ -f "/usr/share/zoneinfo/$TZNAME" ]; then

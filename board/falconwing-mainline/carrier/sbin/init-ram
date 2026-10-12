@@ -9,7 +9,7 @@
 #
 #   1. loop-mount /rootfs.squashfs read-only, straight from the card. The
 #      root stays read-only: settings applied at boot go to
-#      /run/chumby-config, which the image's /etc links to.
+#      /run/octopus-config, which the image's /etc links to.
 #   2. bind /data/var (persistent, on this partition) onto /var: the only
 #      place the card is written
 #   3. pivot into it - this partition stays mounted at /media/sd - and
@@ -43,7 +43,7 @@ mount --bind /data/var /newroot/var || fail "cannot bind /data/var"
 # (bin/chumby-try), fixes - as if they were in the image, without one.
 # It's renamed run-overlay.disabled before it runs: one that breaks the
 # boot (a hang, a crash, the watchdog) doesn't run again, and the next boot
-# is the image's. chumby-overlay-ok.service renames it back once a boot
+# is the image's. octopus-overlay-ok.service renames it back once a boot
 # has gone well (the UI up a while). Its output: /var/run-overlay.log.
 rm -f /data/var/run-overlay.applied	# (a boot that didn't finish: stays off)
 # Made for another image (its "# image-inode: N" isn't this one's: an

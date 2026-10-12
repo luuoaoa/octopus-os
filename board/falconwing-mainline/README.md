@@ -35,14 +35,14 @@ The kernel mounts it as root and runs `init-ram`, which loop-mounts
 `rootfs.squashfs` read-only, binds `/data/var` onto `/var`, pivots (the
 carrier stays at `/media/sd`) and execs systemd. The root stays
 read-only; the card is only written through `/var`: alarms and the last
-FM station (`/var/lib/chumby`), SSH host keys (`/etc/dropbear` ->
+FM station (`/var/lib/octopus`), SSH host keys (`/etc/dropbear` ->
 `/var/lib/dropbear`), timesyncd's clock, ALSA state.
 
 What used to be written to `/etc` at boot is in RAM instead: the image's
 `/etc/{hostname,localtime,timezone,shadow,default/dropbear,
 wpa_supplicant/wpa_supplicant-wlan0.conf}` and `/root/.ssh/authorized_keys`
-are symlinks into `/run/chumby-config`, filled every boot from the FAT
-partition by `chumby-config.service` (tmpfiles seeds `shadow` from
+are symlinks into `/run/octopus-config`, filled every boot from the FAT
+partition by `octopus-config.service` (tmpfiles seeds `shadow` from
 `/etc/shadow.default` and `localtime` with UTC first). systemd mounts a
 generated `/etc/machine-id`; `systemd-update-done` is masked. `/tmp` and
 `/run` are tmpfs; the journal is in RAM (2 MB).
@@ -54,7 +54,7 @@ that pinned 16 MB of the 64 and starved the display of contiguous memory.)
 `bin/update-chumby.sh <host>` replaces it live over SSH: rootfs.squashfs
 (streamed to a temp name, SHA-256 checked, renamed), the early-boot
 files, the kernel slot (only if changed, read back and compared), and
-optionally `customize-chumby/{network-config,user-data,authorized_keys}`
+optionally `customize-octopus/{network-config,user-data,authorized_keys}`
 into the FAT partition; then reboots. ~3 minutes, mostly dropbear's
 crypto on this CPU.
 
@@ -67,11 +67,11 @@ Lean for 64 MB: no networkd, resolved, hwdb, hostnamed, timedated.
 
 | Unit | Does |
 |---|---|
-| `chumby-config.service` | applies the FAT config partition (before WiFi, SSH, UI) |
+| `octopus-config.service` | applies the FAT config partition (before WiFi, SSH, UI) |
 | `wpa_supplicant@wlan0` + `udhcpc@wlan0` | WiFi (busybox udhcpc writes resolv.conf) |
 | `systemd-timesyncd` | NTP; the kernel copies synced time into the RTC |
 | `dropbear.service` | SSH |
-| `chumby-session.service` | chumby-wm + chumby-shell + apps (one cgroup) |
+| `octopus-session.service` | octopus-wm + octopus-shell + apps (one cgroup) |
 | `serial-getty@ttyAMA0` | console |
 | PID 1 | feeds the hardware watchdog (`RuntimeWatchdogSec=15s`) |
 
@@ -89,7 +89,7 @@ Lean for 64 MB: no networkd, resolved, hwdb, hostnamed, timedated.
 | Backlight | `pwm-backlight`, PWM2 @ 625 Hz |
 | Touchscreen | `mxs-lradc-ts`, 4-wire |
 | Knob | `rotary-encoder` on ROTARYA/B as GPIOs (REL_WHEEL) |
-| Snooze button (top) | `gpio-keys` "snooze" on B1P30 (PWM4 pad), active low, KEY_PROG1 — pin from the vendor `chumby_bend.ko` |
+| Snooze button (top) | `gpio-keys` "snooze" on B1P30 (PWM4 pad), active low, KEY_PROG1 — pin from the vendor `octopus_bend.ko` |
 | Audio | patch 0003: new i.MX23 built-in codec driver + `simple-audio-card`; external speaker amp via `simple-audio-amplifier`; headphone detect |
 | CPU frequency | `cpufreq-dt`, `ondemand`: 454.74 / 227.37 / 151.58 / 113.68 MHz (patch 0004, see below) |
 
@@ -130,7 +130,7 @@ radio off
 **RDS**: the QN8005 decodes RDS itself (the stock tool had an `rds`
 command: reg 0x00 bit 1 enables it, bit 7 of reg 0x1b flips per group,
 blocks A-D in regs 0x10-0x17). While the radio is on, `qn8005 rds
-/run/chumby/rds` polls it every 20 ms and keeps `ps=` (station name),
+/run/octopus/rds` polls it every 20 ms and keeps `ps=` (station name),
 `rt=` (RadioText), `title=`/`artist=` (RadioText+) up to date; the radio
 script restarts it on every tune. The chip has no block error flags, so
 each segment is only taken once it arrives twice in a row. The FM app
@@ -139,65 +139,65 @@ shows the station name and "title - artist" (or the RadioText).
 ## GUI (Wayland)
 
 ```
- ┌──────────────────────────────────┐   chumby-wm (wlroots, pixman, no GPU)
+ ┌──────────────────────────────────┐   octopus-wm (wlroots, pixman, no GPU)
  │ ⌂ ▌♪ FM Radio▐ 🔔     🔊 👁 10:30 │     owns DRM + input, places windows
- ├──────────────────────────────────┤   chumby-shell: the tab bar, Home menu,
+ ├──────────────────────────────────┤   octopus-shell: the tab bar, Home menu,
  │                                  │     volume/brightness sliders, alarms
- │   the app in front (320x208)     │   apps: chumby-clock, chumby-fm,
- │                                  │     chumby-netradio, ...
+ │   the app in front (320x208)     │   apps: octopus-clock, octopus-fm,
+ │                                  │     octopus-netradio, ...
  └──────────────────────────────────┘
 ```
 
-**Writing an app? Read [docs/writing-chumby-apps.md](../../docs/writing-chumby-apps.md)**:
-the libchumby API, sound coordination (`chumby-audio`), the ready-made
+**Writing an app? Read [docs/writing-octopus-apps.md](../../docs/writing-octopus-apps.md)**:
+the liboctopus API, sound coordination (`octopus-audio`), the ready-made
 players, and the LVGL traps we hit.
 
-- **chumby-wm** (package/chumby-wm): a small compositor on wlroots, built
+- **octopus-wm** (package/octopus-wm): a small compositor on wlroots, built
   without EGL/GBM (package/wlroots-pixman). Window policy by xdg app_id
-  (see the top of `chumby-wm.c`): the shell's tab bar across the top, its
+  (see the top of `octopus-wm.c`): the shell's tab bar across the top, its
   menu and slider dropping down from it, apps maximized under it, one in
   front. Apps out of sight are frozen (SIGSTOP) until brought back, unless
   they asked to stay awake. It applies the touch calibration
-  (`/var/lib/chumby/touch.cal`, live) and gives the calibration tool the
+  (`/var/lib/octopus/touch.cal`, live) and gives the calibration tool the
   whole screen. Apps are exported via wlr-foreign-toplevel-management;
-  screencopy is enabled for `chumby-screenshot > shot.ppm`.
-- **chumby-shell** (package/chumby-shell): the tab bar (Home, the app in
+  screencopy is enabled for `octopus-screenshot > shot.ppm`.
+- **octopus-shell** (package/octopus-shell): the tab bar (Home, the app in
   front, the one before it; volume, brightness, the time), the Home menu
   of installed apps, the volume/brightness sliders, screen power, the
   snooze button (toggles the screen and brings up the Clock; held 4 s:
   touch calibration) and the **alarms** (it rings them whatever is open,
-  pausing whatever plays through `chumby-audio`, and resumes it when
-  dismissed). Commands go to the FIFO `/run/chumby/shell.cmd`:
+  pausing whatever plays through `octopus-audio`, and resumes it when
+  dismissed). Commands go to the FIFO `/run/octopus/shell.cmd`:
   `snooze|stop|ring|volume|brightness|menu|calibrate` (handy over ssh;
   `ring` tests the alarm). Started with the compositor by
-  `chumby-session.service` (logs: `journalctl -u chumby-session`).
-- **libchumby** (package/libchumby): the framework every app links: LVGL
+  `octopus-session.service` (logs: `journalctl -u octopus-session`).
+- **liboctopus** (package/liboctopus): the framework every app links: LVGL
   9.6 on Wayland, Rockbox's Nimbus bitmap fonts, the day/night theme,
   layout and label helpers, and a main loop that can watch extra fds.
-- **System apps** (package/chumby-apps): Clock (with alarms), FM Radio
+- **System apps** (package/octopus-apps): Clock (with alarms), FM Radio
   (RDS, station art), AirPlay, Settings, and the stream player
-  `chumby-stream`; a binary plus `/usr/share/chumby/apps/<name>.app` each.
-  **App bundles** (apps/, package/chumby-bundled-apps): Internet Radio and
-  Podcasts, preinstalled in `/usr/lib/chumby/apps/<Id>/`, built and run
+  `octopus-stream`; a binary plus `/usr/share/octopus/apps/<name>.app` each.
+  **App bundles** (apps/, package/octopus-bundled-apps): Internet Radio and
+  Podcasts, preinstalled in `/usr/lib/octopus/apps/<Id>/`, built and run
   like any bundle (docs/sdk.md).
 
-**Night mode** is policy, not per-app: `/etc/chumby/policy.conf` (night
+**Night mode** is policy, not per-app: `/etc/octopus/policy.conf` (night
 window, `mode = auto|day|night`, `snooze_minutes`, `alarm_volume`, and
 `day_/night_brightness` as the defaults), re-read every 30 s by every
 process. At night the palette turns black/warm-red. The brightness is
 remembered per mode: set in the popup, it's that mode's from then on
-(`/var/lib/chumby/brightness`), restored at each switch.
+(`/var/lib/octopus/brightness`), restored at each switch.
 
 **Buttons**: the power button (the i.MX23's PSWITCH, kernel patch 0007:
 `mxs-pswitch`, KEY_POWER) turns the screen off, or on with the clock;
 held 2 s it shuts the Chumby down. Nothing else turns the screen on or off
-- no schedule - except an alarm ringing, which turns it on. chumby-wm
+- no schedule - except an alarm ringing, which turns it on. octopus-wm
 drops touches that start on the dark screen. The snooze button snoozes a
 ringing alarm, and held 4 s starts the touch calibration; otherwise it
 does nothing, for now.
 
 **Clock**: HH:MM (one redraw a minute), date, the next alarm; alarms in
-`/var/lib/chumby/alarms.conf` (`06:30 MTWTF-- on`, editable by hand).
+`/var/lib/octopus/alarms.conf` (`06:30 MTWTF-- on`, editable by hand).
 
 ## The run overlay: builds without reflashing
 
@@ -209,12 +209,12 @@ hatch by design:
 - `init-ram` renames it `run-overlay.disabled` *before* running it: an
   overlay that breaks the boot (a hang, a crash, the watchdog) doesn't run
   again, and the next boot is the image's;
-- `chumby-overlay-ok.service` renames it back once the boot has gone well
+- `octopus-overlay-ok.service` renames it back once the boot has gone well
   (the UI up two minutes): it then holds for every boot;
 - it's only run on the image it was made for (`# image-inode:`, which
   changes when an update renames a new rootfs.squashfs in), and
   `bin/update-chumby.sh` removes it: an update always ends it;
-- chumby-wm frames the screen in magenta while anything from the card is
+- octopus-wm frames the screen in magenta while anything from the card is
   bound over the image, and logs the files: none is left behind unnoticed.
 
 Its output is in `/var/run-overlay.log`. `bin/chumby-try` makes them.
@@ -225,7 +225,7 @@ The ARM926 is where costs show: measure there, not in QEMU (no cache or
 timing model). `bin/chumby-try HOST ...` does it over SSH, everything on
 the card (`/var/try`: the Chumby has 64 MB of RAM), the sound muted:
 
-- `push /usr/bin/chumby-wm /usr/lib/libchumby.so.1 ...` stages this build's
+- `push /usr/bin/octopus-wm /usr/lib/liboctopus.so.1 ...` stages this build's
   unstripped copies (named functions in perf) in the run overlay; `apply`
   reboots into it (nothing is swapped under a running session: that reset
   the Chumby); `push` adds to what's staged, `drop PATH...` un-stages;
@@ -237,9 +237,9 @@ the card (`/var/try`: the Chumby has 64 MB of RAM), the sound muted:
   mutes the sound (the DAC at 0, left so) and runs scenarios: CPU per
   process and the system's load in each.
 
-`CHUMBY_REFR_DEBUG=1` (any app: its redraws a second, pixels, time),
-`CHUMBY_WM_DEBUG=1` (chumby-wm: frames a second, their time) and
-`CHUMBY_LOOP_DEBUG=1` (libchumby's loop going round too fast: which
+`OCTOPUS_REFR_DEBUG=1` (any app: its redraws a second, pixels, time),
+`OCTOPUS_WM_DEBUG=1` (octopus-wm: frames a second, their time) and
+`OCTOPUS_LOOP_DEBUG=1` (liboctopus's loop going round too fast: which
 descriptor, once a second) log to the journal. `/proc/stat`'s idle ticks
 undercount here (tickless idle): compare shares of the ticks counted, as
 `bench` does.
@@ -250,7 +250,7 @@ reload - every unit re-read from the compressed image, the page cache
 short of RAM - stalls it past that, and the Chumby resets. The journal is
 in RAM: to see why something reset, stream it to the card first.
 
-The screen stays 32-bit: a 16-bit one (`CHUMBY_WM_16BIT=1`) would halve
+The screen stays 32-bit: a 16-bit one (`OCTOPUS_WM_16BIT=1`) would halve
 every copy, but the i.MX23's LCD controller doesn't widen RGB565 for the
 18-bit panel and the colours come out scrambled - on the glass only, not
 in a screenshot.

@@ -1,0 +1,3 @@
+# The FM tuner's bus (bit-banged, i2c-0): the apps' user drives it (radio,
+# qn8005), not root.
+SUBSYSTEM=="i2c-dev", KERNEL=="i2c-0", GROUP="octopus", MODE="0660"

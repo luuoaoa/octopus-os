@@ -1,0 +1,20 @@
+config BR2_PACKAGE_OCTOPUS_APPS
+	bool "octopus-apps"
+	select BR2_PACKAGE_LIBOCTOPUS
+	select BR2_PACKAGE_LIBCURL
+	select BR2_PACKAGE_MPG123
+	select BR2_PACKAGE_FAAD2
+	select BR2_PACKAGE_ALSA_LIB
+	select BR2_PACKAGE_AFTER_DARK_TOASTERS	# octopus-toasters' pictures
+	help
+	  The Chumby One's system apps, on liboctopus: Clock (with alarms,
+	  rung by octopus-shell), FM Radio (uses /usr/bin/radio from the
+	  falconwing-mainline board), AirPlay (what shairport-sync
+	  receives; the board selects shairport-sync), Settings, and the
+	  stream player octopus-stream (MP3 and AAC streams, HLS, files: for
+	  any app, through liboctopus's octopus_stream_*). And Flying
+	  Toasters, the screen saver octopus-shell starts after a while
+	  without a touch.
+
+	  Apps that aren't the system's - Internet Radio, Podcasts - are
+	  bundles: octopus-bundled-apps.

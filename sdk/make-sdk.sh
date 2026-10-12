@@ -1,30 +1,30 @@
 #!/bin/bash
-# make-sdk.sh [BOARD]: build the Chumby SDK for a board, from source
+# make-sdk.sh [BOARD]: build the Octopus SDK for a board, from source
 # (docs/sdk-build.md). BOARD is a configs/<BOARD>_defconfig with the
-# Chumby's UI in it; the default, raspad, is any 64-bit Raspberry Pi
+# Octopus OS in it; the default, raspad, is any 64-bit Raspberry Pi
 # (aarch64). falconwing_mainline is the Chumby One itself (ARMv5).
 #
 # In the pinned build container (as docker-build.sh): the board's image,
 # then buildroot's SDK (the toolchain and the sysroot, relocatable). Then
 # two Docker images, tagged with the board:
 #
-#   chumby-sdk:BOARD   the SDK + chumby-app + the examples (x86-64)
-#   chumby-sim:BOARD   the board's root filesystem, to run its UI on the PC
+#   octopus-sdk:BOARD   the SDK + octopus-app + the examples (x86-64)
+#   octopus-sim:BOARD   the board's root filesystem, to run its UI on the PC
 #
 # The first build takes an hour or two (everything from source); later
-# ones only what changed. Use the images with CHUMBY_BOARD=BOARD
-# chumby-app ... (raspad is chumby-app's default too).
+# ones only what changed. Use the images with OCTOPUS_BOARD=BOARD
+# octopus-app ... (raspad is octopus-app's default too).
 set -euo pipefail
 
 TOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BOARD="${1:-raspad}"
 DEFCONFIG="${BOARD}_defconfig"
 OUT="output-${BOARD//_/-}"
-BUILDER=pifansrf-builder:ubuntu20.04
+BUILDER=octopus-builder:ubuntu20.04
 
 [ -f "$TOP/configs/$DEFCONFIG" ] || { echo "no configs/$DEFCONFIG" >&2; exit 1; }
-grep -q '^BR2_PACKAGE_LIBCHUMBY=y' "$TOP/configs/$DEFCONFIG" ||
-	echo "warning: $DEFCONFIG has no libchumby: no SDK for Chumby apps" >&2
+grep -q '^BR2_PACKAGE_LIBOCTOPUS=y' "$TOP/configs/$DEFCONFIG" ||
+	echo "warning: $DEFCONFIG has no liboctopus: no SDK for Octopus apps" >&2
 grep -q '^BR2_TARGET_ROOTFS_TAR=y' "$TOP/configs/$DEFCONFIG" ||
 	echo "warning: $DEFCONFIG makes no rootfs.tar: no simulator image" >&2
 
@@ -44,8 +44,8 @@ docker run --rm -v "$TOP:/work" -w /work/buildroot "$BUILDER" bash -c '
 		pkg=$(basename "$(dirname "$mk")")
 		var=BR2_PACKAGE_$(echo "$pkg" | tr a-z- A-Z_)
 		grep -q "^$var=y" /work/'"$OUT"'/.config || continue
-		# libchumby first: the others build against its headers.
-		if [ "$pkg" = libchumby ]; then rebuild="$pkg-rebuild $rebuild"
+		# liboctopus first: the others build against its headers.
+		if [ "$pkg" = liboctopus ]; then rebuild="$pkg-rebuild $rebuild"
 		else rebuild="$rebuild $pkg-rebuild"; fi
 	done
 	make O=/work/'"$OUT"' $rebuild

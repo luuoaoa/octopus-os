@@ -4,10 +4,9 @@
 # (ALSA "Master") is the default sink's - the EQ chain's - so that's the
 # only volume anyone turns; WirePlumber starts a new sink at 40 % and
 # remembers whatever it was last, which would quietly cap everything.
-# (After pi-radio's pifansrf-pin-speaker.sh.)
 #
 # The default sink itself is left to WirePlumber: the EQ chain's priority
-# makes it the default (and chumby-sound apply sets it so).
+# makes it the default (and octopus-sound apply sets it so).
 set -u
 
 CONF=/etc/pipewire/pipewire.conf.d/30-raspad-eq.conf
