@@ -12,6 +12,9 @@
 #   octopus-app sim-shot FILE     the same headless, a screenshot after 25 s
 #                                (FILE.ppm), the app brought to the front
 #   octopus-app deploy HOST       install <Id>.octopusapp on a device (SSH)
+#                                (sim, sim-shot: OCTOPUS_SIM_USB=DIR shows a
+#                                folder of this PC's as a USB stick,
+#                                read-only, at octopus_usb_dir()/sim)
 #   octopus-app shell             a shell with the SDK, in this directory
 #
 # On the PC it needs Docker (and SSH for deploy), and the SDK's images for
@@ -87,13 +90,18 @@ pack)
 sim | sim-shot)
 	id=$(app_id)
 	set -- "$cmd" "$@"
+	usb=
+	if [ -n "${OCTOPUS_SIM_USB:-}" ]; then	# a folder as a USB stick
+		[ -d "$OCTOPUS_SIM_USB" ] || die "OCTOPUS_SIM_USB: no folder $OCTOPUS_SIM_USB"
+		usb="-v $(cd "$OCTOPUS_SIM_USB" && pwd):/run/octopus-usb/sim:ro"
+	fi
 	shot=
 	if [ "$cmd" = sim-shot ]; then
 		shot=${2:-}
 		[ -n "$shot" ] || usage
 		docker rm -f octopus-sim-shot >/dev/null 2>&1 || true
 		docker run -d --init --name octopus-sim-shot -e OCTOPUS_SIM_HEADLESS=1 \
-			-v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE" >/dev/null
+			$usb -v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE" >/dev/null
 		sleep 15
 		docker exec octopus-sim-shot sh -c "echo 'launch $id' > /run/octopus/shell.cmd"
 		sleep 10
@@ -137,7 +145,7 @@ sim | sim-shot)
 	trap '[ -n "$player" ] && kill "$player" 2>/dev/null; rm -rf "$snd"' EXIT INT TERM
 	echo "The Octopus UI in a window: Home (top left) > $(conf Name bundle/app.conf). Ctrl-C ends it."
 	docker run --rm -it --init --name octopus-sim -v "$snd:/run/host-sound" \
-		-v "$sock:/run/host/wayland-0" -v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE" || true
+		-v "$sock:/run/host/wayland-0" $usb -v "$PWD/bundle:/var/apps/$id:ro" "$SIM_IMAGE" || true
 	;;
 deploy)
 	host=${1:-}

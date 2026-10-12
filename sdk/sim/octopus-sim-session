@@ -8,12 +8,15 @@ set -e
 rm -rf /run/octopus
 install -d -o octopus -g octopus -m 0775 /run/octopus /run/octopus/audio
 install -d -o octopus -g octopus /var/lib/octopus
-mkdir -p /var/apps /run/systemd/timesync
+mkdir -p /var/apps /run/systemd/timesync /run/octopus-usb
 # The clock is the host's, and right: as if NTP had synced (alarms on, no
 # "no network" mark).
 touch /run/systemd/timesync/synchronized
 
 export XDG_RUNTIME_DIR=/run/octopus WLR_RENDERER=pixman
+# Scripted taps, for tests: "tap X Y" (UI pixels) into this FIFO, e.g.
+#   docker exec octopus-sim sh -c 'echo "tap 160 120" > /run/octopus-sim-taps'
+export OCTOPUS_WM_TAPS=/run/octopus-sim-taps
 if [ -n "${OCTOPUS_SIM_HEADLESS:-}" ]; then
 	export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
 else

@@ -940,17 +940,15 @@ static void cursor_fit(struct server *s)
 		cursor_show(s);
 }
 
-static void touch_down(struct wl_listener *l, void *data)
+/* A finger down at (lx, ly), layout pixels. */
+static void touch_down_at(struct server *s, int id, uint32_t time_msec, double lx, double ly)
 {
-	struct touch_dev *t = wl_container_of(l, t, down);
-	struct server *s = t->server;
-	struct wlr_touch_down_event *ev = data;
-	double lx = ev->x * s->layout_w, ly = ev->y * s->layout_h, sx, sy;
+	double sx, sy;
 	struct wlr_surface *surface = surface_at(s, lx, ly, &sx, &sy);
 
 	input_activity(s);
 	/* Not marked active: its motion and up are dropped too. */
-	if (ev->touch_id < 0 || ev->touch_id >= MAX_TOUCH || screen_dark())
+	if (id < 0 || id >= MAX_TOUCH || screen_dark())
 		return;
 	cursor_hide(s);		/* a finger now, not the mouse */
 	if (shell_popup_up(s)) {
@@ -966,11 +964,19 @@ static void touch_down(struct wl_listener *l, void *data)
 	if (!surface)
 		return;
 	/* Remember the surface origin so motion stays relative to it. */
-	s->touch[ev->touch_id].active = true;
-	s->touch[ev->touch_id].ox = lx - sx;
-	s->touch[ev->touch_id].oy = ly - sy;
-	wlr_seat_touch_notify_down(s->seat, surface, ev->time_msec,
-				   ev->touch_id, sx, sy);
+	s->touch[id].active = true;
+	s->touch[id].ox = lx - sx;
+	s->touch[id].oy = ly - sy;
+	wlr_seat_touch_notify_down(s->seat, surface, time_msec, id, sx, sy);
+}
+
+static void touch_down(struct wl_listener *l, void *data)
+{
+	struct touch_dev *t = wl_container_of(l, t, down);
+	struct wlr_touch_down_event *ev = data;
+
+	touch_down_at(t->server, ev->touch_id, ev->time_msec,
+		      ev->x * t->server->layout_w, ev->y * t->server->layout_h);
 }
 
 static void touch_motion(struct wl_listener *l, void *data)
@@ -987,17 +993,89 @@ static void touch_motion(struct wl_listener *l, void *data)
 				     ev->y * s->layout_h - s->touch[ev->touch_id].oy);
 }
 
+static void touch_up_at(struct server *s, int id, uint32_t time_msec)
+{
+	if (id < 0 || id >= MAX_TOUCH || !s->touch[id].active)
+		return;
+	s->touch[id].active = false;
+	wlr_seat_touch_notify_up(s->seat, time_msec, id);
+}
+
 static void touch_up(struct wl_listener *l, void *data)
 {
 	struct touch_dev *t = wl_container_of(l, t, up);
-	struct server *s = t->server;
 	struct wlr_touch_up_event *ev = data;
 
-	if (ev->touch_id < 0 || ev->touch_id >= MAX_TOUCH ||
-	    !s->touch[ev->touch_id].active)
+	touch_up_at(t->server, ev->touch_id, ev->time_msec);
+}
+
+/*
+ * The simulator's scripted taps: OCTOPUS_WM_TAPS=<fifo> (made if it isn't
+ * there; never set on a device) takes "tap X Y" lines, X and Y in UI
+ * pixels, and taps there as a finger would (down, up 80 ms later) - for
+ * screenshots of what's behind a tap, headless, where there's no input.
+ */
+static struct wl_event_source *tap_up_timer;
+
+static uint32_t now_msec(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+
+static int tap_up(void *data)
+{
+	struct server *s = data;
+
+	touch_up_at(s, 0, now_msec());
+	wlr_seat_touch_notify_frame(s->seat);
+	return 0;
+}
+
+static int taps_readable(int fd, uint32_t mask, void *data)
+{
+	struct server *s = data;
+	char buf[256], *line, *save;
+	ssize_t n;
+	int x, y;
+
+	(void)mask;
+	n = read(fd, buf, sizeof(buf) - 1);
+	if (n <= 0)
+		return 0;
+	buf[n] = '\0';
+	for (line = strtok_r(buf, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+		if (sscanf(line, "tap %d %d", &x, &y) != 2)
+			continue;
+		touch_down_at(s, 0, now_msec(), s->ui_tree->node.x + x + 0.5,
+			      s->ui_tree->node.y + y + 0.5);
+		wlr_seat_touch_notify_frame(s->seat);
+		wl_event_source_timer_update(tap_up_timer, 80);
+	}
+	return 0;
+}
+
+static void taps_init(struct server *s)
+{
+	const char *path = getenv("OCTOPUS_WM_TAPS");
+	struct wl_event_loop *loop = wl_display_get_event_loop(s->display);
+	int fd;
+
+	if (!path || !*path)
 		return;
-	s->touch[ev->touch_id].active = false;
-	wlr_seat_touch_notify_up(s->seat, ev->time_msec, ev->touch_id);
+	mkfifo(path, 0600);
+	fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);	/* RDWR: no EOF between writers */
+	if (fd < 0) {
+		wlr_log(WLR_ERROR, "%s: %s", path, strerror(errno));
+		return;
+	}
+	wl_event_loop_add_fd(loop, fd, WL_EVENT_READABLE, taps_readable, s);
+	tap_up_timer = wl_event_loop_add_timer(loop, tap_up, s);
+	s->have_touch = true;	/* the seat says touch, for the apps to listen */
+	wlr_seat_set_capabilities(s->seat, WL_SEAT_CAPABILITY_TOUCH);
+	wlr_log(WLR_INFO, "taps from %s", path);
 }
 
 static void touch_frame(struct wl_listener *l, void *data)
@@ -1953,6 +2031,7 @@ int main(int argc, char **argv)
 	s.new_input.notify = new_input;
 	wl_signal_add(&s.backend->events.new_input, &s.new_input);
 	s.seat = wlr_seat_create(s.display, "seat0");
+	taps_init(&s);
 
 	socket = wl_display_add_socket_auto(s.display);
 	if (!socket) {

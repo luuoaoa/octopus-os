@@ -1,0 +1,12 @@
+[Unit]
+Description=USB storage %I: mounted for the apps, its app bundles installed
+# (A template: a stick needs no unit file of its own, nor a daemon-reload.)
+# Bound to the device: pulled out, the unit stops, and unmounts it.
+BindsTo=dev-%i.device
+After=dev-%i.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/octopus-usb add %I
+ExecStop=/usr/libexec/octopus-usb remove %I

@@ -28,6 +28,8 @@ Industries.
   mode with a dim, warm palette, on a schedule or by hand.
 - **Internet radio and podcasts:** Icecast/Shoutcast, HLS, MP3 and AAC
   streams, resumable episodes, a seekable progress bar.
+- **Music from a USB stick:** browse its folders, play a song and what
+  follows it, or a whole folder and everything in it.
 - **An AirPlay speaker** (shairport-sync), with remote control of the
   phone: play/pause, next/previous.
 - **Tuning for small speakers:** a bass enhancer

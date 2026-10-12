@@ -119,6 +119,12 @@ in it, so open it from the Home menu. The mouse is the finger.
   `docker exec octopus-sim sh -c 'echo snooze > /run/octopus/shell.cmd'`.
 - **`octopus-app sim-shot FILE`** runs it headless and saves a screenshot
   with your app in front (`FILE.ppm`), for scripts and tests.
+- **A USB stick:** `OCTOPUS_SIM_USB=~/Music octopus-app sim` shows a folder
+  of your PC's to the apps as a stick (read-only, at
+  `octopus_usb_dir()/sim`).
+- **Taps, for scripts:** "tap X Y" (UI pixels) into
+  `/run/octopus-sim-taps` presses there, headless too:
+  `docker exec octopus-sim sh -c 'echo "tap 43 204" > /run/octopus-sim-taps'`.
 
 ## Making the SDK
 
@@ -143,4 +149,4 @@ as long as the functions they use stay.
   format could give each bundle a user of its own.
 - **No systemd unit per app:** installing never adds unit files (a
   `daemon-reload` is slow on small boards, and on the Chumby One stalls
-  PID 1 past its 15 s hardware watchdog). USB installs use one template unit, `octopus-usb-install@`.
+  PID 1 past its 15 s hardware watchdog). USB sticks use one template unit, `octopus-usb@`.

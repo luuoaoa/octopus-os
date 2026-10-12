@@ -44,6 +44,10 @@
  * there), "length=" (its size) and "played=" (seconds played this time),
  * written about once a second. A drop mid-file resumes from there; at its
  * end it's "state=ended" - and that status stays, for the app to see.
+ *
+ * A local file is given as its path ("/run/octopus-usb/sda1/Song.mp3": a
+ * USB stick's): read through libcurl's file://, a file the same way, its
+ * size from stat().
  */
 
 #define _GNU_SOURCE
@@ -1577,17 +1581,35 @@ static CURLcode stream_play(CURL *c)
 	return net_res;
 }
 
+/* A path as a file:// URL: anything but [A-Za-z0-9-._~/] %-encoded (a
+ * "#" or "?" in a name is no fragment or query). */
+static void file_url(const char *path, char *out, size_t size)
+{
+	size_t n = snprintf(out, size, "file://");
+	const unsigned char *p;
+
+	for (p = (const unsigned char *)path; *p && n + 4 < size; p++)
+		if (isalnum(*p) || strchr("-._~/", *p))
+			out[n++] = *p;
+		else
+			n += snprintf(out + n, size - n, "%%%02X", *p);
+	out[n] = '\0';
+}
+
 static void play(void)
 {
 	char target[1024];
 	int backoff = 2;
+	bool local = url[0] == '/';
 	CURLcode res;
 	CURL *c;
 
 	while (!stop) {
 		set_state("connecting");
 		snprintf(target, sizeof(target), "%s", url);
-		if (is_playlist(url) && !playlist_resolve(url, target, sizeof(target))) {
+		if (local)
+			file_url(url, target, sizeof(target));
+		else if (is_playlist(url) && !playlist_resolve(url, target, sizeof(target))) {
 			set_state("error");
 			sleep_s(backoff);
 			backoff = backoff * 2 > BACKOFF_MAX_S ? BACKOFF_MAX_S : backoff * 2;
@@ -1627,6 +1649,19 @@ static void play(void)
 		c = easy(target);
 		if (!c)
 			break;
+		if (local) {	/* no headers to say so: a file, this big */
+			struct stat st;
+
+			if (stat(url, &st) < 0) {	/* the stick is gone */
+				curl_easy_cleanup(c);
+				res = CURLE_FILE_COULDNT_READ_FILE;
+				goto failed;
+			}
+			finite = true;
+			file_len = st.st_size;
+			base_byte = start_byte;
+			fed = 0;
+		}
 		{
 			struct curl_slist *h = curl_slist_append(NULL, "Icy-MetaData: 1");
 

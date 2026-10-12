@@ -1,4 +1,5 @@
-# USB storage plugged in: install the app bundles on it (FAT, an octopus-apps
-# folder at its top; octopus-usb-install). Each partition, and the whole disk
-# for a stick formatted without a partition table.
-ACTION=="add", SUBSYSTEM=="block", KERNEL=="sd[a-z]*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="octopus-usb-install@%k.service"
+# USB storage plugged in: mounted for the apps (a music player), the app
+# bundles in its octopus-apps folder installed (octopus-usb). Each
+# partition, and the whole disk for a stick formatted without a partition
+# table. The unit is bound to the device: pulled out, it unmounts.
+ACTION=="add", SUBSYSTEM=="block", KERNEL=="sd[a-z]*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="octopus-usb@%k.service"

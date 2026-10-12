@@ -208,6 +208,8 @@ margin; the controls along the bottom, as far apart as on 320x240.
 | `octopus_run_dir()` | `/run/octopus` (or `$OCTOPUS_RUN_DIR`): state shared between processes |
 | `octopus_shell_command(cmd)` | the shell's FIFO: `snooze`, `stop`, `ring`, `volume`, `brightness`, `menu`, `calibrate` |
 | `octopus_stay_awake(on)` | don't freeze me while out of sight |
+| `octopus_usb_dir()` | where USB sticks are: each one plugged in is mounted read-only (FAT, exFAT) in a directory of its own under it (`/run/octopus-usb/sda1`), until it's pulled out; watch it with inotify |
+| `octopus_audio_tags(path, &tags)` | a music file's title, artist, album and track (ID3v2, ID3v1), as UTF-8 |
 
 ## Sound
 
@@ -275,6 +277,9 @@ Volume is owned by the shell (its slider; the Chumby One's knob): ALSA's
   from a byte on (an HTTP range); for a file the state adds `byte=` (where
   it is: resume from there), `length=` and `played=` (s), about once a
   second, and at its end it's `state=ended` (left in place for the app).
+  A local file is given as its path (`/run/octopus-usb/sda1/Song.mp3`):
+  the same, read through `file://`. USB Music (`apps/usbmusic`) queues a
+  folder's songs this way and starts the next at each `ended`.
 - **`octopus-podcast-feed <feed> <cache> [n]`**: a podcast's RSS, parsed as
   it downloads (expat), its newest n episodes (30) as tab-separated lines:
   published (epoch), duration (s), bytes, audio URL, title.

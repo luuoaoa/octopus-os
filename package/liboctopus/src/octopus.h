@@ -381,6 +381,28 @@ struct octopus_stream_status {
 	long byte;		/* a file: how far in, in bytes */
 };
 
+/*
+ * USB sticks: each one plugged in is mounted read-only (FAT, or exFAT)
+ * in a directory of its own under this one (/run/octopus-usb/sda1...,
+ * or $OCTOPUS_USB_DIR), readable by the apps, until it's pulled out.
+ * The directory is always there: watch it (inotify) for sticks coming
+ * and going. A file on one plays with octopus_stream_play(path, name).
+ */
+const char *octopus_usb_dir(void);
+
+/*
+ * A music file's tags (ID3v2 or ID3v1, as MP3s carry them), as UTF-8;
+ * "" for those it hasn't. False if it has none at all (or can't be
+ * read): show its file name instead.
+ */
+struct octopus_tags {
+	char title[128];
+	char artist[128];
+	char album[128];
+	int track;		/* its number on the album, 0 if not given */
+};
+bool octopus_audio_tags(const char *path, struct octopus_tags *tags);
+
 bool octopus_stream_play(const char *url, const char *name);
 bool octopus_stream_stop(void);
 bool octopus_stream_status(struct octopus_stream_status *st);

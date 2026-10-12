@@ -1594,6 +1594,216 @@ const char *octopus_app_data_dir(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* USB sticks and music files                                         */
+
+const char *octopus_usb_dir(void)
+{
+	const char *d = getenv("OCTOPUS_USB_DIR");
+
+	return d && *d ? d : "/run/octopus-usb";
+}
+
+/* Code point cp as UTF-8 at out + *n (room left for the NUL). */
+static void utf8_put(char *out, size_t size, size_t *n, unsigned int cp)
+{
+	unsigned char b[4];
+	size_t k;
+
+	if (cp < 0x80) {
+		b[0] = cp;
+		k = 1;
+	} else if (cp < 0x800) {
+		b[0] = 0xc0 | cp >> 6;
+		b[1] = 0x80 | (cp & 0x3f);
+		k = 2;
+	} else if (cp < 0x10000) {
+		b[0] = 0xe0 | cp >> 12;
+		b[1] = 0x80 | ((cp >> 6) & 0x3f);
+		b[2] = 0x80 | (cp & 0x3f);
+		k = 3;
+	} else {
+		b[0] = 0xf0 | cp >> 18;
+		b[1] = 0x80 | ((cp >> 12) & 0x3f);
+		b[2] = 0x80 | ((cp >> 6) & 0x3f);
+		b[3] = 0x80 | (cp & 0x3f);
+		k = 4;
+	}
+	if (*n + k < size) {
+		memcpy(out + *n, b, k);
+		*n += k;
+	}
+}
+
+/* Latin-1 (ID3v1, ID3v2 encoding 0) or UTF-8 as UTF-8, up to a NUL or
+ * len bytes, trailing spaces cut. */
+static void text_8bit(const unsigned char *p, size_t len, bool utf8, char *out, size_t size)
+{
+	size_t n = 0, i;
+
+	for (i = 0; i < len && p[i]; i++)
+		if (utf8 || p[i] < 0x80) {
+			if (n + 1 < size)
+				out[n++] = p[i];
+		} else {
+			utf8_put(out, size, &n, p[i]);
+		}
+	while (n && out[n - 1] == ' ')
+		n--;
+	out[n] = '\0';
+}
+
+/* An ID3v2 text frame's (its encoding byte first) first string. */
+static void id3_text(const unsigned char *p, size_t len, char *out, size_t size)
+{
+	size_t n = 0, i;
+	bool be = true;
+	int enc;
+
+	out[0] = '\0';
+	if (!len)
+		return;
+	enc = p[0];
+	p++;
+	len--;
+	if (enc == 0 || enc == 3) {
+		text_8bit(p, len, enc == 3, out, size);
+		return;
+	}
+	if (enc != 1 && enc != 2)
+		return;
+	if (enc == 1 && len >= 2 && p[0] == 0xff && p[1] == 0xfe) {	/* UTF-16, BOM */
+		be = false;
+		p += 2;
+		len -= 2;
+	} else if (enc == 1 && len >= 2 && p[0] == 0xfe && p[1] == 0xff) {
+		p += 2;
+		len -= 2;
+	}
+	for (i = 0; i + 1 < len; i += 2) {
+		unsigned int u = be ? p[i] << 8 | p[i + 1] : p[i + 1] << 8 | p[i];
+
+		if (!u)
+			break;
+		if (u >= 0xd800 && u < 0xdc00 && i + 3 < len) {	/* a surrogate pair */
+			unsigned int l = be ? p[i + 2] << 8 | p[i + 3] : p[i + 3] << 8 | p[i + 2];
+
+			if (l >= 0xdc00 && l < 0xe000) {
+				u = 0x10000 + ((u - 0xd800) << 10) + (l - 0xdc00);
+				i += 2;
+			}
+		}
+		utf8_put(out, size, &n, u);
+	}
+	while (n && out[n - 1] == ' ')
+		n--;
+	out[n] = '\0';
+}
+
+static unsigned long syncsafe(const unsigned char *p)
+{
+	return (unsigned long)(p[0] & 0x7f) << 21 | (p[1] & 0x7f) << 14 | (p[2] & 0x7f) << 7 |
+	       (p[3] & 0x7f);
+}
+
+/* ID3v2.2-2.4 at the file's start: its title, artist, album and track
+ * frames, skipping (not reading) the rest - a cover picture can be
+ * hundreds of kB, read off a slow stick. */
+static void id3v2_read(FILE *f, struct octopus_tags *t)
+{
+	unsigned char h[10], data[512];
+	unsigned long size, pos, fsize;
+	int ver, hdr;
+	char num[16];
+
+	if (fread(h, 1, 10, f) != 10 || memcmp(h, "ID3", 3) || h[3] < 2 || h[3] > 4)
+		return;
+	ver = h[3];
+	hdr = ver == 2 ? 6 : 10;
+	size = syncsafe(h + 6);
+	pos = 0;
+	if (ver > 2 && (h[5] & 0x40)) {		/* an extended header: past it */
+		unsigned char e[4];
+		unsigned long esize;
+
+		if (fread(e, 1, 4, f) != 4)
+			return;
+		esize = ver == 4 ? syncsafe(e) : ((unsigned long)e[0] << 24 | e[1] << 16 | e[2] << 8 | e[3]) + 4;
+		if (esize < 4 || fseek(f, (long)esize - 4, SEEK_CUR))
+			return;
+		pos = esize;
+	}
+	while (pos + hdr <= size) {
+		char *out = NULL;
+		size_t out_size = 0;
+
+		if (fread(h, 1, hdr, f) != (size_t)hdr || !h[0])
+			break;		/* padding */
+		if (ver == 2)
+			fsize = (unsigned long)h[3] << 16 | h[4] << 8 | h[5];
+		else if (ver == 3)
+			fsize = (unsigned long)h[4] << 24 | h[5] << 16 | h[6] << 8 | h[7];
+		else
+			fsize = syncsafe(h + 4);
+		pos += hdr + fsize;
+		if (pos > size)
+			break;
+		if (!memcmp(h, ver == 2 ? "TT2" : "TIT2", ver == 2 ? 3 : 4)) {
+			out = t->title;
+			out_size = sizeof(t->title);
+		} else if (!memcmp(h, ver == 2 ? "TP1" : "TPE1", ver == 2 ? 3 : 4)) {
+			out = t->artist;
+			out_size = sizeof(t->artist);
+		} else if (!memcmp(h, ver == 2 ? "TAL" : "TALB", ver == 2 ? 3 : 4)) {
+			out = t->album;
+			out_size = sizeof(t->album);
+		} else if (!memcmp(h, ver == 2 ? "TRK" : "TRCK", ver == 2 ? 3 : 4)) {
+			out = num;	/* "3" or "3/12" */
+			out_size = sizeof(num);
+		}
+		if (out && fsize <= sizeof(data)) {
+			if (fread(data, 1, fsize, f) != fsize)
+				break;
+			id3_text(data, fsize, out, out_size);
+			if (out == num)
+				t->track = atoi(num);
+		} else if (fseek(f, (long)fsize, SEEK_CUR)) {
+			break;
+		}
+	}
+}
+
+/* ID3v1, the last 128 bytes: for what ID3v2 didn't give. */
+static void id3v1_read(FILE *f, struct octopus_tags *t)
+{
+	unsigned char v[128];
+
+	if (fseek(f, -128, SEEK_END) || fread(v, 1, 128, f) != 128 || memcmp(v, "TAG", 3))
+		return;
+	if (!t->title[0])
+		text_8bit(v + 3, 30, false, t->title, sizeof(t->title));
+	if (!t->artist[0])
+		text_8bit(v + 33, 30, false, t->artist, sizeof(t->artist));
+	if (!t->album[0])
+		text_8bit(v + 63, 30, false, t->album, sizeof(t->album));
+	if (!t->track && v[125] == 0 && v[126])	/* ID3v1.1 */
+		t->track = v[126];
+}
+
+bool octopus_audio_tags(const char *path, struct octopus_tags *tags)
+{
+	FILE *f = fopen(path, "rb");
+
+	memset(tags, 0, sizeof(*tags));
+	if (!f)
+		return false;
+	id3v2_read(f, tags);
+	if (!tags->title[0] || !tags->artist[0] || !tags->album[0])
+		id3v1_read(f, tags);
+	fclose(f);
+	return tags->title[0] || tags->artist[0] || tags->album[0];
+}
+
+/* ------------------------------------------------------------------ */
 /* The stream player                                                  */
 
 #define STREAM_TOOL	"/usr/bin/octopus-stream"

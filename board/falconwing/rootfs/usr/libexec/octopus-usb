@@ -1,0 +1,45 @@
+#!/bin/sh
+# octopus-usb add|remove <dev>: a USB stick (or card reader) plugged in or
+# pulled out. Started by udev (90-octopus-usb.rules) through
+# octopus-usb@<dev>.service, which stops (remove) when the device goes.
+#
+# add: mounted read-only at /run/octopus-usb/<dev>, readable by the apps
+# (a music player reads it there: octopus_usb_dir()), and the bundles in
+# its octopus-apps/ folder installed (octopus-install). It stays mounted
+# until it's pulled out. FAT, or exFAT where the kernel has it.
+# remove: unmounted (lazily: it's gone already, a player may hold a file).
+DEV=/dev/$2
+MNT=/run/octopus-usb/$2
+
+case "$1" in
+add)
+	mkdir -p "$MNT"
+	opts=ro,nosuid,nodev,noexec,umask=022
+	mount -t vfat -o "$opts,utf8" "$DEV" "$MNT" 2>/dev/null ||
+		mount -t exfat -o "$opts" "$DEV" "$MNT" 2>/dev/null || {
+		rmdir "$MNT"
+		exit 0	# neither (or the whole disk of a partitioned stick): not ours
+	}
+	n=0
+	for b in "$MNT"/octopus-apps/*.octopusapp "$MNT"/octopus-apps/*/; do
+		[ -e "$b" ] || continue
+		[ -d "$b" ] && [ ! -f "$b/app.conf" ] && continue
+		if octopus-install "${b%/}"; then
+			n=$((n + 1))
+		fi
+	done
+	echo "octopus-usb: $DEV at $MNT, $n bundle(s) installed"
+	;;
+remove)
+	if grep -q " $MNT " /proc/mounts; then
+		umount -l "$MNT"
+		echo "octopus-usb: $DEV gone"
+	fi
+	rmdir "$MNT" 2>/dev/null
+	;;
+*)
+	echo "usage: octopus-usb add|remove <dev>" >&2
+	exit 1
+	;;
+esac
+exit 0
