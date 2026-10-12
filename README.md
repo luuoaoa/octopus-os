@@ -167,12 +167,7 @@ buildroot/          submodule
 
 ## Other targets in this repository
 
-The repository started as **pifansrf**, and still builds two other images:
-
-- **`configs/raspad_defconfig`:** the Chumby's UI and apps on any 64-bit
+- **`configs/raspad_defconfig`:** the same UI and apps on any 64-bit
   Raspberry Pi, made for a RasPad 3 (a Pi 4 tablet with a 1280x800
   screen). It renders on the GPU, with see-through blurred popups and
   saver. See [board/raspad/README.md](board/raspad/README.md).
-- **`configs/pifansrf_defconfig`:** the original image, a Raspberry Pi
-  Zero (W) running from RAM, as a HomeKit bridge for RF ceiling fans. See
-  [board/raspberrypi0fansrf/README.md](board/raspberrypi0fansrf/README.md).

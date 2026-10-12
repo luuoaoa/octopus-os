@@ -1,9 +1,0 @@
-[Unit]
-Description=Trigger boot-diag.service ~30s after boot
-
-[Timer]
-OnBootSec=30s
-Unit=boot-diag.service
-
-[Install]
-WantedBy=timers.target

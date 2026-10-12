@@ -1,6 +1,0 @@
-[Unit]
-Description=Capture boot diagnostics to /boot/boot-diag.txt
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/boot-diag.sh
