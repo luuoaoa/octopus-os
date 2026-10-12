@@ -24,6 +24,10 @@
  * at, kept per episode in "positions" in the data directory, with the
  * finished ones marked. Pause stops it, remembering where; the skip
  * buttons restart it a little before or after (taps in a row add up).
+ * The episode playing is downloaded whole as it plays, into
+ * now_playing.mp3 in the data directory (octopus-stream's cache: playing
+ * starts with its first seconds in, not when it's all there), so a skip
+ * back, a pause or a Wi-Fi drop doesn't go back to the network.
  */
 
 #include <fcntl.h>
@@ -109,6 +113,10 @@ static int n_positions;
 static int cur_show, cur_ep = -1;	/* what's selected */
 static bool playing;			/* we want it on (corrected by status) */
 static uint64_t start_grace_until;
+/* We stopped it (pause): octopus-stream stops in the background, its last
+ * status still there a moment - not a sign it plays (until the grace is
+ * over, or we start it again). */
+static bool stop_pending;
 static long long st_byte, st_length;	/* where octopus-stream is, in the episode */
 /* Where playing is, in seconds: where it started (the byte it started
  * from, at its bitrate: an estimate, made once) plus what octopus-stream
@@ -725,16 +733,19 @@ static void position_save(const struct episode *e, long long byte, long long len
 static void stream_start_at(long long byte)
 {
 	struct episode *e = episode();
-	char at[24], *argv[] = { "octopus-stream", NULL, shows[cur_show].name, at, NULL };
+	char at[24], cache[300];
+	char *argv[] = { "octopus-stream", NULL, shows[cur_show].name, at, cache, NULL };
 
 	if (!e)
 		return;
 	if (byte < 0)
 		byte = 0;
 	snprintf(at, sizeof(at), "%lld", byte);
+	snprintf(cache, sizeof(cache), "%s/now_playing.mp3", data_dir);
 	argv[1] = e->url;
 	stream_run(argv);
 	start_grace_until = mono_ms() + START_GRACE_MS;
+	stop_pending = false;
 	snprintf(st_state, sizeof(st_state), "connecting");
 	play_anchor_s = byte / bytes_per_s(e);
 	st_played = 0;
@@ -750,6 +761,7 @@ static void stream_stop(void)
 
 	stream_run(argv);
 	start_grace_until = mono_ms() + START_GRACE_MS;
+	stop_pending = true;
 	st_state[0] = '\0';
 }
 
@@ -798,7 +810,10 @@ static void status_read(void)
 	if (f)
 		fclose(f);
 	/* Just started or stopped: not up to date yet (nothing, another's,
-	 * or the last words of the run ours replaced). */
+	 * or the last words of the run ours replaced - or of the one we've
+	 * just stopped). */
+	if (mono_ms() < start_grace_until && stop_pending)
+		return;
 	if (mono_ms() < start_grace_until &&
 	    (!f || !stream_is_ours(url) || (start >= 0 && start != req_start)))
 		return;

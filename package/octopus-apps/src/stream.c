@@ -48,6 +48,21 @@
  * A local file is given as its path ("/run/octopus-usb/sda1/Song.mp3": a
  * USB stick's): read through libcurl's file://, a file the same way, its
  * size from stat().
+ *
+ *   octopus-stream <url> <name> <byte> <cache>
+ *                                a file (a podcast episode), downloaded
+ *                                whole into <cache> as it plays
+ * The cache: a thread downloads the file into it at the network's speed,
+ * and playing reads from it, starting once ~2 s of sound are in (as a
+ * stream would) - not when it's all there. Running dry (the network
+ * slower than the sound), it waits for that much again. <cache>.src says
+ * whose bytes those are ("url=", "length=", "complete=1"): the same file
+ * again (paused, an alarm, the app reopened) carries on with what's
+ * there, its download resumed by a range request; another starts it
+ * over. Played from the network instead, as without a cache: if it won't
+ * fit (the disk keeping CACHE_RESERVE free), the server gives no length,
+ * or a seek goes further than CACHE_AHEAD past what's downloaded (the
+ * download carries on meanwhile). "cached=" in the state: bytes in.
  */
 
 #define _GNU_SOURCE
@@ -67,6 +82,7 @@
 #include <sys/file.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -95,6 +111,18 @@ static long long fed;			/* bytes of it to the decoders */
 static long long file_len;		/* its whole size */
 static unsigned long long played_frames;
 static time_t pos_written;
+
+/* The cache (see above): its path ("" for none), and the download's
+ * progress, shared with the playing thread under cache_lock. */
+#define CACHE_RESERVE	(32LL * 1024 * 1024)	/* disk left free */
+#define CACHE_AHEAD	(4LL * 1024 * 1024)	/* a seek past what's in by this: the network */
+static char cache_path[512];
+static int cache_fd = -1;
+static long long cache_have;		/* bytes in it, from its start */
+static long long cache_total;		/* the file's size (0 until known) */
+static bool cache_complete, cache_failed;
+static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cache_cond = PTHREAD_COND_INITIALIZER;
 
 
 static void sleep_s(int s);
@@ -142,6 +170,8 @@ static void status_write_locked(void)
 	if (finite)
 		fprintf(f, "byte=%lld\nlength=%lld\nplayed=%llu\n", base_byte + fed, file_len,
 			pcm_rate > 0 ? played_frames / (unsigned long long)pcm_rate : 0ULL);
+	if (cache_path[0])
+		fprintf(f, "cache=%s\ncached=%lld\n", cache_path, cache_have);
 	fclose(f);
 	rename(tmp, status_path);
 }
@@ -899,8 +929,22 @@ static void es_out(const unsigned char *d, size_t n)
 	size_t i;
 
 	long long abs = base_byte + fed;	/* where d is in the file */
+	/* A file's ID3v2 tag (a podcast's cover picture: hundreds of kB) is
+	 * no sound: left out of the bitrate, which apps time the file by. */
+	static long long tag_left;
+	size_t sound = n;
 
-	bitrate_count(n, 0);
+	if (abs == 0)
+		tag_left = n >= 10 && !memcmp(d, "ID3", 3) ?
+			   10 + ((long long)(d[6] & 0x7f) << 21 | (d[7] & 0x7f) << 14 |
+				 (d[8] & 0x7f) << 7 | (d[9] & 0x7f)) : 0;
+	if (tag_left > 0) {
+		size_t t = tag_left < (long long)n ? (size_t)tag_left : n;
+
+		tag_left -= t;
+		sound -= t;
+	}
+	bitrate_count(sound, 0);
 	fed += n;
 	if (codec == CODEC_UNKNOWN && n >= 3 && !memcmp(d, "ID3", 3))
 		codec = CODEC_MP3;	/* a podcast's tag: its picture could look like AAC */
@@ -1581,6 +1625,275 @@ static CURLcode stream_play(CURL *c)
 	return net_res;
 }
 
+/* ------------------------------------------------------------------ */
+/* The cache: the file downloaded whole, played from the disk          */
+
+/* <cache>.src: whose bytes the cache holds, and if they're all there. */
+static void cache_src_write(void)
+{
+	char path[600], tmp[610];
+	FILE *f;
+
+	snprintf(path, sizeof(path), "%s.src", cache_path);
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+	if (!(f = fopen(tmp, "w")))
+		return;
+	fprintf(f, "url=%s\nlength=%lld\ncomplete=%d\n", url, cache_total, cache_complete);
+	fclose(f);
+	rename(tmp, path);
+}
+
+/* Open the cache: what's there kept if it's this URL's, else emptied. */
+static bool cache_open(void)
+{
+	char path[600], line[1100], src_url[1024] = "";
+	long long length = 0;
+	int complete = 0;
+	struct stat st;
+	FILE *f;
+
+	snprintf(path, sizeof(path), "%s.src", cache_path);
+	if ((f = fopen(path, "r"))) {
+		while (fgets(line, sizeof(line), f)) {
+			line[strcspn(line, "\n")] = '\0';
+			if (!strncmp(line, "url=", 4))
+				snprintf(src_url, sizeof(src_url), "%s", line + 4);
+			else if (!strncmp(line, "length=", 7))
+				length = atoll(line + 7);
+			else if (!strncmp(line, "complete=", 9))
+				complete = atoi(line + 9);
+		}
+		fclose(f);
+	}
+	cache_fd = open(cache_path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+	if (cache_fd < 0) {
+		fprintf(stderr, "octopus-stream: %s: %s\n", cache_path, strerror(errno));
+		return false;
+	}
+	if (strcmp(src_url, url) || fstat(cache_fd, &st)) {	/* another's: start over */
+		if (ftruncate(cache_fd, 0) < 0)
+			return false;
+		cache_have = cache_total = 0;
+		cache_complete = false;
+	} else {
+		cache_have = st.st_size;
+		cache_total = length;
+		cache_complete = complete && length > 0 && st.st_size == length;
+	}
+	cache_src_write();
+	return true;
+}
+
+/* The download: its response's headers. */
+static bool dl_ranged;		/* our range honoured (206) */
+static long long dl_length;	/* of this response (Content-Length) */
+static bool dl_checked;		/* the space checked, the start settled */
+
+static size_t dl_header(char *buf, size_t size, size_t n, void *user)
+{
+	size_t len = size * n;
+	char line[512], *v;
+
+	(void)user;
+	snprintf(line, sizeof(line), "%.*s", (int)(len < sizeof(line) ? len : sizeof(line) - 1), buf);
+	line[strcspn(line, "\r\n")] = '\0';
+	if (!strncmp(line, "HTTP/", 5)) {	/* a new response (redirects) */
+		const char *code = strchr(line, ' ');
+
+		dl_ranged = code && atoi(code + 1) == 206;
+		dl_length = 0;
+		return len;
+	}
+	if (!(v = strchr(line, ':')))
+		return len;
+	*v++ = '\0';
+	while (*v == ' ')
+		v++;
+	if (!strcasecmp(line, "content-length"))
+		dl_length = atoll(v);
+	return len;
+}
+
+/* The first bytes: where they go (from the top, if the server ignored
+ * our range), and whether the rest will fit. False: no cache, after all. */
+static bool dl_settle(void)
+{
+	struct statvfs fs;
+	long long total = dl_ranged ? cache_have + dl_length : dl_length;
+
+	if (dl_length <= 0) {
+		fprintf(stderr, "octopus-stream: no length given: not cached\n");
+		return false;
+	}
+	if (!dl_ranged && cache_have > 0) {	/* the whole file again */
+		pthread_mutex_lock(&cache_lock);
+		cache_have = 0;
+		pthread_mutex_unlock(&cache_lock);
+		if (ftruncate(cache_fd, 0) < 0)
+			return false;
+	}
+	if (fstatvfs(cache_fd, &fs) == 0 &&
+	    (long long)fs.f_bavail * (long long)fs.f_frsize < total - cache_have + CACHE_RESERVE) {
+		fprintf(stderr, "octopus-stream: %lld bytes won't fit beside %s: not cached\n",
+			total - cache_have, cache_path);
+		return false;
+	}
+	pthread_mutex_lock(&cache_lock);
+	cache_total = total;
+	pthread_cond_broadcast(&cache_cond);
+	pthread_mutex_unlock(&cache_lock);
+	cache_src_write();
+	return true;
+}
+
+static void cache_fail(void)
+{
+	pthread_mutex_lock(&cache_lock);
+	cache_failed = true;
+	pthread_cond_broadcast(&cache_cond);
+	pthread_mutex_unlock(&cache_lock);
+}
+
+static size_t dl_data(char *p, size_t size, size_t n, void *user)
+{
+	size_t len = size * n, done = 0;
+	ssize_t w;
+
+	(void)user;
+	if (stop)
+		return 0;
+	if (!dl_checked) {
+		if (!dl_settle()) {
+			cache_fail();
+			return 0;
+		}
+		dl_checked = true;
+	}
+	while (done < len) {
+		w = pwrite(cache_fd, p + done, len - done, cache_have + done);
+		if (w <= 0) {	/* the disk's full after all */
+			fprintf(stderr, "octopus-stream: %s: %s\n", cache_path, strerror(errno));
+			cache_fail();
+			return 0;
+		}
+		done += w;
+	}
+	pthread_mutex_lock(&cache_lock);
+	cache_have += len;
+	pthread_cond_broadcast(&cache_cond);
+	pthread_mutex_unlock(&cache_lock);
+	return len;
+}
+
+static int dl_progress(void *u, curl_off_t a, curl_off_t b, curl_off_t c, curl_off_t d)
+{
+	(void)u; (void)a; (void)b; (void)c; (void)d;
+	return stop;
+}
+
+/* The download thread: the file, to its end, resuming (by a range) after
+ * a drop, backing off as the stream would. */
+static void *dl_thread(void *arg)
+{
+	int backoff = 2;
+
+	(void)arg;
+	while (!stop && !cache_failed && !cache_complete) {
+		CURL *c = curl_easy_init();
+		CURLcode res;
+
+		if (!c)
+			break;
+		dl_checked = false;
+		dl_ranged = false;
+		curl_easy_setopt(c, CURLOPT_URL, url);
+		curl_easy_setopt(c, CURLOPT_USERAGENT, USER_AGENT);
+		curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(c, CURLOPT_MAXREDIRS, 5L);
+		curl_easy_setopt(c, CURLOPT_CAINFO, CA_BUNDLE);
+		curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
+		curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1000L);
+		curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 20L);
+		curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+		curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, dl_progress);
+		curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, dl_header);
+		curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, dl_data);
+		if (cache_have > 0)
+			curl_easy_setopt(c, CURLOPT_RESUME_FROM_LARGE, (curl_off_t)cache_have);
+		res = curl_easy_perform(c);
+		curl_easy_cleanup(c);
+		if (stop || cache_failed)
+			break;
+		if (cache_total > 0 && cache_have >= cache_total) {
+			pthread_mutex_lock(&cache_lock);
+			cache_complete = true;
+			pthread_cond_broadcast(&cache_cond);
+			pthread_mutex_unlock(&cache_lock);
+			cache_src_write();
+			break;
+		}
+		if (res == CURLE_OK)	/* ended short: on from there, soon */
+			backoff = 2;
+		fprintf(stderr, "octopus-stream: caching %s: %s, again in %d s\n", url,
+			curl_easy_strerror(res), backoff);
+		sleep_s(backoff);
+		backoff = backoff * 2 > BACKOFF_MAX_S ? BACKOFF_MAX_S : backoff * 2;
+	}
+	return NULL;
+}
+
+/* Play from the cache, from start_byte, to its end (or until we're
+ * stopped, or a new range is wanted). Waits for PREBUFFER past where it
+ * is to be in, at the start and whenever it runs dry. CURLE_OK at the
+ * end; CURLE_WRITE_ERROR if the cache fails (the caller streams). */
+static CURLcode cache_play(void)
+{
+	static unsigned char chunk[4096];
+	long long pos = start_byte;
+	bool filled = false;
+	struct timespec ts;
+	long long want;
+	ssize_t n;
+
+	while (!stop && !restart_xfer) {
+		pthread_mutex_lock(&cache_lock);
+		for (;;) {
+			want = filled ? 1 : PREBUFFER;
+			if (stop || restart_xfer || cache_failed)
+				break;
+			if (cache_have - pos >= want)
+				break;
+			if (cache_complete || (cache_total > 0 && cache_have >= cache_total))
+				break;		/* all there: what's left, however little */
+			filled = false;		/* dry: buffer up again */
+			clock_gettime(CLOCK_REALTIME, &ts);
+			ts.tv_nsec += 200 * 1000000L;
+			if (ts.tv_nsec >= 1000000000L) {
+				ts.tv_sec++;
+				ts.tv_nsec -= 1000000000L;
+			}
+			pthread_cond_timedwait(&cache_cond, &cache_lock, &ts);
+		}
+		file_len = cache_total;
+		n = cache_have - pos > (long long)sizeof(chunk) ? (ssize_t)sizeof(chunk) :
+		    (ssize_t)(cache_have - pos);
+		pthread_mutex_unlock(&cache_lock);
+		if (stop || restart_xfer)
+			break;
+		if (cache_failed)
+			return CURLE_WRITE_ERROR;
+		if (n <= 0)
+			return CURLE_OK;	/* its end */
+		filled = true;
+		n = pread(cache_fd, chunk, n, pos);
+		if (n <= 0)
+			return CURLE_READ_ERROR;
+		pos += n;
+		es_out(chunk, n);
+	}
+	return CURLE_OK;
+}
+
 /* A path as a file:// URL: anything but [A-Za-z0-9-._~/] %-encoded (a
  * "#" or "?" in a name is no fragment or query). */
 static void file_url(const char *path, char *out, size_t size)
@@ -1646,6 +1959,26 @@ static void play(void)
 		}
 		metaint = 0;
 		meta_len = -1;
+		/* Cached: from the disk, as it comes in - unless the cache
+		 * failed, or this is far past what's in (the network, then). */
+		if (cache_fd >= 0 && !cache_failed && start_byte <= cache_have + CACHE_AHEAD) {
+			finite = true;
+			base_byte = start_byte;
+			fed = 0;
+			res = cache_play();
+			if (stop)
+				break;
+			if (restart_xfer)
+				continue;
+			if (res == CURLE_OK && file_len > 0 && base_byte + fed >= file_len) {
+				set_state("ended");
+				break;
+			}
+			start_byte = base_byte + fed;
+			if (cache_failed)	/* the rest from the network, at once */
+				continue;
+			goto failed;
+		}
 		c = easy(target);
 		if (!c)
 			break;
@@ -1709,7 +2042,7 @@ int main(int argc, char **argv)
 	snprintf(paused_path, sizeof(paused_path), "%s/stream.paused", dir);
 	snprintf(lock_path, sizeof(lock_path), "%s/stream.lock", dir);
 	if (argc < 2) {
-		fprintf(stderr, "usage: octopus-stream <url> [name] | stop | pause | resume | active\n");
+		fprintf(stderr, "usage: octopus-stream <url> [name [byte [cache]]] | stop | pause | resume | active\n");
 		return 2;
 	}
 	if (!strcmp(argv[1], "active"))
@@ -1735,7 +2068,7 @@ int main(int argc, char **argv)
 		f = fopen(paused_path, "w");
 		while (st && f && fgets(line, sizeof(line), st))
 			if (!strncmp(line, "url=", 4) || !strncmp(line, "name=", 5) ||
-			    !strncmp(line, "byte=", 5))
+			    !strncmp(line, "byte=", 5) || !strncmp(line, "cache=", 6))
 				fputs(line, f);
 		if (st)
 			fclose(st);
@@ -1760,6 +2093,8 @@ int main(int argc, char **argv)
 				got_name = true;
 			} else if (!strncmp(line, "byte=", 5)) {
 				start_byte = atoll(line + 5);
+			} else if (!strncmp(line, "cache=", 6)) {
+				snprintf(cache_path, sizeof(cache_path), "%s", line + 6);
 			}
 		}
 		fclose(f);
@@ -1782,6 +2117,8 @@ int main(int argc, char **argv)
 		}
 		if (argc > 3)
 			start_byte = atoll(argv[3]);
+		if (argc > 4 && argv[4][0] == '/')
+			snprintf(cache_path, sizeof(cache_path), "%s", argv[4]);
 		unlink(paused_path);
 		/* Whatever else plays (the FM radio) stops: one at a time. A
 		 * resume comes from octopus-audio itself (it holds the lock). */
@@ -1831,7 +2168,21 @@ int main(int argc, char **argv)
 
 	curl_global_init(CURL_GLOBAL_DEFAULT);
 	mpg123_init();
-	play();
+	{
+		/* A file over the network to cache: its download, alongside. */
+		pthread_t dl;
+		bool dl_running = false;
+
+		if (cache_path[0] && (!strncmp(url, "http://", 7) || !strncmp(url, "https://", 8)) &&
+		    cache_open())
+			dl_running = pthread_create(&dl, NULL, dl_thread, NULL) == 0;
+		else
+			cache_path[0] = '\0';
+		play();
+		stop = 1;	/* the download too (played to the end: it's all in) */
+		if (dl_running)
+			pthread_join(dl, NULL);
+	}
 
 	pcm_close();
 	if (mh)

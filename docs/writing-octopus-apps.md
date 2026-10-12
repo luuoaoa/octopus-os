@@ -277,6 +277,14 @@ Volume is owned by the shell (its slider; the Chumby One's knob): ALSA's
   from a byte on (an HTTP range); for a file the state adds `byte=` (where
   it is: resume from there), `length=` and `played=` (s), about once a
   second, and at its end it's `state=ended` (left in place for the app).
+  **`octopus-stream <url> <name> <byte> <cache>`** downloads the file
+  whole into `<cache>` (a path in the app's data directory) as it plays:
+  playing starts with its first ~2 s in, reads from the disk from then on
+  (a skip, a pause or a Wi-Fi drop needs no network), and the same file
+  again carries on with what's there (`<cache>.src` says whose it is).
+  It streams instead if the file won't fit (32 MB kept free) or a seek
+  goes far past what's in. Podcasts caches each episode as
+  `now_playing.mp3`; the state adds `cached=` (bytes in).
   A local file is given as its path (`/run/octopus-usb/sda1/Song.mp3`):
   the same, read through `file://`. USB Music (`apps/usbmusic`) queues a
   folder's songs this way and starts the next at each `ended`.
