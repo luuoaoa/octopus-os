@@ -104,8 +104,9 @@ source); later ones only redo what changed. Buildroot is a submodule,
 pinned at release 2026.02.1: if you cloned without
 `--recurse-submodules`, run `git submodule update --init`.
 
-Write `sdcard.img` to a microSD card. Before the first boot, edit the
-files on its FAT partition (any computer mounts it):
+Write `sdcard.img` to a microSD card with an imager (Raspberry Pi
+Imager's "Use custom", balenaEtcher) or `dd`. Before the first boot, edit
+the files on its FAT partition (any computer mounts it):
 
 - **`network-config`:** your Wi-Fi.
 
@@ -140,8 +141,9 @@ bash docker-build.sh raspad
 bin/update-raspad.sh <device address>
 ```
 
-This rsyncs what changed onto the running system, keeps your settings,
-alarms and installed apps, and reboots. No reflashing.
+Once the card is flashed, it never needs flashing again: this rsyncs
+what changed onto the running system, keeps your settings, alarms and
+installed apps, and reboots.
 
 ## Writing apps
 
@@ -186,7 +188,15 @@ If you have one, building for it needs an image of its stock SD card
 board/falconwing-mainline/extract-stock.sh /path/to/stock-sdcard.img   # once
 bash docker-build.sh falconwing-mainline
 # -> output-falconwing-mainline/images/sdcard.img
-bin/update-chumby.sh <its address>     # updating a running one
+```
+
+The first time, write `sdcard.img` to a microSD card with an imager
+(Raspberry Pi Imager's "Use custom", balenaEtcher) or `dd`, and edit
+`network-config` and `user-data` on its FAT partition as for the Pi.
+After that, update the running Chumby One over the network instead:
+
+```sh
+bin/update-chumby.sh <its address>
 ```
 
 **[board/falconwing-mainline/README.md](board/falconwing-mainline/README.md)**
