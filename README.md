@@ -6,6 +6,17 @@ an appliance, not a desktop. It boots straight to a big clock, wakes you
 with alarms, plays internet radio, podcasts and AirPlay, and goes dim and
 warm at night.
 
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/clock.png" width="320" alt="The clock"><br>The clock</td>
+    <td align="center"><img src="docs/images/netradio.png" width="320" alt="Internet radio"><br>Internet radio</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/podcasts.png" width="320" alt="Podcasts"><br>Podcasts</td>
+    <td align="center"><img src="docs/images/toasters.png" width="320" alt="Flying Toasters over a blur of the screen"><br>Flying Toasters</td>
+  </tr>
+</table>
+
 It started as new firmware for the **Chumby One**, a 2009 Wi-Fi bedside
 radio, and still runs on one (see [The Chumby One](#the-chumby-one)).
 Octopus OS is an independent project, not affiliated with Chumby
