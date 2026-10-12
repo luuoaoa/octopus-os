@@ -131,7 +131,7 @@ BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_OCTOPUS_PATH)/board/rpi64/users.table"
 ```
 
 (`liboctopus`, LVGL, pixman and the rest come with those. The users table
-makes the apps' user, `octopus`; the RasPad's adds it to PipeWire's group.)
+makes the apps' user, `octopus`; rpi64's adds it to PipeWire's group.)
 Then:
 
 ```sh

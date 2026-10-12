@@ -1,7 +1,8 @@
-# Writing apps for the Chumby One (falconwing)
+# Writing Octopus apps
 
-How the UI and sound fit together on the Chumby One image, what's already
-there to build on, and the traps we fell into so you don't have to. Read
+How the UI and sound fit together in Octopus OS, on a Raspberry Pi
+(`rpi64`) or the Chumby One (`falconwing`), what's already there to build
+on, and the traps we fell into so you don't have to. Read
 this before writing an app; the headers it points at have the details.
 
 ## The pieces
@@ -10,8 +11,8 @@ this before writing an app; the headers it points at have the details.
 octopus-wm (wlroots compositor, package/octopus-wm)
  ├── octopus-shell  (package/octopus-shell)  tab bar, Home menu, volume /
  │                  brightness sliders, alarms, buttons, screen power
- ├── system apps   (package/octopus-apps)  Clock, FM Radio, AirPlay,
- │                  Settings; the stream player octopus-stream
+ ├── system apps   (package/octopus-apps)  Clock, AirPlay, Settings, FM
+ │                  Radio (Chumby One); the stream player octopus-stream
  └── app bundles   Internet Radio, Podcasts (apps/, preinstalled in
                     /usr/lib/octopus/apps), and anyone's (the SDK, installed
                     in /var/apps): one Wayland client each
@@ -19,7 +20,8 @@ liboctopus (package/liboctopus)  LVGL 9.6 compiled in, plus Octopus's
                     framework every app and the shell link against
 ```
 
-- **Screen**: 320x240. The shell's tab bar is the top `OCTOPUS_BAR_H` (32)
+- **Screen**: 320x240 (on a bigger screen, scaled up by a whole number:
+  apps don't see it). The shell's tab bar is the top `OCTOPUS_BAR_H` (32)
   px; an app gets `OCTOPUS_APP_W` x `OCTOPUS_APP_H` (320x208) under it. The
   compositor places windows by their app_id (see the top of
   `octopus-wm.c`); an app doesn't position itself.
@@ -32,7 +34,7 @@ liboctopus (package/liboctopus)  LVGL 9.6 compiled in, plus Octopus's
   fire late, all at once. If you must keep working out of sight (a
   download, a timer that has to fire), call `octopus_stay_awake(true)`, and
   `false` once done. Alarms don't need this: the shell rings them.
-- **Sound runs in its own processes** (the FM loop, `octopus-stream`), so
+- **Sound runs in its own processes** (`octopus-stream`, the FM loop), so
   freezing or closing an app never cuts it. See [Sound](#sound).
 
 ## An app in 30 lines
@@ -180,9 +182,11 @@ Sizes for a resistive screen: anything a finger must hit is at least
 
 ## Sound
 
-There is one sound card (the i.MX233's codec, ALSA `plughw:0,0`) and one
-thing plays at a time. `octopus-audio`
-(`board/falconwing/rootfs/usr/bin/octopus-audio`) decides:
+Players open ALSA's `octopus` (or `default`) device: on a Pi that's
+PipeWire, through the speaker chain (`board/rpi64/README.md`); on the
+Chumby One, its codec directly. One thing plays at a time, and
+`octopus-audio` (`board/falconwing/rootfs/usr/bin/octopus-audio`, on both
+boards) decides:
 
 ```
 octopus-audio play <source>      I'm playing now: every other source stops,
@@ -199,8 +203,9 @@ octopus-audio list               who's registered, who plays, who's paused
 A **source** is an executable in `/usr/share/octopus/audio.d/<name>` taking
 `stop | pause | resume | active` (exit status: playing?). Today:
 
-- `fm` -> the `radio` script. `stop` = audio loop off and the tuner chip
-  to standby (`qn8005 sleep`); `pause` keeps it tuned for a quick resume.
+- `fm` (the Chumby One) -> the `radio` script. `stop` = audio loop off
+  and the tuner chip to standby (`qn8005 sleep`); `pause` keeps it tuned
+  for a quick resume.
 - `stream` -> `octopus-stream`. `pause` remembers the URL and name (and,
   in a podcast episode, the byte it was at); `resume` reconnects to it.
 
@@ -225,14 +230,14 @@ For short sounds over whatever plays (a chime), `duck` / `release`
 around them. The alarm does exactly this; snoozing stays quiet and the
 radio comes back when the alarm is dismissed.
 
-Volume is the codec's `DAC` control, owned by the shell (knob, slider);
-players just play.
+Volume is owned by the shell (its slider; the Chumby One's knob): ALSA's
+`Master` on a Pi, the codec's `DAC` on the Chumby One. Players just play.
 
 ### Ready-made players
 
 - **`octopus-stream <url> [name]`**: internet radio, in the background.
-  MP3 (libmpg123) or AAC (faad2's fixed-point build: the ARM926 has no
-  FPU), Shoutcast/Icecast with ICY titles, HLS (`.m3u8`, TS or packed
+  MP3 (libmpg123) or AAC (faad2's fixed-point build, for the Chumby One's
+  FPU-less ARM9), Shoutcast/Icecast with ICY titles, HLS (`.m3u8`, TS or packed
   audio), `.pls`/`.m3u`, and MP4 audio files (`.m4a`: AAC, index first or
   last). Reconnects with backoff, buffers ~2 s ahead,
   resamples through ALSA. Its state is in `$run_dir/stream` (`state=`,
@@ -244,8 +249,8 @@ players just play.
 - **`octopus-podcast-feed <feed> <cache> [n]`**: a podcast's RSS, parsed as
   it downloads (expat), its newest n episodes (30) as tab-separated lines:
   published (epoch), duration (s), bytes, audio URL, title.
-- **`radio on|off|tune|scan|pause|resume|active`**: the FM tuner (QN8005)
-  and its audio loop; RDS goes to `$run_dir/rds` (`ps`, `rt`, `title`,
+- **`radio on|off|tune|scan|pause|resume|active`** (the Chumby One): the
+  FM tuner (QN8005) and its audio loop; RDS goes to `$run_dir/rds` (`ps`, `rt`, `title`,
   `artist`, `psdyn`, `pstext`, `rssi`). See the script's header.
 
 ## LVGL 9.6 traps we've hit
@@ -294,6 +299,7 @@ don't get them.
   files are found. `octopus-screenshot out.ppm` captures the screen; the
   shell's FIFO (`$OCTOPUS_RUN_DIR/shell.cmd`) opens menus and sliders.
   Use it for screenshots before deploying UI changes.
-- **On the board**: `bin/update-chumby.sh <host>` updates the SD card
-  over SSH (rsync deltas) and reboots. To try a binary first, copy it to
-  `/tmp` and run it there; the root filesystem is read-only.
+- **On a device**: `bin/update-rpi64.sh <host>` (a Pi) or
+  `bin/update-chumby.sh <host>` (the Chumby One) updates it over SSH
+  (rsync deltas) and reboots. For apps alone, the SDK's
+  `octopus-app deploy` is quicker (docs/sdk.md).

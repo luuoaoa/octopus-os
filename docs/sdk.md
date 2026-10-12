@@ -106,7 +106,7 @@ in it, so open it from the Home menu. The mouse is the finger.
 
 - **Your app's colours, fonts, layout and night mode** look the same as on
   the device. Speed doesn't: it's an emulated ARM on a fast PC, so it can be
-  faster than the Chumby's. Check performance on the real thing.
+  faster or slower than the device. Check performance on the real thing.
 - **Sound** plays through the PC's. The simulator has no sound card: its
   ALSA writes 48 kHz 16-bit stereo into a FIFO (`sdk/sim/asound.conf`), and
   `octopus-app sim` plays that with `pw-cat`, `paplay` or `aplay`, whichever
@@ -130,9 +130,10 @@ as long as the functions they use stay.
 
 ## Design notes
 
-- **Why a simulator, not an emulator:** emulating the whole Chumby (QEMU
-  system mode) would need its LCD, touchscreen and codec emulated, and
-  i.MX23 support QEMU doesn't have. User-mode emulation runs the same
+- **Why a simulator, not an emulator:** emulating a whole device (QEMU
+  system mode) would need its display, touchscreen and sound emulated -
+  the Pi's GPU, the Chumby One's i.MX23 - which QEMU doesn't do well or at
+  all. User-mode emulation runs the same
   binaries on the PC's kernel. wlroots' Wayland backend (always built) makes
   `octopus-wm` a window on the PC's desktop, so what you see is the real
   UI.
@@ -141,5 +142,5 @@ as long as the functions they use stay.
   apps as relatively trusted: there's no per-app sandbox. A future bundle
   format could give each bundle a user of its own.
 - **No systemd unit per app:** installing never adds unit files (a
-  `daemon-reload` stalls the Chumby's PID 1 past its 15 s hardware
-  watchdog). USB installs use one template unit, `octopus-usb-install@`.
+  `daemon-reload` is slow on small boards, and on the Chumby One stalls
+  PID 1 past its 15 s hardware watchdog). USB installs use one template unit, `octopus-usb-install@`.

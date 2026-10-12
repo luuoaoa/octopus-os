@@ -50,32 +50,21 @@ unprivileged user, and over-the-air updates by rsync.
 
 | Part | What works | Notes |
 |---|---|---|
-| **Raspberry Pi** | Any 64-bit one: 3, 3B+, Zero 2 W, 4, 400, 5, 500, CM3/4/5 | Tested on a Pi 4. Wi-Fi is built in (or use Ethernet). |
+| **Raspberry Pi** | Any 64-bit one: 3, 3B+, Zero 2 W, 4, 400, 5, 500, CM3/4/5 | A Pi 4 or 5 is comfortable. Wi-Fi is built in (or use Ethernet). |
 | **Screen + touch** | An HDMI screen with a USB touch panel | The UI is 320x240, scaled up by a whole number, so any size works; a mouse works too. |
 | **Speakers** | Through the Pi's first HDMI port | e.g. a screen with speakers, or an HDMI audio board with an amplifier. Other outputs need one line changed (below). |
 | **A shell** | Anything that holds it all on a nightstand | A case or stand for the screen, room for the Pi and speakers, some airflow. |
 | Power, storage | The Pi's official power supply; a microSD card | The image is about 320 MB. |
 
-### The easy way: a RasPad 3
-
-SunFounder's **RasPad 3** is all of the above in one: a tablet case around
-a Raspberry Pi 4 with a 10.1" 1280x800 touchscreen (USB, an ILITEK
-controller), speakers and an amplifier fed by HDMI, and a battery.
-Octopus OS was built on one, so it works as it is: the touch comes
-calibrated, and the sound goes through the speaker tuning to its
-speakers. Stand it on the nightstand and you're done.
-
-### Building your own
-
 - **Screen:** an HDMI screen with a USB touch panel is the safe choice.
   Most are standard HID touch devices the kernel handles without any
-  setup (the RasPad's is one). Drivers for the official Raspberry Pi DSI
-  touchscreen and common I2C/SPI touch controllers (Goodix, FocalTech/EDT,
-  ADS7846) are built too, but untested, and they need their `dtoverlay=`
-  line in `config.txt` on the card. The picture is sharpest when the
-  screen's height is a multiple of 240 (720, 960, 1080...): the rest is a
-  black border. The UI has no brightness control unless the screen has a
-  kernel backlight driver; night mode darkens it either way.
+  setup. Drivers for the official Raspberry Pi DSI touchscreen and common
+  I2C/SPI touch controllers (Goodix, FocalTech/EDT, ADS7846) are built
+  too, but untested, and they need their `dtoverlay=` line in
+  `config.txt` on the card. The picture is sharpest when the screen's
+  height is a multiple of 240 (720, 960, 1080...): the rest is a black
+  border. The UI has no brightness control unless the screen has a kernel
+  backlight driver; night mode darkens it either way.
 - **Speakers:** the sound goes to the first HDMI port's audio, through the
   bass and EQ chain. For the 3.5 mm jack (not on a Pi 5), a USB sound card
   or an I2S amplifier board (e.g. a MAX98357A), change the one match in
@@ -86,6 +75,14 @@ speakers. Stand it on the nightstand and you're done.
 - **The shell:** a picture-frame or wooden box, a 3D-printed stand, or a
   mount for the screen. Leave the Pi some air (a Pi 4 or 5 wants a
   heatsink), and face the speakers towards you, not the wall.
+
+**What it's been tested on.** After the Chumby One, Octopus OS's first
+Raspberry Pi was a SunFounder **RasPad 3**: a Pi 4 in a tablet case with
+a 10.1" 1280x800 HDMI touchscreen (USB touch), speakers on HDMI, and a
+battery. It's all of the above in one box, and it runs Octopus OS as it
+is. Other Pis, screens and speakers are built for and should work; if
+yours needs something the image doesn't do, an issue or a pull request is
+welcome.
 
 ## Getting started
 

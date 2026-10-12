@@ -120,8 +120,8 @@ static void pressed(lv_event_t *e)
 ```
 
 `octopus_stream_play()` starts the player in the background and returns at
-once (never block the UI: the Chumby's CPU is slow, and a stuck main loop
-is a frozen screen). Whatever else was playing stops: there is one
+once (never block the UI: a stuck main loop is a frozen screen, and on a
+small board's CPU that's easy). Whatever else was playing stops: there is one
 speaker, and the newest source takes it. The name (`TITLE`) is what the
 volume control's stop button shows.
 
